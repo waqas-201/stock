@@ -2,11 +2,14 @@ import * as XLSX from 'xlsx';
 import { StockItem } from '../types';
 
 /**
- * Exports current stock items to an Excel (.xlsx) file with 3 columns:
- * - Item Name
- * - Unit
- * - Quantity
- */
+  * Exports current stock items to an Excel (.xlsx) file with:
+  * - Item Name
+  * - Unit
+  * - Current Quantity
+  * - Low Stock Alert Threshold
+  * - Production Date
+  * - Notes
+  */
 export function exportToExcel(
   items: StockItem[],
   filename = 'stock-inventory.xlsx'
@@ -14,7 +17,10 @@ export function exportToExcel(
   const data = items.map((item) => ({
     'Item Name': item.itemName,
     Unit: item.unit,
-    Quantity: item.quantity,
+    'Current Stock': item.quantity,
+    'Low Stock Alert (Min)': item.lowStockThreshold ?? 5,
+    'Production Date': item.productionDate || '',
+    Notes: item.notes || '',
   }));
 
   const worksheet = XLSX.utils.json_to_sheet(data);
@@ -22,7 +28,10 @@ export function exportToExcel(
   worksheet['!cols'] = [
     { wch: 36 }, // Item Name
     { wch: 18 }, // Unit
-    { wch: 18 }, // Quantity
+    { wch: 16 }, // Current Stock
+    { wch: 22 }, // Low Stock Alert
+    { wch: 18 }, // Production Date
+    { wch: 36 }, // Notes
   ];
 
   const workbook = XLSX.utils.book_new();
@@ -32,23 +41,37 @@ export function exportToExcel(
 }
 
 /**
- * Exports stock items as a standard CSV file
- */
+  * Exports stock items as a standard CSV file
+  */
 export function exportToCsv(
   items: StockItem[],
   filename = 'stock-inventory.csv'
 ): void {
-  const headers = ['Item Name', 'Unit', 'Quantity'];
+  const headers = [
+    'Item Name',
+    'Unit',
+    'Current Stock',
+    'Low Stock Alert',
+    'Production Date',
+    'Notes',
+  ];
 
   const rows = items.map((item) => {
-    const escape = (val: string | number) => {
+    const escape = (val: string | number | undefined) => {
       const s = String(val ?? '');
       if (s.includes(',') || s.includes('"') || s.includes('\n')) {
         return `"${s.replace(/"/g, '""')}"`;
       }
       return s;
     };
-    return [escape(item.itemName), escape(item.unit), escape(item.quantity)].join(',');
+    return [
+      escape(item.itemName),
+      escape(item.unit),
+      escape(item.quantity),
+      escape(item.lowStockThreshold ?? 5),
+      escape(item.productionDate || ''),
+      escape(item.notes || ''),
+    ].join(',');
   });
 
   const csvContent = [headers.join(','), ...rows].join('\r\n');
@@ -65,11 +88,20 @@ export function exportToCsv(
 }
 
 /**
- * Parses an uploaded Excel or CSV file to import stock items
- */
+  * Parses an uploaded Excel or CSV file to import stock items
+  */
 export async function parseExcelOrCsvFile(
   file: File
-): Promise<{ itemName: string; unit: string; quantity: number }[]> {
+): Promise<
+  {
+    itemName: string;
+    unit: string;
+    quantity: number;
+    lowStockThreshold: number;
+    productionDate?: string;
+    notes?: string;
+  }[]
+> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
@@ -101,10 +133,18 @@ export async function parseExcelOrCsvFile(
           f0.includes('name') ||
           f1.includes('unit') ||
           f2.includes('quant') ||
+          f2.includes('stock') ||
           f2.includes('qty');
 
         const startIndex = isHeader ? 1 : 0;
-        const parsedItems: { itemName: string; unit: string; quantity: number }[] = [];
+        const parsedItems: {
+          itemName: string;
+          unit: string;
+          quantity: number;
+          lowStockThreshold: number;
+          productionDate?: string;
+          notes?: string;
+        }[] = [];
 
         for (let i = startIndex; i < rawRows.length; i++) {
           const row = rawRows[i];
@@ -119,11 +159,26 @@ export async function parseExcelOrCsvFile(
               : parseFloat(String(rawQty ?? '0'));
           const quantity = isNaN(parsedQty) ? 0 : Math.max(0, parsedQty);
 
+          const rawThreshold = row[3];
+          const parsedThreshold =
+            typeof rawThreshold === 'number'
+              ? rawThreshold
+              : parseFloat(String(rawThreshold ?? '5'));
+          const lowStockThreshold = isNaN(parsedThreshold)
+            ? 5
+            : Math.max(0, parsedThreshold);
+
+          const rawProdDate = row[4] ? String(row[4]).trim() : '';
+          const rawNotes = row[5] ? String(row[5]).trim() : '';
+
           if (itemName) {
             parsedItems.push({
               itemName,
               unit: unit || 'Pieces',
               quantity,
+              lowStockThreshold,
+              productionDate: rawProdDate || undefined,
+              notes: rawNotes || undefined,
             });
           }
         }

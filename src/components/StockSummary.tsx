@@ -1,33 +1,30 @@
 import React from 'react';
-import { Package, AlertTriangle, CheckCircle2, Layers, SlidersHorizontal, Check } from 'lucide-react';
+import { Package, AlertTriangle, CheckCircle2, Layers } from 'lucide-react';
 import { StockItem, StockFilter } from '../types';
 
 interface StockSummaryProps {
   items: StockItem[];
-  globalThreshold: number;
   activeFilter?: StockFilter;
   onSelectFilter?: (filter: StockFilter) => void;
-  onOpenThresholdModal: () => void;
 }
 
 export const StockSummary: React.FC<StockSummaryProps> = ({
   items,
-  globalThreshold,
   activeFilter = 'all',
   onSelectFilter,
-  onOpenThresholdModal,
 }) => {
   const totalItems = items.length;
   const totalQuantity = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
   const outOfStockCount = items.filter((item) => (item.quantity || 0) <= 0).length;
 
+  // Individual item low stock: quantity > 0 and <= item's specific lowStockThreshold
   const lowStockCount = items.filter((item) => {
-    const threshold = item.lowStockThreshold ?? globalThreshold;
+    const threshold = item.lowStockThreshold ?? 5;
     return (item.quantity || 0) > 0 && (item.quantity || 0) <= threshold;
   }).length;
 
   const inStockCount = items.filter((item) => {
-    const threshold = item.lowStockThreshold ?? globalThreshold;
+    const threshold = item.lowStockThreshold ?? 5;
     return (item.quantity || 0) > threshold;
   }).length;
 
@@ -64,7 +61,7 @@ export const StockSummary: React.FC<StockSummaryProps> = ({
             <span className="text-[11px] sm:text-xs text-slate-400 font-medium">SKUs</span>
           </div>
           {activeFilter === 'all' && (
-            <span className="hidden sm:inline-flex text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md">
+            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200/50">
               Active
             </span>
           )}
@@ -101,14 +98,14 @@ export const StockSummary: React.FC<StockSummaryProps> = ({
             </span>
           </div>
           {activeFilter === 'in_stock' && (
-            <span className="hidden sm:inline-flex text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md">
+            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200/50">
               Active
             </span>
           )}
         </div>
       </div>
 
-      {/* 3. Low Stock (with Threshold Setting trigger) */}
+      {/* 3. Low Stock (Individual Item Alert) */}
       <div
         id="stat-card-low-stock"
         onClick={() => onSelectFilter && onSelectFilter('low_stock')}
@@ -134,22 +131,18 @@ export const StockSummary: React.FC<StockSummaryProps> = ({
               {lowStockCount}
             </span>
             <span className="text-[11px] sm:text-xs text-slate-400 font-medium">
-              {lowStockCount === 1 ? 'item' : 'items'}
+              {lowStockCount === 1 ? 'alert' : 'alerts'}
             </span>
           </div>
-
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenThresholdModal();
-            }}
-            title="Configure Low Stock Alert Threshold"
-            className="min-h-[28px] min-w-[28px] px-2 py-1 text-[11px] font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 rounded-lg flex items-center gap-1 cursor-pointer"
-          >
-            <span>≤ {globalThreshold}</span>
-            <SlidersHorizontal className="w-3 h-3 text-amber-800" />
-          </button>
+          {activeFilter === 'low_stock' ? (
+            <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded-md border border-amber-300">
+              Active
+            </span>
+          ) : (
+            <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-md">
+              Per Item
+            </span>
+          )}
         </div>
       </div>
 
@@ -183,7 +176,7 @@ export const StockSummary: React.FC<StockSummaryProps> = ({
             </span>
           </div>
           {activeFilter === 'out_of_stock' && (
-            <span className="hidden sm:inline-flex text-[10px] font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded-md">
+            <span className="text-[10px] font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded-md border border-rose-200/50">
               Active
             </span>
           )}

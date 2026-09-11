@@ -4,33 +4,37 @@ import {
   FileSpreadsheet,
   Upload,
   Scale,
-  SlidersHorizontal,
   MoreVertical,
   Download,
   X,
-  FileText,
+  Plus,
+  ShieldAlert,
+  Zap,
+  History,
 } from 'lucide-react';
 
 interface NavbarProps {
   itemCount: number;
-  globalThreshold: number;
+  confirmOnDelete: boolean;
+  onToggleConfirmOnDelete: () => void;
   onExportExcel: () => void;
   onExportCsv: () => void;
   onImportFile: (file: File) => void;
   onOpenUnitModal: () => void;
-  onOpenThresholdModal: () => void;
   onAddNewItem: () => void;
+  onOpenAuditTrail: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   itemCount,
-  globalThreshold,
+  confirmOnDelete,
+  onToggleConfirmOnDelete,
   onExportExcel,
   onExportCsv,
   onImportFile,
   onOpenUnitModal,
-  onOpenThresholdModal,
   onAddNewItem,
+  onOpenAuditTrail,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -71,29 +75,54 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <h1 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight truncate">
                     Stock Management
                   </h1>
-                  <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full shrink-0">
-                    Mobile-Ready
-                  </span>
                 </div>
                 <p className="text-[11px] sm:text-xs text-slate-500 truncate">
-                  {itemCount} {itemCount === 1 ? 'item' : 'items'} • Alert ≤ {globalThreshold}
+                  {itemCount} {itemCount === 1 ? 'item' : 'items'} in inventory • Per-item low stock alerts
                 </p>
               </div>
             </div>
 
             {/* Desktop and Tablet Action Tools */}
             <div className="hidden md:flex items-center gap-2 sm:gap-2.5">
-              {/* Low Stock Threshold */}
+              {/* Confirm Deletions Preference Toggle */}
               <button
-                id="btn-navbar-threshold"
+                id="btn-toggle-confirm-delete"
                 type="button"
-                onClick={onOpenThresholdModal}
-                title="Configure Low Stock Alert Threshold"
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-amber-900 bg-amber-50 hover:bg-amber-100/80 border border-amber-200 rounded-xl transition-colors cursor-pointer"
+                onClick={onToggleConfirmOnDelete}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border transition-colors cursor-pointer ${
+                  confirmOnDelete
+                    ? 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    : 'bg-amber-50/80 text-amber-900 border-amber-200 hover:bg-amber-100'
+                }`}
+                title={
+                  confirmOnDelete
+                    ? 'Click to switch to Quick Delete (no popup)'
+                    : 'Quick Delete active (no popup, 1-tap delete with Undo)'
+                }
               >
-                <SlidersHorizontal className="w-3.5 h-3.5 text-amber-700" />
-                <span>Alert:</span>
-                <span className="font-bold">≤ {globalThreshold}</span>
+                {confirmOnDelete ? (
+                  <>
+                    <ShieldAlert className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Confirm Popup: On</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-3.5 h-3.5 text-amber-600" />
+                    <span className="font-bold">Quick Delete: On</span>
+                  </>
+                )}
+              </button>
+
+              {/* Activity Trail / Log */}
+              <button
+                id="btn-open-audit-trail"
+                type="button"
+                onClick={onOpenAuditTrail}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors cursor-pointer"
+                title="View full inventory activity trail (added, removed, changed items)"
+              >
+                <History className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Audit Trail</span>
               </button>
 
               {/* Units */}
@@ -132,10 +161,51 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <FileSpreadsheet className="w-3.5 h-3.5" />
                 <span>Export Excel</span>
               </button>
+
+              {/* Add Item Desktop Button */}
+              <button
+                id="btn-navbar-add-item"
+                type="button"
+                onClick={onAddNewItem}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors cursor-pointer"
+                title="Add new stock item"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Item</span>
+              </button>
             </div>
 
             {/* Mobile Actions Header (Touch-optimized buttons) */}
             <div className="flex md:hidden items-center gap-1.5 shrink-0">
+              {/* Quick Delete Indicator / Toggle Button on mobile */}
+              <button
+                type="button"
+                onClick={onToggleConfirmOnDelete}
+                className={`min-h-[44px] px-2.5 py-1.5 inline-flex items-center justify-center gap-1 text-xs font-bold rounded-xl border transition-colors cursor-pointer ${
+                  confirmOnDelete
+                    ? 'bg-slate-100 text-slate-700 border-slate-200'
+                    : 'bg-amber-50 text-amber-900 border-amber-300'
+                }`}
+                title={
+                  confirmOnDelete
+                    ? 'Delete confirmation popup is ON. Tap to switch to Quick Delete.'
+                    : 'Quick Delete is ON (No popup). Tap to turn on confirmation popup.'
+                }
+                aria-label="Toggle delete confirmation choice"
+              >
+                {confirmOnDelete ? (
+                  <>
+                    <ShieldAlert className="w-3.5 h-3.5 text-slate-500" />
+                    <span className="text-[11px]">Ask</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-3.5 h-3.5 text-amber-600" />
+                    <span className="text-[11px] font-bold">Fast</span>
+                  </>
+                )}
+              </button>
+
               {/* Quick Excel Export on mobile */}
               <button
                 type="button"
@@ -208,30 +278,76 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {/* Menu options with large 48px+ touch targets */}
             <div className="space-y-2">
-              {/* Alert threshold */}
+              {/* Delete Confirmation Mode Preference */}
+              <button
+                type="button"
+                onClick={() => {
+                  onToggleConfirmOnDelete();
+                }}
+                className="w-full min-h-[50px] px-4 py-3 bg-slate-50 active:bg-slate-100 border border-slate-200 rounded-2xl flex items-center justify-between text-left transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                      confirmOnDelete
+                        ? 'bg-slate-200 text-slate-700'
+                        : 'bg-amber-100 text-amber-800'
+                    }`}
+                  >
+                    {confirmOnDelete ? (
+                      <ShieldAlert className="w-5 h-5" />
+                    ) : (
+                      <Zap className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-sm font-bold text-slate-900 block">
+                      {confirmOnDelete
+                        ? 'Delete Confirmation: ON'
+                        : 'Quick Delete (No Popups): ON'}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      {confirmOnDelete
+                        ? 'Shows confirmation popup before deleting items'
+                        : 'Deletes immediately on 1 tap (with instant Undo)'}
+                    </span>
+                  </div>
+                </div>
+                <span
+                  className={`text-xs font-bold px-2.5 py-1 rounded-lg ${
+                    confirmOnDelete
+                      ? 'bg-slate-200 text-slate-700'
+                      : 'bg-amber-200/80 text-amber-900'
+                  }`}
+                >
+                  {confirmOnDelete ? 'Popup On' : 'Quick Mode'}
+                </span>
+              </button>
+
+              {/* Audit Trail / Activity Log */}
               <button
                 type="button"
                 onClick={() => {
                   setIsMobileMenuOpen(false);
-                  onOpenThresholdModal();
+                  onOpenAuditTrail();
                 }}
-                className="w-full min-h-[50px] px-4 py-3 bg-amber-50 active:bg-amber-100 border border-amber-200 rounded-2xl flex items-center justify-between text-left transition-colors cursor-pointer"
+                className="w-full min-h-[50px] px-4 py-3 bg-slate-50 active:bg-slate-100 border border-slate-200 rounded-2xl flex items-center justify-between text-left transition-colors cursor-pointer"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-amber-200/70 text-amber-800 flex items-center justify-center">
-                    <SlidersHorizontal className="w-5 h-5" />
+                  <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-800 flex items-center justify-center">
+                    <History className="w-5 h-5" />
                   </div>
                   <div>
                     <span className="text-sm font-bold text-slate-900 block">
-                      Low Stock Threshold
+                      Audit Trail & History
                     </span>
-                    <span className="text-xs text-amber-800">
-                      Currently alerts at ≤ {globalThreshold} units
+                    <span className="text-xs text-slate-500">
+                      View log of items added, changed, or removed
                     </span>
                   </div>
                 </div>
-                <span className="text-xs font-bold text-amber-900 px-2.5 py-1 bg-amber-200/80 rounded-lg">
-                  Change
+                <span className="text-xs font-semibold text-indigo-700 px-2.5 py-1 bg-indigo-50 border border-indigo-200 rounded-lg">
+                  View Log
                 </span>
               </button>
 
@@ -327,7 +443,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }}
                 className="w-full min-h-[48px] px-4 py-3 bg-emerald-600 active:bg-emerald-700 text-white font-bold text-sm rounded-2xl shadow-xs flex items-center justify-center gap-2 cursor-pointer"
               >
-                <span>+ Add New Stock Item</span>
+                <Plus className="w-4 h-4" />
+                <span>Add New Stock Item</span>
               </button>
             </div>
           </div>

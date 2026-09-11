@@ -8,6 +8,9 @@ interface ConfirmDialogProps {
   confirmLabel?: string;
   cancelLabel?: string;
   isDestructive?: boolean;
+  showDontAskAgain?: boolean;
+  dontAskAgain?: boolean;
+  onToggleDontAskAgain?: (checked: boolean) => void;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -19,6 +22,9 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
   isDestructive = true,
+  showDontAskAgain = false,
+  dontAskAgain = false,
+  onToggleDontAskAgain,
   onConfirm,
   onCancel,
 }) => {
@@ -73,7 +79,22 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             </button>
           </div>
 
-          <div className="mt-6 grid grid-cols-2 gap-2.5">
+          {/* Optional "Don't ask again" option */}
+          {showDontAskAgain && onToggleDontAskAgain && (
+            <div className="mt-4 pt-3 border-t border-slate-100">
+              <label className="flex items-center gap-2.5 cursor-pointer text-xs font-semibold text-slate-600 select-none">
+                <input
+                  type="checkbox"
+                  checked={dontAskAgain}
+                  onChange={(e) => onToggleDontAskAgain(e.target.checked)}
+                  className="w-4 h-4 rounded-md border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                />
+                <span>Don&apos;t ask confirmation again (Quick 1-tap delete)</span>
+              </label>
+            </div>
+          )}
+
+          <div className="mt-5 grid grid-cols-2 gap-2.5">
             <button
               type="button"
               onClick={onCancel}
