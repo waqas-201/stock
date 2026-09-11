@@ -14,9 +14,11 @@ import type { User as FirebaseUser } from '../lib/firebase';
 interface OperatorModalProps {
   isOpen: boolean;
   onClose: () => void;
-  currentOperator: OperatorProfile;
-  onSaveOperator: (operator: OperatorProfile) => void;
-  currentUser: FirebaseUser | null;
+  currentOperator?: OperatorProfile;
+  currentProfile?: OperatorProfile;
+  onSaveOperator?: (operator: OperatorProfile) => void;
+  onSave?: (operator: OperatorProfile) => void;
+  currentUser?: FirebaseUser | null;
 }
 
 const PRESET_ROLES = [
@@ -27,22 +29,35 @@ const PRESET_ROLES = [
   'Inventory Auditor',
 ];
 
+const DEFAULT_OPERATOR: OperatorProfile = {
+  name: 'Waqas (Admin)',
+  email: 'waqasvu892@gmail.com',
+  role: 'Administrator',
+};
+
 export const OperatorModal: React.FC<OperatorModalProps> = ({
   isOpen,
   onClose,
   currentOperator,
+  currentProfile,
   onSaveOperator,
+  onSave,
   currentUser,
 }) => {
-  const [name, setName] = useState(currentOperator.name);
-  const [role, setRole] = useState(currentOperator.role || 'Staff Member');
+  const activeOp = currentOperator || currentProfile || DEFAULT_OPERATOR;
+  const activeName = activeOp?.name || 'Waqas (Admin)';
+  const activeRole = activeOp?.role || 'Administrator';
+
+  const [name, setName] = useState(activeName);
+  const [role, setRole] = useState(activeRole);
 
   useEffect(() => {
     if (isOpen) {
-      setName(currentOperator.name);
-      setRole(currentOperator.role || 'Staff Member');
+      const op = currentOperator || currentProfile || DEFAULT_OPERATOR;
+      setName(op?.name || 'Waqas (Admin)');
+      setRole(op?.role || 'Administrator');
     }
-  }, [isOpen, currentOperator]);
+  }, [isOpen, currentOperator, currentProfile]);
 
   if (!isOpen) return null;
 
@@ -51,12 +66,19 @@ export const OperatorModal: React.FC<OperatorModalProps> = ({
     const trimmed = name.trim();
     if (!trimmed) return;
 
-    onSaveOperator({
+    const op = currentOperator || currentProfile || DEFAULT_OPERATOR;
+    const updatedProfile: OperatorProfile = {
       name: trimmed,
-      email: currentUser?.email || currentOperator.email,
-      photoURL: currentUser?.photoURL || currentOperator.photoURL,
-      role: role.trim() || 'Staff Member',
-    });
+      email: currentUser?.email || op?.email || '',
+      photoURL: currentUser?.photoURL || op?.photoURL,
+      role: role.trim() || 'Administrator',
+    };
+
+    if (onSaveOperator) {
+      onSaveOperator(updatedProfile);
+    } else if (onSave) {
+      onSave(updatedProfile);
+    }
     onClose();
   };
 

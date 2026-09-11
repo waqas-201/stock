@@ -143,11 +143,13 @@ export function App() {
       setIsAuthLoading(false);
       if (user) {
         setOperator((prev) => {
-          const isGeneric = prev.name === 'Staff Member';
+          const prevName = prev?.name || 'Waqas (Admin)';
+          const isGeneric = prevName === 'Staff Member' || prevName === 'Store Operator';
           const updated: OperatorProfile = {
-            ...prev,
-            name: isGeneric && user.displayName ? user.displayName : prev.name,
-            email: user.email || prev.email,
+            name: isGeneric && user.displayName ? user.displayName : prevName,
+            email: user.email || prev?.email || '',
+            role: prev?.role || 'Administrator',
+            photoURL: user.photoURL || prev?.photoURL,
           };
           saveOperatorProfile(updated);
           return updated;
@@ -1014,8 +1016,10 @@ export function App() {
       <OperatorModal
         isOpen={isOperatorModalOpen}
         onClose={() => setIsOperatorModalOpen(false)}
+        currentOperator={operator}
         currentProfile={operator}
-        onSave={(newProfile) => {
+        currentUser={currentUser}
+        onSaveOperator={(newProfile) => {
           setOperator(newProfile);
           saveOperatorProfile(newProfile);
           showToast(

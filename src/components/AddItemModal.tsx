@@ -50,7 +50,7 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
       setProductionDate('');
       setNotes('');
       setError(null);
-      if (units.length > 0) {
+      if (units && units.length > 0 && units[0]?.name) {
         setUnit(units[0].name);
       }
     }
@@ -95,7 +95,7 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
       return;
     }
 
-    const cleanUnit = unit || (units[0] ? units[0].name : 'Pieces');
+    const cleanUnit = unit || (units && units[0]?.name ? units[0].name : 'Pieces');
 
     onAdd(
       cleanName,
@@ -212,11 +212,11 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
               onChange={(e) => setUnit(e.target.value)}
               className="w-full px-3.5 py-2.5 min-h-[44px] text-sm sm:text-base bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent text-slate-900 cursor-pointer"
             >
-              {units.map((u) => (
+              {units && units.map((u) => u?.name ? (
                 <option key={u.id} value={u.name}>
                   {u.name} {u.code ? `(${u.code})` : ''}
                 </option>
-              ))}
+              ) : null)}
             </select>
           </div>
 

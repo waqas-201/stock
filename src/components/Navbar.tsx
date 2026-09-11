@@ -37,7 +37,7 @@ interface NavbarProps {
   isAuthLoading: boolean;
   onSignInWithGoogle: () => void;
   onSignOut: () => void;
-  currentOperator: OperatorProfile;
+  currentOperator?: OperatorProfile;
   onOpenOperatorModal: () => void;
 }
 
@@ -58,6 +58,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentOperator,
   onOpenOperatorModal,
 }) => {
+  const opName = currentOperator?.name || 'Waqas (Admin)';
+  const opInitial = opName.charAt(0).toUpperCase() || 'W';
+  const opRole = currentOperator?.role || 'Staff Member';
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -132,13 +136,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                 title="Change active staff name for inventory modifications and audit trail"
               >
                 <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-[10px]">
-                  {currentOperator.name.charAt(0).toUpperCase()}
+                  {opInitial}
                 </div>
                 <span className="truncate max-w-[110px] text-slate-900">
-                  {currentOperator.name}
+                  {opName}
                 </span>
                 <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200 hidden lg:inline">
-                  {currentOperator.role}
+                  {opRole}
                 </span>
               </button>
 
@@ -288,10 +292,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 aria-label="Active staff member"
               >
                 <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-[10px]">
-                  {currentOperator.name.charAt(0).toUpperCase()}
+                  {opInitial}
                 </div>
                 <span className="max-w-[65px] truncate text-[11px] font-bold">
-                  {currentOperator.name}
+                  {opName}
                 </span>
               </button>
 
@@ -489,14 +493,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex items-center justify-between">
               <div className="flex items-center gap-2.5 min-w-0">
                 <div className="w-9 h-9 rounded-xl bg-emerald-700 text-white font-bold flex items-center justify-center shrink-0">
-                  {currentOperator.name.charAt(0).toUpperCase()}
+                  {opInitial}
                 </div>
                 <div className="min-w-0">
                   <span className="text-xs font-bold text-slate-900 block truncate">
-                    Staff: {currentOperator.name}
+                    Staff: {opName}
                   </span>
                   <span className="text-[11px] text-emerald-800 font-semibold block">
-                    Role: {currentOperator.role} • {currentOperator.email || 'Local'}
+                    Role: {opRole} • {currentOperator?.email || 'Local'}
                   </span>
                 </div>
               </div>

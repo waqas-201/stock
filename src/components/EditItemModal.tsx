@@ -213,11 +213,11 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
               onChange={(e) => setUnit(e.target.value)}
               className="w-full px-3.5 py-2.5 min-h-[44px] text-sm sm:text-base bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent text-slate-900 cursor-pointer"
             >
-              {units.map((u) => (
+              {units && units.map((u) => u?.name ? (
                 <option key={u.id} value={u.name}>
                   {u.name} {u.code ? `(${u.code})` : ''}
                 </option>
-              ))}
+              ) : null)}
             </select>
           </div>
 
