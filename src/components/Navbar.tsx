@@ -167,7 +167,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </div>
                   )}
                   <span className="text-xs font-semibold text-emerald-900 truncate max-w-[110px]">
-                    {currentUser.displayName || currentUser.email?.split('@')[0]}
+                    {currentUser.displayName || (currentUser.isAnonymous ? 'Quick Team' : currentUser.email?.split('@')[0])}
                   </span>
                   <button
                     type="button"
@@ -303,11 +303,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               {currentUser ? (
                 <div
                   className="min-h-[44px] px-2 py-1.5 inline-flex items-center justify-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 rounded-xl"
-                  title={`Logged into Cloud DB as ${currentUser.email}`}
+                  title={currentUser.isAnonymous ? 'Logged into Cloud DB via Quick Team Pass' : `Logged into Cloud DB as ${currentUser.email}`}
                 >
                   <CloudCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                   <span className="max-w-[60px] truncate">
-                    {currentUser.displayName?.split(' ')[0] || 'Sync'}
+                    {currentUser.displayName?.split(' ')[0] || (currentUser.isAnonymous ? 'Team' : 'Sync')}
                   </span>
                 </div>
               ) : (

@@ -28,6 +28,7 @@ import {
   auth,
   testConnection,
   signInWithGoogle,
+  signInQuickAccess,
   signOutUser,
   onAuthStateChanged,
   User,
@@ -57,6 +58,7 @@ import { AuditTrailModal } from './components/AuditTrailModal';
 import { UnitManagementModal } from './components/UnitManagementModal';
 import { OperatorModal } from './components/OperatorModal';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { UnauthorizedDomainModal } from './components/UnauthorizedDomainModal';
 import {
   CheckCircle2,
   AlertCircle,
@@ -109,6 +111,8 @@ export function App() {
   const [itemToDelete, setItemToDelete] = useState<StockItem | null>(null);
   const [dontAskAgainInDialog, setDontAskAgainInDialog] = useState(false);
   const [isUnitModalOpen, setIsUnitModalOpen] = useState(false);
+  const [isDomainModalOpen, setIsDomainModalOpen] = useState(false);
+  const [currentDomain, setCurrentDomain] = useState('');
 
   // Notification Toast with optional Action (e.g. Undo)
   const [toast, setToast] = useState<{
@@ -253,7 +257,7 @@ export function App() {
     saveManagedUnits(newUnits);
   };
 
-  // Google Sign-In handler
+  // Google Sign-In handler with automatic fallback & domain guidance
   const handleSignInWithGoogle = async () => {
     try {
       showToast('Signing in with Google...', 'info');
@@ -263,7 +267,52 @@ export function App() {
       }
     } catch (err: any) {
       console.error('Google Sign-In error:', err);
-      showToast(err.message || 'Could not sign in with Google', 'error');
+      const isUnauthorizedDomain =
+        err?.code === 'auth/unauthorized-domain' ||
+        (typeof err?.message === 'string' && err.message.includes('unauthorized-domain'));
+
+      if (isUnauthorizedDomain) {
+        // Attempt quick anonymous team connection so Cloud DB connects immediately!
+        try {
+          showToast('Attempting quick team connection...', 'info');
+          const anonUser = await signInQuickAccess();
+          if (anonUser) {
+            showToast('Connected to Cloud DB via Quick Team Pass! Real-time sync active.', 'success');
+            return;
+          }
+        } catch (anonErr) {
+          console.warn('Quick access fallback not available:', anonErr);
+        }
+
+        // Domain not authorized in Firebase Console - open helper modal
+        const host = typeof window !== 'undefined' ? window.location.hostname : '';
+        setCurrentDomain(host);
+        setIsDomainModalOpen(true);
+        showToast('Domain authorization required in Firebase Console for Google login.', 'error');
+      } else {
+        showToast(err.message || 'Could not sign in with Google', 'error');
+      }
+    }
+  };
+
+  // Quick Team Connect handler (doesn't require Google OAuth domain whitelist)
+  const handleQuickConnect = async () => {
+    try {
+      showToast('Connecting via Quick Team Session...', 'info');
+      const user = await signInQuickAccess();
+      if (user) {
+        showToast('Connected to Cloud DB! Real-time Firestore sync active.', 'success');
+      }
+    } catch (err: any) {
+      console.error('Quick access error:', err);
+      if (err?.code === 'auth/admin-restricted-operation') {
+        const host = typeof window !== 'undefined' ? window.location.hostname : '';
+        setCurrentDomain(host);
+        setIsDomainModalOpen(true);
+        showToast('Please authorize your domain in Firebase Console for Google sign-in.', 'error');
+      } else {
+        showToast(err.message || 'Could not connect to Cloud DB', 'error');
+      }
     }
   };
 
@@ -864,8 +913,23 @@ export function App() {
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600"></span>
                 </span>
                 <span className="truncate">
-                  Persistent Cloud DB Active • Real-time Firestore sync enabled for{' '}
-                  <strong className="font-bold">{currentUser.email}</strong>
+                  Persistent Cloud DB Active • Real-time Firestore sync enabled{' '}
+                  {currentUser.isAnonymous ? (
+                    <>
+                      <strong className="font-bold">(Quick Team Access)</strong>
+                      <button
+                        type="button"
+                        onClick={() => setIsDomainModalOpen(true)}
+                        className="ml-2 text-[11px] text-emerald-800 hover:text-emerald-950 underline font-semibold cursor-pointer"
+                      >
+                        Authorize Google Login
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      for <strong className="font-bold">{currentUser.email}</strong>
+                    </>
+                  )}
                 </span>
               </div>
               <div className="flex items-center gap-3 shrink-0">
@@ -881,28 +945,52 @@ export function App() {
               </div>
             </div>
           ) : (
-            <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border border-emerald-200 rounded-xl p-3 sm:py-2.5 sm:px-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-2xs">
+            <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border border-emerald-200 rounded-xl p-3 sm:py-2.5 sm:px-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
               <div className="flex items-center gap-2.5 text-xs text-slate-700">
                 <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
                   <Database className="w-4 h-4" />
                 </div>
                 <div>
                   <p className="font-bold text-slate-900 text-xs sm:text-sm">
-                    Enable Persistent Cloud Database
+                    Connect Persistent Cloud Database
                   </p>
                   <p className="text-[11px] sm:text-xs text-slate-500">
-                    Connect Google Account to persist stock, units, and audit logs permanently in Firestore. All team members get full CRUD permissions.
+                    Store stock items and audit logs permanently in Firestore. All team members share full CRUD access.
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={handleSignInWithGoogle}
-                className="w-full sm:w-auto min-h-[38px] px-4 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 shrink-0"
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                <span>Connect Google Account</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto shrink-0">
+                <button
+                  type="button"
+                  onClick={handleQuickConnect}
+                  className="flex-1 sm:flex-initial min-h-[38px] px-3.5 py-1.5 text-xs font-bold text-emerald-800 bg-white hover:bg-emerald-100/60 border border-emerald-300 rounded-xl shadow-2xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                  title="Instant database connection without requiring Google OAuth domain setup"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Instant Quick Connect</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSignInWithGoogle}
+                  className="flex-1 sm:flex-initial min-h-[38px] px-4 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>Connect Google Account</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const host = typeof window !== 'undefined' ? window.location.hostname : '';
+                    setCurrentDomain(host);
+                    setIsDomainModalOpen(true);
+                  }}
+                  className="min-h-[38px] px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-200/50 rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1"
+                  title="View domain whitelisting instructions for Firebase"
+                >
+                  <Info className="w-3.5 h-3.5 text-slate-500" />
+                  <span className="hidden md:inline">Domain Help</span>
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -1027,6 +1115,15 @@ export function App() {
             'success'
           );
         }}
+      />
+
+      {/* 8. Firebase Domain Authorization Helper Modal */}
+      <UnauthorizedDomainModal
+        isOpen={isDomainModalOpen}
+        onClose={() => setIsDomainModalOpen(false)}
+        domain={currentDomain || (typeof window !== 'undefined' ? window.location.hostname : '')}
+        onRetryGoogleSignIn={handleSignInWithGoogle}
+        onQuickConnect={handleQuickConnect}
       />
     </div>
   );

@@ -3,6 +3,7 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInAnonymously,
   signOut,
   onAuthStateChanged,
   User,
@@ -89,6 +90,15 @@ export async function signInWithGoogle(): Promise<User | null> {
   provider.setCustomParameters({ prompt: 'select_account' });
   const result = await signInWithPopup(auth, provider);
   return result.user;
+}
+
+export async function signInQuickAccess(): Promise<User | null> {
+  const result = await signInAnonymously(auth);
+  return result.user;
+}
+
+export function getFirebaseProjectId(): string {
+  return firebaseConfig.projectId || '';
 }
 
 export async function signOutUser(): Promise<void> {
