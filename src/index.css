@@ -1,7 +1,1 @@
 @import "tailwindcss";
-
-@layer base {
-  [dir="rtl"] {
-    font-family: 'Noto Sans Arabic', 'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', 'Urdu Typesetting', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  }
-}

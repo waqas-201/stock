@@ -1,35 +1,35 @@
 import { StockUnit } from '../types';
 
-const UNITS_STORAGE_KEY = 'pakistani_stock_units_v1';
+const UNITS_STORAGE_KEY = 'app_stock_units_v2';
 
-export const DEFAULT_PAKISTANI_UNITS: StockUnit[] = [
-  { id: 'u_pcs', nameUrdu: 'عدد / نَگ', nameEnglish: 'Pieces (pcs)', isDefault: true },
-  { id: 'u_kg', nameUrdu: 'کلو گرام', nameEnglish: 'Kilogram (kg)', isDefault: true },
-  { id: 'u_gm', nameUrdu: 'گرام', nameEnglish: 'Gram (g)', isDefault: true },
-  { id: 'u_ltr', nameUrdu: 'لیٹر', nameEnglish: 'Liter (ltr)', isDefault: true },
-  { id: 'u_ml', nameUrdu: 'ملی لیٹر', nameEnglish: 'Milliliter (ml)', isDefault: true },
-  { id: 'u_ctn', nameUrdu: 'پیٹی / کاٹن', nameEnglish: 'Carton (ctn)', isDefault: true },
-  { id: 'u_box', nameUrdu: 'ڈبہ / باکس', nameEnglish: 'Box', isDefault: true },
-  { id: 'u_pkt', nameUrdu: 'پیکٹ', nameEnglish: 'Packet (pkt)', isDefault: true },
-  { id: 'u_bag', nameUrdu: 'بوری / توڑا', nameEnglish: 'Sack / Bag', isDefault: true },
-  { id: 'u_dz', nameUrdu: 'درجن', nameEnglish: 'Dozen (dz)', isDefault: true },
-  { id: 'u_bdl', nameUrdu: 'بنڈل', nameEnglish: 'Bundle', isDefault: true },
-  { id: 'u_m', nameUrdu: 'میٹر', nameEnglish: 'Meter (m)', isDefault: true },
-  { id: 'u_yd', nameUrdu: 'گز', nameEnglish: 'Yard / Ghaz', isDefault: true },
-  { id: 'u_btl', nameUrdu: 'بوتل', nameEnglish: 'Bottle', isDefault: true },
-  { id: 'u_roll', nameUrdu: 'رول', nameEnglish: 'Roll', isDefault: true },
-  { id: 'u_ream', nameUrdu: 'ریم', nameEnglish: 'Ream', isDefault: true },
+export const DEFAULT_UNITS: StockUnit[] = [
+  { id: 'u_pcs', name: 'Pieces', code: 'pcs', isDefault: true },
+  { id: 'u_box', name: 'Box', code: 'box', isDefault: true },
+  { id: 'u_kg', name: 'Kilogram', code: 'kg', isDefault: true },
+  { id: 'u_gm', name: 'Gram', code: 'g', isDefault: true },
+  { id: 'u_ltr', name: 'Liter', code: 'L', isDefault: true },
+  { id: 'u_ml', name: 'Milliliter', code: 'mL', isDefault: true },
+  { id: 'u_ctn', name: 'Carton', code: 'ctn', isDefault: true },
+  { id: 'u_pkt', name: 'Packet', code: 'pkt', isDefault: true },
+  { id: 'u_bag', name: 'Bag / Sack', code: 'bag', isDefault: true },
+  { id: 'u_dz', name: 'Dozen', code: 'dz', isDefault: true },
+  { id: 'u_bdl', name: 'Bundle', code: 'bdl', isDefault: true },
+  { id: 'u_m', name: 'Meter', code: 'm', isDefault: true },
+  { id: 'u_btl', name: 'Bottle', code: 'btl', isDefault: true },
+  { id: 'u_roll', name: 'Roll', code: 'roll', isDefault: true },
+  { id: 'u_ream', name: 'Ream', code: 'ream', isDefault: true },
+  { id: 'u_set', name: 'Set', code: 'set', isDefault: true },
 ];
 
 /**
- * Loads managed units from localStorage or seeds defaults
+ * Loads managed units from localStorage or initializes defaults
  */
 export function loadManagedUnits(): StockUnit[] {
   try {
     const raw = localStorage.getItem(UNITS_STORAGE_KEY);
     if (!raw) {
-      saveManagedUnits(DEFAULT_PAKISTANI_UNITS);
-      return DEFAULT_PAKISTANI_UNITS;
+      saveManagedUnits(DEFAULT_UNITS);
+      return DEFAULT_UNITS;
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
@@ -38,7 +38,7 @@ export function loadManagedUnits(): StockUnit[] {
   } catch (err) {
     console.error('Failed to load units from storage:', err);
   }
-  return DEFAULT_PAKISTANI_UNITS;
+  return DEFAULT_UNITS;
 }
 
 /**
@@ -50,14 +50,4 @@ export function saveManagedUnits(units: StockUnit[]): void {
   } catch (err) {
     console.error('Failed to save units to storage:', err);
   }
-}
-
-/**
- * Generates unit display label based on Urdu or English preference
- */
-export function getUnitDisplay(unit: StockUnit, lang: 'ur' | 'en' = 'ur'): string {
-  if (lang === 'ur') {
-    return unit.nameEnglish ? `${unit.nameUrdu} (${unit.nameEnglish})` : unit.nameUrdu;
-  }
-  return unit.nameEnglish || unit.nameUrdu;
 }

@@ -1,20 +1,23 @@
 import { StockItem } from '../types';
 
-const STORAGE_KEY = 'in_app_stock_items_pk_v2';
+const STORAGE_KEY = 'in_app_stock_items_en_v3';
+const THRESHOLD_STORAGE_KEY = 'app_global_low_stock_threshold';
+
+export const DEFAULT_LOW_STOCK_THRESHOLD = 5;
 
 export const INITIAL_STOCK_ITEMS: StockItem[] = [
-  { id: 'item_1', itemName: 'اے فور پرنٹنگ پیپر (A4 Paper)', unit: 'ریم', quantity: 45 },
-  { id: 'item_2', itemName: 'بال پوائنٹ پین (نیلا)', unit: 'ڈبہ / باکس', quantity: 14 },
-  { id: 'item_3', itemName: 'باسمتی چاول (سپر کرنل)', unit: 'بوری / توڑا', quantity: 8 },
-  { id: 'item_4', itemName: 'کوکنگ آئل ۵ لیٹر کین', unit: 'پیٹی / کاٹن', quantity: 12 },
-  { id: 'item_5', itemName: 'چینی سفید (White Sugar)', unit: 'کلو گرام', quantity: 35 },
-  { id: 'item_6', itemName: 'ہینڈ سینیٹائزر ۵۰۰ ایم ایل', unit: 'بوتل', quantity: 0 },
-  { id: 'item_7', itemName: 'پیکنگ ٹیپ (چوڑا ۲ انچ)', unit: 'رول', quantity: 4 },
-  { id: 'item_8', itemName: 'اسٹیپلر پن ۲۴/۶ (Stapler Pins)', unit: 'پیکٹ', quantity: 25 },
+  { id: 'item_1', itemName: 'A4 Printing Paper (80 GSM)', unit: 'Ream', quantity: 45 },
+  { id: 'item_2', itemName: 'Ballpoint Pens (Blue, 50pk)', unit: 'Box', quantity: 12 },
+  { id: 'item_3', itemName: 'Organic Basmati Rice', unit: 'Bag / Sack', quantity: 8 },
+  { id: 'item_4', itemName: 'Refined Canola Oil (5L)', unit: 'Carton', quantity: 14 },
+  { id: 'item_5', itemName: 'White Cane Sugar', unit: 'Kilogram', quantity: 30 },
+  { id: 'item_6', itemName: 'Hand Sanitizer (500ml)', unit: 'Bottle', quantity: 0 },
+  { id: 'item_7', itemName: 'Heavy Duty Packaging Tape', unit: 'Roll', quantity: 4, lowStockThreshold: 5 },
+  { id: 'item_8', itemName: 'Standard Wire Staples (24/6)', unit: 'Packet', quantity: 22 },
 ];
 
 /**
- * Loads stock items from localStorage or returns default items on first launch
+ * Loads stock items from localStorage
  */
 export function loadStoredStock(): StockItem[] {
   try {
@@ -41,6 +44,33 @@ export function saveStoredStock(items: StockItem[]): void {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
   } catch (err) {
     console.error('Failed to save stock to localStorage:', err);
+  }
+}
+
+/**
+ * Loads global low stock threshold from localStorage
+ */
+export function loadLowStockThreshold(): number {
+  try {
+    const raw = localStorage.getItem(THRESHOLD_STORAGE_KEY);
+    if (raw !== null) {
+      const num = parseInt(raw, 10);
+      if (!isNaN(num) && num >= 0) return num;
+    }
+  } catch (err) {
+    console.error('Failed to load low stock threshold:', err);
+  }
+  return DEFAULT_LOW_STOCK_THRESHOLD;
+}
+
+/**
+ * Saves global low stock threshold to localStorage
+ */
+export function saveLowStockThreshold(threshold: number): void {
+  try {
+    localStorage.setItem(THRESHOLD_STORAGE_KEY, threshold.toString());
+  } catch (err) {
+    console.error('Failed to save low stock threshold:', err);
   }
 }
 

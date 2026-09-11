@@ -1,6 +1,6 @@
 {
   "name": "Stock Management",
-  "description": "اسٹاک مینجمنٹ - Pakistani Urdu stock inventory app with custom unit management and instant Excel export.",
+  "description": "Clean stock inventory management app with custom units, configurable low-stock threshold, and instant Excel export.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

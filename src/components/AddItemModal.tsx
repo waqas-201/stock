@@ -1,235 +1,286 @@
-import React, { useState } from 'react';
-import { X, Plus, PackagePlus, Settings2 } from 'lucide-react';
-import { StockUnit, AppLanguage } from '../types';
-import { AppStrings } from '../lib/translations';
+import React, { useState, useEffect } from 'react';
+import { X, Plus, Package, Scale, SlidersHorizontal, Minus } from 'lucide-react';
+import { StockUnit } from '../types';
 
 interface AddItemModalProps {
   isOpen: boolean;
   units: StockUnit[];
-  lang: AppLanguage;
-  t: AppStrings;
+  defaultThreshold: number;
   onClose: () => void;
-  onOpenUnitManagement: () => void;
-  onAdd: (item: { itemName: string; unit: string; quantity: number }) => void;
+  onAdd: (
+    itemName: string,
+    unit: string,
+    quantity: number,
+    threshold?: number
+  ) => void;
+  onOpenUnitModal: () => void;
 }
 
 export const AddItemModal: React.FC<AddItemModalProps> = ({
   isOpen,
   units,
-  lang,
-  t,
+  defaultThreshold,
   onClose,
-  onOpenUnitManagement,
   onAdd,
+  onOpenUnitModal,
 }) => {
   const [itemName, setItemName] = useState('');
-  const [unit, setUnit] = useState(units[0]?.nameUrdu || 'عدد / نَگ');
-  const [quantity, setQuantity] = useState<number | string>(1);
+  const [unit, setUnit] = useState<string>('');
+  const [quantity, setQuantity] = useState<string>('1');
+  const [customThreshold, setCustomThreshold] = useState<string>('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setItemName('');
+      setQuantity('1');
+      setCustomThreshold('');
+      setShowAdvanced(false);
+      setError(null);
+      if (units.length > 0 && !unit) {
+        setUnit(units[0].name);
+      }
+    }
+  }, [isOpen, units]);
 
   if (!isOpen) return null;
 
+  const handleStepQuantity = (delta: number) => {
+    const curr = parseFloat(quantity) || 0;
+    const next = Math.max(0, curr + delta);
+    setQuantity(next.toString());
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!itemName.trim()) {
-      setError(lang === 'ur' ? 'اشیاء کا نام لازمی ہے' : 'Item name is required');
-      return;
-    }
-    if (!unit.trim()) {
-      setError(lang === 'ur' ? 'اکائی کا انتخاب لازمی ہے' : 'Unit is required');
-      return;
-    }
-    const numQty = typeof quantity === 'number' ? quantity : parseFloat(String(quantity));
-    if (isNaN(numQty) || numQty < 0) {
-      setError(lang === 'ur' ? 'تعداد درست اور مثبت ہونی چاہیے' : 'Quantity must be a valid number');
+    const cleanName = itemName.trim();
+    if (!cleanName) {
+      setError('Item name is required');
       return;
     }
 
-    setError(null);
-    onAdd({
-      itemName: itemName.trim(),
-      unit: unit.trim(),
-      quantity: numQty,
-    });
-    setItemName('');
-    setQuantity(1);
+    const parsedQty = parseFloat(quantity);
+    if (isNaN(parsedQty) || parsedQty < 0) {
+      setError('Please enter a valid non-negative quantity');
+      return;
+    }
+
+    const cleanUnit = unit || (units[0] ? units[0].name : 'Pieces');
+
+    let parsedThreshold: number | undefined = undefined;
+    if (customThreshold.trim() !== '') {
+      const val = parseInt(customThreshold, 10);
+      if (!isNaN(val) && val >= 0) {
+        parsedThreshold = val;
+      }
+    }
+
+    onAdd(cleanName, cleanUnit, parsedQty, parsedThreshold);
     onClose();
   };
 
   return (
     <div
       id="add-item-modal-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div
         id="add-item-modal-box"
         role="dialog"
         aria-modal="true"
-        className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+        className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200 overflow-hidden max-h-[92vh] flex flex-col animate-in slide-in-from-bottom-5 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+        {/* Mobile Pull Handle */}
+        <div className="w-12 h-1.5 bg-slate-300 rounded-full mx-auto sm:hidden mt-2.5 shrink-0" />
+
+        {/* Header */}
+        <div className="px-5 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shadow-2xs">
-              <PackagePlus className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+              <Package className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900">{t.addItem}</h3>
+              <h3 className="text-base font-bold text-slate-900 leading-tight">
+                Add Stock Item
+              </h3>
               <p className="text-xs text-slate-500">
-                {t.itemNameCol} • {t.unitCol} • {t.quantityCol}
+                Register a new inventory product
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg cursor-pointer transition-colors"
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-full active:bg-slate-200/60 cursor-pointer"
+            aria-label="Close modal"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        {/* Form Body - Scrollable on mobile if keyboard opens */}
+        <form onSubmit={handleSubmit} className="p-5 sm:p-6 space-y-4 overflow-y-auto flex-1">
           {error && (
-            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-medium">
+            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium">
               {error}
             </div>
           )}
 
-          {/* Column 1: Item Name */}
+          {/* 1. Item Name */}
           <div>
             <label
-              htmlFor="new-item-name"
+              htmlFor="add-item-name"
               className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5"
             >
-              {t.itemNameCol} <span className="text-rose-500">*</span>
+              1. Item Name <span className="text-rose-500">*</span>
             </label>
             <input
-              id="new-item-name"
+              id="add-item-name"
               type="text"
               required
-              placeholder={lang === 'ur' ? 'مثلاً: باسمتی چاول، کوکنگ آئل، کاپیاں' : 'e.g., Basmati Rice, Cooking Oil, Paper'}
+              placeholder="e.g., A4 Paper, Ballpoint Pens, Rice"
               value={itemName}
               onChange={(e) => setItemName(e.target.value)}
-              className="w-full px-3.5 py-2.5 text-sm text-slate-900 bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent placeholder:text-slate-400"
-              autoFocus
+              className="w-full px-3.5 py-3 min-h-[48px] text-base bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent text-slate-900 placeholder:text-slate-400"
             />
           </div>
 
-          {/* Column 2: Unit (Integrated Unit Management) */}
+          {/* 2. Unit Selection */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label
-                htmlFor="new-item-unit"
+                htmlFor="add-item-unit"
                 className="block text-xs font-bold uppercase tracking-wider text-slate-700"
               >
-                {t.unitCol} <span className="text-rose-500">*</span>
+                2. Unit <span className="text-rose-500">*</span>
               </label>
               <button
                 type="button"
-                onClick={onOpenUnitManagement}
-                className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer"
+                onClick={() => {
+                  onClose();
+                  onOpenUnitModal();
+                }}
+                className="min-h-[32px] inline-flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700 font-semibold cursor-pointer py-1"
               >
-                <Settings2 className="w-3 h-3" />
-                <span>{t.manageUnits}</span>
+                <Scale className="w-3.5 h-3.5" />
+                <span>Manage Units</span>
               </button>
             </div>
-
-            <div className="flex gap-2">
-              <select
-                id="new-item-unit-select"
-                value={unit}
-                onChange={(e) => setUnit(e.target.value)}
-                className="w-full px-3.5 py-2.5 text-sm text-slate-900 bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent"
-              >
-                {units.map((u) => (
-                  <option key={u.id} value={u.nameUrdu}>
-                    {u.nameUrdu} {u.nameEnglish ? `(${u.nameEnglish})` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Quick unit pills */}
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] text-slate-400 font-medium">{t.quickUnits}</span>
-              {units.slice(0, 7).map((u) => (
-                <button
-                  key={u.id}
-                  type="button"
-                  onClick={() => setUnit(u.nameUrdu)}
-                  className={`px-2.5 py-1 text-xs rounded-lg border transition-colors cursor-pointer ${
-                    unit === u.nameUrdu
-                      ? 'bg-emerald-50 border-emerald-400 text-emerald-800 font-bold'
-                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                  }`}
-                >
-                  {u.nameUrdu}
-                </button>
+            <select
+              id="add-item-unit"
+              value={unit}
+              onChange={(e) => setUnit(e.target.value)}
+              className="w-full px-3.5 py-3 min-h-[48px] text-base bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent text-slate-900 cursor-pointer"
+            >
+              {units.map((u) => (
+                <option key={u.id} value={u.name}>
+                  {u.name} {u.code ? `(${u.code})` : ''}
+                </option>
               ))}
-            </div>
+            </select>
           </div>
 
-          {/* Column 3: Quantity */}
+          {/* 3. Quantity with Touch Stepper */}
           <div>
             <label
-              htmlFor="new-item-quantity"
+              htmlFor="add-item-quantity"
               className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5"
             >
-              {t.quantityCol} <span className="text-rose-500">*</span>
+              3. Quantity <span className="text-rose-500">*</span>
             </label>
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setQuantity((q) => Math.max(0, (Number(q) || 0) - 1))}
-                className="px-3.5 py-2.5 border border-slate-300 bg-slate-50 hover:bg-slate-100 rounded-xl text-slate-700 font-bold text-sm cursor-pointer"
+                onClick={() => handleStepQuantity(-1)}
+                className="min-h-[48px] min-w-[48px] rounded-xl bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 flex items-center justify-center font-bold border border-slate-200 transition-transform active:scale-95 cursor-pointer"
+                title="Decrease quantity by 1"
+                aria-label="Decrease quantity"
               >
-                -1
+                <Minus className="w-5 h-5" />
               </button>
+
               <input
-                id="new-item-quantity"
+                id="add-item-quantity"
                 type="number"
                 min="0"
                 step="any"
                 required
+                placeholder="0"
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
-                className="flex-1 px-3.5 py-2.5 text-base text-center font-bold text-slate-900 bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent font-mono"
+                className="flex-1 px-3.5 py-3 min-h-[48px] text-base font-mono text-center font-bold bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent text-slate-900"
               />
+
               <button
                 type="button"
-                onClick={() => setQuantity((q) => (Number(q) || 0) + 1)}
-                className="px-3.5 py-2.5 border border-slate-300 bg-slate-50 hover:bg-slate-100 rounded-xl text-slate-700 font-bold text-sm cursor-pointer"
+                onClick={() => handleStepQuantity(1)}
+                className="min-h-[48px] min-w-[48px] rounded-xl bg-emerald-100 hover:bg-emerald-200 active:bg-emerald-300 text-emerald-800 flex items-center justify-center font-bold border border-emerald-200 transition-transform active:scale-95 cursor-pointer"
+                title="Increase quantity by 1"
+                aria-label="Increase quantity"
               >
-                +1
-              </button>
-              <button
-                type="button"
-                onClick={() => setQuantity((q) => (Number(q) || 0) + 10)}
-                className="px-3 py-2.5 border border-slate-300 bg-slate-50 hover:bg-slate-100 rounded-xl text-slate-700 text-xs font-bold cursor-pointer"
-              >
-                +10
+                <Plus className="w-5 h-5" />
               </button>
             </div>
           </div>
 
-          <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-3">
+          {/* Optional item-specific threshold */}
+          <div className="pt-1">
             <button
-              id="btn-add-item-cancel"
+              type="button"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="min-h-[38px] inline-flex items-center gap-2 text-xs text-slate-600 hover:text-slate-900 font-medium cursor-pointer"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-amber-600" />
+              <span>
+                {showAdvanced
+                  ? 'Hide custom threshold'
+                  : `Custom alert threshold (Default: ≤ ${defaultThreshold})`}
+              </span>
+            </button>
+
+            {showAdvanced && (
+              <div className="mt-2 p-3 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2">
+                <label
+                  htmlFor="add-item-custom-threshold"
+                  className="block text-xs font-semibold text-amber-900"
+                >
+                  Alert when quantity reaches or drops below:
+                </label>
+                <input
+                  id="add-item-custom-threshold"
+                  type="number"
+                  min="0"
+                  placeholder={`Default (${defaultThreshold})`}
+                  value={customThreshold}
+                  onChange={(e) => setCustomThreshold(e.target.value)}
+                  className="w-full px-3.5 py-2.5 min-h-[44px] text-base sm:text-sm bg-white border border-amber-300 rounded-lg text-slate-900 font-mono"
+                />
+                <p className="text-[11px] text-amber-800 leading-normal">
+                  Leave blank to inherit global setting (≤ {defaultThreshold} units).
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Modal Footer with 48px Touch Buttons */}
+          <div className="pt-3 border-t border-slate-100 grid grid-cols-2 gap-2.5 shrink-0">
+            <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 cursor-pointer"
+              className="min-h-[48px] px-4 py-2.5 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl active:bg-slate-100 cursor-pointer flex items-center justify-center"
             >
-              {t.cancel}
+              Cancel
             </button>
             <button
-              id="btn-add-item-submit"
+              id="btn-submit-add-item"
               type="submit"
-              className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors cursor-pointer"
+              className="min-h-[48px] inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-emerald-600 active:bg-emerald-700 rounded-xl shadow-xs transition-colors cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>{t.addToStock}</span>
+              <span>Add to Stock</span>
             </button>
           </div>
         </form>

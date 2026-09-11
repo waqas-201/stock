@@ -8,18 +8,14 @@ import {
   Scale,
   RotateCcw,
 } from 'lucide-react';
-import { StockUnit, AppLanguage } from '../types';
-import { DEFAULT_PAKISTANI_UNITS } from '../lib/unitStorage';
-import { AppStrings } from '../lib/translations';
+import { StockUnit } from '../types';
 
 interface UnitManagementModalProps {
   isOpen: boolean;
   units: StockUnit[];
-  lang: AppLanguage;
-  t: AppStrings;
   onClose: () => void;
-  onAddUnit: (nameUrdu: string, nameEnglish?: string) => void;
-  onUpdateUnit: (id: string, nameUrdu: string, nameEnglish?: string) => void;
+  onAddUnit: (name: string, code?: string) => void;
+  onUpdateUnit: (id: string, name: string, code?: string) => void;
   onDeleteUnit: (id: string) => void;
   onResetUnits: () => void;
 }
@@ -27,127 +23,127 @@ interface UnitManagementModalProps {
 export const UnitManagementModal: React.FC<UnitManagementModalProps> = ({
   isOpen,
   units,
-  lang,
-  t,
   onClose,
   onAddUnit,
   onUpdateUnit,
   onDeleteUnit,
   onResetUnits,
 }) => {
-  const [newUrdu, setNewUrdu] = useState('');
-  const [newEnglish, setNewEnglish] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newCode, setNewCode] = useState('');
   const [editingUnitId, setEditingUnitId] = useState<string | null>(null);
-  const [editUrdu, setEditUrdu] = useState('');
-  const [editEnglish, setEditEnglish] = useState('');
+  const [editName, setEditName] = useState('');
+  const [editCode, setEditCode] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUrdu.trim()) {
-      setError(lang === 'ur' ? 'اکائی کا نام درج کریں' : 'Unit name is required');
+    if (!newName.trim()) {
+      setError('Unit name is required');
       return;
     }
     setError(null);
-    onAddUnit(newUrdu.trim(), newEnglish.trim() || undefined);
-    setNewUrdu('');
-    setNewEnglish('');
+    onAddUnit(newName.trim(), newCode.trim() || undefined);
+    setNewName('');
+    setNewCode('');
   };
 
   const startEdit = (unit: StockUnit) => {
     setEditingUnitId(unit.id);
-    setEditUrdu(unit.nameUrdu);
-    setEditEnglish(unit.nameEnglish || '');
+    setEditName(unit.name);
+    setEditCode(unit.code || '');
   };
 
   const handleSaveEdit = (id: string) => {
-    if (!editUrdu.trim()) return;
-    onUpdateUnit(id, editUrdu.trim(), editEnglish.trim() || undefined);
+    if (!editName.trim()) return;
+    onUpdateUnit(id, editName.trim(), editCode.trim() || undefined);
     setEditingUnitId(null);
   };
 
   return (
     <div
       id="unit-management-modal-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div
         id="unit-management-modal-box"
         role="dialog"
         aria-modal="true"
-        className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]"
+        className="w-full max-w-xl bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh] animate-in slide-in-from-bottom-5 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Mobile Pull Handle */}
+        <div className="w-12 h-1.5 bg-slate-300 rounded-full mx-auto sm:hidden mt-2.5 shrink-0" />
+
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+        <div className="px-5 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
               <Scale className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-slate-900 leading-tight">
-                {t.unitManagementTitle}
+              <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">
+                Unit Management
               </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                {t.unitManagementSubtitle}
+              <p className="text-xs text-slate-500">
+                Measurement units for your inventory items
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-full active:bg-slate-200/60 cursor-pointer"
+            aria-label="Close modal"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="p-6 overflow-y-auto flex-1 space-y-6">
+        <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 sm:space-y-6">
           {/* Add New Unit Form */}
           <form
             onSubmit={handleAdd}
-            className="p-4 bg-emerald-50/60 border border-emerald-200/80 rounded-xl space-y-3"
+            className="p-4 bg-emerald-50/50 border border-emerald-200 rounded-2xl space-y-3"
           >
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-bold text-emerald-900 uppercase tracking-wider flex items-center gap-1.5">
-                <Plus className="w-3.5 h-3.5 text-emerald-700" />
-                <span>{t.addNewUnit}</span>
-              </h4>
-            </div>
+            <h4 className="text-xs font-bold text-emerald-900 uppercase tracking-wider flex items-center gap-1.5">
+              <Plus className="w-4 h-4 text-emerald-700" />
+              <span>Add New Unit</span>
+            </h4>
 
             {error && (
               <p className="text-xs text-rose-600 font-medium">{error}</p>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  {t.unitNameUrdu} <span className="text-rose-500">*</span>
+                  Unit Name <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder={t.unitPlaceholderUrdu}
-                  value={newUrdu}
-                  onChange={(e) => setNewUrdu(e.target.value)}
-                  className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent text-slate-900"
+                  placeholder="e.g., Kilogram, Carton, Box"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 min-h-[44px] text-base sm:text-sm bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent text-slate-900 placeholder:text-slate-400"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  {t.unitNameEnglish}
+                  Abbreviation / Symbol (Optional)
                 </label>
                 <input
                   type="text"
-                  placeholder={t.unitPlaceholderEnglish}
-                  value={newEnglish}
-                  onChange={(e) => setNewEnglish(e.target.value)}
-                  className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent text-slate-900"
+                  placeholder="e.g., kg, ctn, box"
+                  value={newCode}
+                  onChange={(e) => setNewCode(e.target.value)}
+                  className="w-full px-3.5 py-2.5 min-h-[44px] text-base sm:text-sm bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent text-slate-900 placeholder:text-slate-400"
                 />
               </div>
             </div>
@@ -155,32 +151,32 @@ export const UnitManagementModal: React.FC<UnitManagementModalProps> = ({
             <div className="flex justify-end pt-1">
               <button
                 type="submit"
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-xs cursor-pointer transition-colors"
+                className="w-full sm:w-auto min-h-[44px] inline-flex items-center justify-center gap-1.5 px-5 py-2 text-sm font-bold text-white bg-emerald-600 active:bg-emerald-700 rounded-xl shadow-xs cursor-pointer transition-colors"
               >
-                <Plus className="w-3.5 h-3.5" />
-                <span>{t.saveUnit}</span>
+                <Plus className="w-4 h-4" />
+                <span>Save New Unit</span>
               </button>
             </div>
           </form>
 
           {/* Existing Units List */}
           <div>
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-2.5">
               <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                {lang === 'ur' ? 'دستیاب اکائیاں' : 'Available Units'} ({units.length})
+                Configured Units ({units.length})
               </h4>
               <button
                 type="button"
                 onClick={onResetUnits}
-                className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-emerald-700 font-medium cursor-pointer"
-                title="Reset to default Pakistani commerce units"
+                className="min-h-[36px] inline-flex items-center gap-1.5 px-2.5 py-1 text-xs text-slate-600 hover:text-emerald-700 font-semibold cursor-pointer rounded-lg active:bg-slate-100"
+                title="Restore default standard units"
               >
-                <RotateCcw className="w-3 h-3" />
-                <span>{lang === 'ur' ? 'ڈیفالٹ بحال کریں' : 'Reset Defaults'}</span>
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset Defaults</span>
               </button>
             </div>
 
-            <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden bg-white">
+            <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-2xs">
               {units.map((unit) => {
                 const isEditing = editingUnitId === unit.id;
 
@@ -192,35 +188,35 @@ export const UnitManagementModal: React.FC<UnitManagementModalProps> = ({
                     >
                       <input
                         type="text"
-                        value={editUrdu}
-                        onChange={(e) => setEditUrdu(e.target.value)}
-                        placeholder="نام (اردو)"
-                        className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-slate-900"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        placeholder="Unit Name"
+                        className="flex-1 px-3 py-2 min-h-[44px] text-base sm:text-xs bg-white border border-slate-300 rounded-xl text-slate-900"
                         autoFocus
                       />
                       <input
                         type="text"
-                        value={editEnglish}
-                        onChange={(e) => setEditEnglish(e.target.value)}
-                        placeholder="English Name"
-                        className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-md text-slate-900"
+                        value={editCode}
+                        onChange={(e) => setEditCode(e.target.value)}
+                        placeholder="Code (e.g. kg)"
+                        className="w-full sm:w-32 px-3 py-2 min-h-[44px] text-base sm:text-xs bg-white border border-slate-300 rounded-xl text-slate-900"
                       />
-                      <div className="flex items-center gap-1 justify-end">
+                      <div className="flex items-center gap-2 justify-end">
                         <button
                           type="button"
                           onClick={() => handleSaveEdit(unit.id)}
-                          className="p-1.5 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 cursor-pointer"
+                          className="min-h-[44px] min-w-[44px] flex items-center justify-center bg-emerald-600 text-white rounded-xl active:bg-emerald-700 cursor-pointer"
                           title="Save"
                         >
-                          <Check className="w-3.5 h-3.5" />
+                          <Check className="w-4 h-4" />
                         </button>
                         <button
                           type="button"
                           onClick={() => setEditingUnitId(null)}
-                          className="p-1.5 bg-slate-200 text-slate-700 rounded-md hover:bg-slate-300 cursor-pointer"
+                          className="min-h-[44px] min-w-[44px] flex items-center justify-center bg-slate-200 text-slate-700 rounded-xl active:bg-slate-300 cursor-pointer"
                           title="Cancel"
                         >
-                          <X className="w-3.5 h-3.5" />
+                          <X className="w-4 h-4" />
                         </button>
                       </div>
                     </div>
@@ -230,47 +226,45 @@ export const UnitManagementModal: React.FC<UnitManagementModalProps> = ({
                 return (
                   <div
                     key={unit.id}
-                    className="px-4 py-3 flex items-center justify-between hover:bg-slate-50/60 transition-colors"
+                    className="p-3 sm:p-3.5 flex items-center justify-between gap-3 hover:bg-slate-50 transition-colors"
                   >
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-bold text-slate-900">
-                        {unit.nameUrdu}
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="font-bold text-sm text-slate-900 truncate">
+                        {unit.name}
                       </span>
-                      {unit.nameEnglish && (
-                        <span className="text-xs text-slate-500 font-medium">
-                          ({unit.nameEnglish})
+                      {unit.code && (
+                        <span className="px-2 py-0.5 text-xs font-mono font-semibold bg-slate-100 text-slate-600 rounded-md border border-slate-200/80">
+                          {unit.code}
                         </span>
                       )}
-                      {unit.isDefault ? (
-                        <span className="px-2 py-0.5 text-[10px] font-semibold bg-slate-100 text-slate-600 rounded-full">
-                          {t.defaultBadge}
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full">
-                          {t.customBadge}
+                      {unit.isDefault && (
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                          Standard
                         </span>
                       )}
                     </div>
 
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 shrink-0">
                       <button
                         type="button"
                         onClick={() => startEdit(unit)}
-                        className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
-                        title="Edit unit"
+                        className="min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-500 hover:text-slate-800 active:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                        title="Edit unit name"
+                        aria-label={`Edit ${unit.name}`}
                       >
-                        <Edit2 className="w-3.5 h-3.5" />
+                        <Edit2 className="w-4 h-4" />
                       </button>
-                      {!unit.isDefault && (
-                        <button
-                          type="button"
-                          onClick={() => onDeleteUnit(unit.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors cursor-pointer"
-                          title="Delete unit"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => onDeleteUnit(unit.id)}
+                        disabled={units.length <= 1}
+                        className="min-w-[44px] min-h-[44px] flex items-center justify-center text-rose-500 hover:text-rose-700 active:bg-rose-50 disabled:opacity-20 disabled:pointer-events-none rounded-xl transition-colors cursor-pointer"
+                        title="Delete unit"
+                        aria-label={`Delete ${unit.name}`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                 );
@@ -279,19 +273,14 @@ export const UnitManagementModal: React.FC<UnitManagementModalProps> = ({
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-          <span>
-            {lang === 'ur'
-              ? 'یہ تمام اکائیاں نیا آئٹم شامل کرتے ہوئے دستیاب ہوں گی'
-              : 'These units will be selectable when adding or editing items'}
-          </span>
+        {/* Modal Footer */}
+        <div className="p-4 border-t border-slate-100 flex justify-end bg-slate-50/60 shrink-0">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-1.5 font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 cursor-pointer"
+            className="w-full sm:w-auto min-h-[44px] px-6 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl active:bg-slate-100 cursor-pointer"
           >
-            {t.cancel}
+            Done
           </button>
         </div>
       </div>

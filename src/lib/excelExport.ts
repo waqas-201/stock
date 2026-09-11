@@ -1,40 +1,33 @@
 import * as XLSX from 'xlsx';
-import { StockItem, AppLanguage } from '../types';
+import { StockItem } from '../types';
 
 /**
  * Exports current stock items to an Excel (.xlsx) file with 3 columns:
- * - Item Name / اشیاء کا نام
- * - Unit / اکائی
- * - Quantity / تعداد
+ * - Item Name
+ * - Unit
+ * - Quantity
  */
 export function exportToExcel(
   items: StockItem[],
-  filename = 'stock-inventory.xlsx',
-  lang: AppLanguage = 'ur'
+  filename = 'stock-inventory.xlsx'
 ): void {
-  const colItemName = lang === 'ur' ? 'اشیاء کا نام (Item Name)' : 'Item Name';
-  const colUnit = lang === 'ur' ? 'اکائی (Unit)' : 'Unit';
-  const colQuantity = lang === 'ur' ? 'تعداد / مقدار (Quantity)' : 'Quantity';
-
   const data = items.map((item) => ({
-    [colItemName]: item.itemName,
-    [colUnit]: item.unit,
-    [colQuantity]: item.quantity,
+    'Item Name': item.itemName,
+    Unit: item.unit,
+    Quantity: item.quantity,
   }));
 
   const worksheet = XLSX.utils.json_to_sheet(data);
 
-  // Set nice column widths for Excel
   worksheet['!cols'] = [
-    { wch: 38 }, // Item Name
-    { wch: 20 }, // Unit
-    { wch: 22 }, // Quantity
+    { wch: 36 }, // Item Name
+    { wch: 18 }, // Unit
+    { wch: 18 }, // Quantity
   ];
 
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, lang === 'ur' ? 'اسٹاک' : 'Stock');
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Stock');
 
-  // Trigger download in browser
   XLSX.writeFile(workbook, filename);
 }
 
@@ -43,13 +36,9 @@ export function exportToExcel(
  */
 export function exportToCsv(
   items: StockItem[],
-  filename = 'stock-inventory.csv',
-  lang: AppLanguage = 'ur'
+  filename = 'stock-inventory.csv'
 ): void {
-  const headers =
-    lang === 'ur'
-      ? ['اشیاء کا نام (Item Name)', 'اکائی (Unit)', 'تعداد / مقدار (Quantity)']
-      : ['Item Name', 'Unit', 'Quantity'];
+  const headers = ['Item Name', 'Unit', 'Quantity'];
 
   const rows = items.map((item) => {
     const escape = (val: string | number) => {
@@ -62,8 +51,7 @@ export function exportToCsv(
     return [escape(item.itemName), escape(item.unit), escape(item.quantity)].join(',');
   });
 
-  // Include UTF-8 BOM (\uFEFF) so Excel opens Urdu text correctly without character encoding issues!
-  const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
+  const csvContent = [headers.join(','), ...rows].join('\r\n');
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
 
@@ -78,7 +66,6 @@ export function exportToCsv(
 
 /**
  * Parses an uploaded Excel or CSV file to import stock items
- * Supports both Urdu and English column headers
  */
 export async function parseExcelOrCsvFile(
   file: File
@@ -103,7 +90,7 @@ export async function parseExcelOrCsvFile(
           return;
         }
 
-        // Detect if row 0 is header in English or Urdu
+        // Detect if row 0 is header
         const firstRow = rawRows[0] || [];
         const f0 = String(firstRow[0] || '').toLowerCase();
         const f1 = String(firstRow[1] || '').toLowerCase();
@@ -111,14 +98,10 @@ export async function parseExcelOrCsvFile(
 
         const isHeader =
           f0.includes('item') ||
-          f0.includes('اشیاء') ||
-          f0.includes('نام') ||
+          f0.includes('name') ||
           f1.includes('unit') ||
-          f1.includes('اکائی') ||
-          f1.includes('یونٹ') ||
           f2.includes('quant') ||
-          f2.includes('تعداد') ||
-          f2.includes('مقدار');
+          f2.includes('qty');
 
         const startIndex = isHeader ? 1 : 0;
         const parsedItems: { itemName: string; unit: string; quantity: number }[] = [];
@@ -128,7 +111,7 @@ export async function parseExcelOrCsvFile(
           if (!row || row.length === 0) continue;
 
           const itemName = String(row[0] ?? '').trim();
-          const unit = String(row[1] ?? 'عدد').trim();
+          const unit = String(row[1] ?? 'Pieces').trim();
           const rawQty = row[2];
           const parsedQty =
             typeof rawQty === 'number'
@@ -139,7 +122,7 @@ export async function parseExcelOrCsvFile(
           if (itemName) {
             parsedItems.push({
               itemName,
-              unit: unit || 'عدد',
+              unit: unit || 'Pieces',
               quantity,
             });
           }

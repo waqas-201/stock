@@ -1,488 +1,347 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  FileSpreadsheet,
-  Download,
-  Plus,
-  Scale,
-} from 'lucide-react';
-import { StockItem, StockUnit, AppLanguage } from './types';
+import React, { useState, useEffect } from 'react';
+import { StockItem, StockUnit, StockFilter } from './types';
 import {
   loadStoredStock,
   saveStoredStock,
+  loadLowStockThreshold,
+  saveLowStockThreshold,
   generateItemId,
-  INITIAL_STOCK_ITEMS,
 } from './lib/stockStorage';
 import {
   loadManagedUnits,
   saveManagedUnits,
-  DEFAULT_PAKISTANI_UNITS,
+  DEFAULT_UNITS,
 } from './lib/unitStorage';
 import {
   exportToExcel,
   exportToCsv,
   parseExcelOrCsvFile,
 } from './lib/excelExport';
-import { URDU_STRINGS, ENGLISH_STRINGS } from './lib/translations';
+
+// Components
 import { Navbar } from './components/Navbar';
 import { StockSummary } from './components/StockSummary';
 import { StockTable } from './components/StockTable';
 import { AddItemModal } from './components/AddItemModal';
 import { EditItemModal } from './components/EditItemModal';
 import { UnitManagementModal } from './components/UnitManagementModal';
+import { ThresholdSettingsModal } from './components/ThresholdSettingsModal';
 import { ConfirmDialog } from './components/ConfirmDialog';
+import { CheckCircle2, AlertCircle, Info, X, Plus } from 'lucide-react';
 
-const LANG_STORAGE_KEY = 'stock_mgmt_app_lang';
-
-export default function App() {
-  // Pakistani Urdu by default
-  const [lang, setLang] = useState<AppLanguage>(() => {
-    return (localStorage.getItem(LANG_STORAGE_KEY) as AppLanguage) || 'ur';
-  });
-
-  const t = lang === 'ur' ? URDU_STRINGS : ENGLISH_STRINGS;
-
-  // Stock items list
-  const [items, setItems] = useState<StockItem[]>([]);
-  // Managed units list
-  const [units, setUnits] = useState<StockUnit[]>([]);
-  const [isInitialized, setIsInitialized] = useState(false);
+export function App() {
+  // App states
+  const [items, setItems] = useState<StockItem[]>(() => loadStoredStock());
+  const [units, setUnits] = useState<StockUnit[]>(() => loadManagedUnits());
+  const [globalThreshold, setGlobalThreshold] = useState<number>(() =>
+    loadLowStockThreshold()
+  );
+  const [activeFilter, setActiveFilter] = useState<StockFilter>('all');
 
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<StockItem | null>(null);
-  const [deletingItem, setDeletingItem] = useState<StockItem | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<StockItem | null>(null);
   const [isUnitModalOpen, setIsUnitModalOpen] = useState(false);
+  const [isThresholdModalOpen, setIsThresholdModalOpen] = useState(false);
 
-  // Toast
+  // Notification Toast
   const [toast, setToast] = useState<{
-    type: 'success' | 'info' | 'error';
+    type: 'success' | 'error' | 'info';
     message: string;
   } | null>(null);
-  const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const showToast = useCallback(
-    (message: string, type: 'success' | 'info' | 'error' = 'success') => {
-      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-      setToast({ message, type });
-      toastTimeoutRef.current = setTimeout(() => {
-        setToast(null);
-      }, 4000);
-    },
-    []
-  );
-
-  // Initialize stock & units from local storage on mount
-  useEffect(() => {
-    const loadedStock = loadStoredStock();
-    const loadedUnits = loadManagedUnits();
-    setItems(loadedStock);
-    setUnits(loadedUnits);
-    setIsInitialized(true);
-  }, []);
-
-  // Update HTML document direction when language changes
-  useEffect(() => {
-    document.documentElement.dir = lang === 'ur' ? 'rtl' : 'ltr';
-    document.documentElement.lang = lang;
-    localStorage.setItem(LANG_STORAGE_KEY, lang);
-  }, [lang]);
-
-  const handleToggleLanguage = () => {
-    const nextLang: AppLanguage = lang === 'ur' ? 'en' : 'ur';
-    setLang(nextLang);
-    showToast(
-      nextLang === 'ur' ? 'زبان اردو میں تبدیل ہو گئی ہے' : 'Switched to English',
-      'info'
-    );
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type });
   };
 
-  // Stock storage updates
-  const updateItemsAndPersist = (newItems: StockItem[]) => {
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  // Persist items
+  const updateItems = (newItems: StockItem[]) => {
     setItems(newItems);
     saveStoredStock(newItems);
   };
 
-  // Units storage updates
-  const updateUnitsAndPersist = (newUnits: StockUnit[]) => {
+  // Persist units
+  const updateUnits = (newUnits: StockUnit[]) => {
     setUnits(newUnits);
     saveManagedUnits(newUnits);
   };
 
-  // Unit Management Handlers
-  const handleAddUnit = (nameUrdu: string, nameEnglish?: string) => {
-    const newUnit: StockUnit = {
-      id: 'unit_' + Date.now(),
-      nameUrdu,
-      nameEnglish,
-      isDefault: false,
-    };
-    const nextUnits = [...units, newUnit];
-    updateUnitsAndPersist(nextUnits);
-    showToast(
-      lang === 'ur'
-        ? `نئی اکائی "${nameUrdu}" شامل کر دی گئی!`
-        : `Added new unit "${nameUrdu}"!`
-    );
+  // Persist threshold
+  const handleSaveThreshold = (newThreshold: number) => {
+    setGlobalThreshold(newThreshold);
+    saveLowStockThreshold(newThreshold);
+    showToast(`Low stock alert threshold set to ≤ ${newThreshold} units`, 'success');
   };
 
-  const handleUpdateUnit = (id: string, nameUrdu: string, nameEnglish?: string) => {
-    const nextUnits = units.map((u) =>
-      u.id === id ? { ...u, nameUrdu, nameEnglish } : u
+  // Unit management actions
+  const handleAddUnit = (name: string, code?: string) => {
+    const newUnit: StockUnit = {
+      id: 'u_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      name,
+      code,
+      isDefault: false,
+    };
+    const next = [...units, newUnit];
+    updateUnits(next);
+    showToast(`Added unit "${name}"`, 'success');
+  };
+
+  const handleUpdateUnit = (id: string, name: string, code?: string) => {
+    const next = units.map((u) =>
+      u.id === id ? { ...u, name, code } : u
     );
-    updateUnitsAndPersist(nextUnits);
-    showToast(
-      lang === 'ur' ? `اکائی "${nameUrdu}" اپ ڈیٹ ہو گئی!` : `Updated unit "${nameUrdu}"!`
-    );
+    updateUnits(next);
+    showToast(`Updated unit to "${name}"`, 'success');
   };
 
   const handleDeleteUnit = (id: string) => {
-    const unitToDelete = units.find((u) => u.id === id);
-    if (!unitToDelete) return;
-    const nextUnits = units.filter((u) => u.id !== id);
-    updateUnitsAndPersist(nextUnits);
-    showToast(
-      lang === 'ur'
-        ? `اکائی "${unitToDelete.nameUrdu}" حذف کر دی گئی`
-        : `Deleted unit "${unitToDelete.nameUrdu}"`,
-      'info'
-    );
+    const target = units.find((u) => u.id === id);
+    if (!target) return;
+
+    // Check if any items use this unit
+    const usedBy = items.filter((i) => i.unit === target.name);
+    if (usedBy.length > 0) {
+      showToast(`Cannot delete "${target.name}": used by ${usedBy.length} items.`, 'error');
+      return;
+    }
+
+    const next = units.filter((u) => u.id !== id);
+    updateUnits(next);
+    showToast(`Unit "${target.name}" removed`, 'info');
   };
 
   const handleResetUnits = () => {
-    updateUnitsAndPersist(DEFAULT_PAKISTANI_UNITS);
-    showToast(
-      lang === 'ur'
-        ? 'پاکستانی تجارتی اکائیاں بحال کر دی گئیں'
-        : 'Restored default Pakistani units'
-    );
+    updateUnits(DEFAULT_UNITS);
+    showToast('Reset units to default list', 'info');
   };
 
-  // Add Item
-  const handleAddItem = (newItem: {
-    itemName: string;
-    unit: string;
-    quantity: number;
-  }) => {
-    const item: StockItem = {
+  // Stock items actions
+  const handleAddItem = (
+    itemName: string,
+    unit: string,
+    quantity: number,
+    threshold?: number
+  ) => {
+    const newItem: StockItem = {
       id: generateItemId(),
-      itemName: newItem.itemName,
-      unit: newItem.unit,
-      quantity: newItem.quantity,
+      itemName,
+      unit,
+      quantity,
+      lowStockThreshold: threshold,
       updatedAt: new Date().toISOString(),
     };
-    const nextItems = [item, ...items];
-    updateItemsAndPersist(nextItems);
-    showToast(
-      lang === 'ur'
-        ? `"${item.itemName}" اسٹاک میں کامیابی سے شامل ہو گیا!`
-        : `Added "${item.itemName}" to stock!`
-    );
+
+    const next = [newItem, ...items];
+    updateItems(next);
+    showToast(`Added "${itemName}" with ${quantity} ${unit}`, 'success');
   };
 
-  // Edit Item
-  const handleUpdateItem = (
+  const handleSaveEditItem = (
     id: string,
-    updated: { itemName: string; unit: string; quantity: number }
+    itemName: string,
+    unit: string,
+    quantity: number,
+    threshold?: number
   ) => {
-    const nextItems = items.map((item) =>
-      item.id === id
+    const next = items.map((i) =>
+      i.id === id
         ? {
-            ...item,
-            itemName: updated.itemName,
-            unit: updated.unit,
-            quantity: updated.quantity,
+            ...i,
+            itemName,
+            unit,
+            quantity,
+            lowStockThreshold: threshold,
             updatedAt: new Date().toISOString(),
           }
-        : item
+        : i
     );
-    updateItemsAndPersist(nextItems);
-    showToast(
-      lang === 'ur'
-        ? `"${updated.itemName}" میں ترمیم محفوظ ہو گئی!`
-        : `Updated "${updated.itemName}"!`
-    );
+    updateItems(next);
+    showToast(`Updated "${itemName}"`, 'success');
   };
 
-  // Quick Quantity Stepper
+  const handleDeleteItemConfirm = () => {
+    if (!itemToDelete) return;
+    const next = items.filter((i) => i.id !== itemToDelete.id);
+    updateItems(next);
+    showToast(`Removed "${itemToDelete.itemName}"`, 'info');
+    setItemToDelete(null);
+  };
+
   const handleQuickQuantityChange = (item: StockItem, delta: number) => {
     const newQty = Math.max(0, (item.quantity || 0) + delta);
-    const nextItems = items.map((i) =>
-      i.id === item.id ? { ...i, quantity: newQty } : i
+    const next = items.map((i) =>
+      i.id === item.id
+        ? {
+            ...i,
+            quantity: newQty,
+            updatedAt: new Date().toISOString(),
+          }
+        : i
     );
-    updateItemsAndPersist(nextItems);
-    showToast(
-      `${item.itemName}: ${newQty} ${item.unit} (${delta > 0 ? '+' : ''}${delta})`,
-      'info'
-    );
+    updateItems(next);
   };
 
-  // Delete Item
-  const handleConfirmDelete = () => {
-    if (!deletingItem) return;
-    const nextItems = items.filter((i) => i.id !== deletingItem.id);
-    updateItemsAndPersist(nextItems);
-    showToast(
-      lang === 'ur'
-        ? `"${deletingItem.itemName}" اسٹاک سے حذف کر دیا گیا۔`
-        : `Removed "${deletingItem.itemName}" from inventory.`,
-      'info'
-    );
-    setDeletingItem(null);
-  };
-
-  // Export to Excel (.xlsx)
+  // File export & import
   const handleExportExcel = () => {
     if (items.length === 0) {
-      showToast(
-        lang === 'ur'
-          ? 'ایکسپورٹ کے لیے کوئی آئٹم موجود نہیں ہے۔'
-          : 'No stock items to export.',
-        'error'
-      );
+      showToast('No items to export.', 'info');
       return;
     }
-    const today = new Date().toISOString().split('T')[0];
-    const filename = `stock-inventory-${today}.xlsx`;
-    exportToExcel(items, filename, lang);
-    showToast(
-      lang === 'ur'
-        ? `${items.length} اشیاء پر مشتمل ایکسل شیٹ ڈاؤنلوڈ ہو گئی!`
-        : `Exported ${items.length} items to ${filename}!`
-    );
+    exportToExcel(items, 'stock-inventory.xlsx');
+    showToast('Excel file exported successfully', 'success');
   };
 
-  // Export to CSV
   const handleExportCsv = () => {
     if (items.length === 0) {
-      showToast(
-        lang === 'ur'
-          ? 'ایکسپورٹ کے لیے کوئی آئٹم موجود نہیں ہے۔'
-          : 'No stock items to export.',
-        'error'
-      );
+      showToast('No items to export.', 'info');
       return;
     }
-    const today = new Date().toISOString().split('T')[0];
-    const filename = `stock-inventory-${today}.csv`;
-    exportToCsv(items, filename, lang);
-    showToast(
-      lang === 'ur'
-        ? `سی ایس وی فائل ڈاؤنلوڈ ہو گئی!`
-        : `Exported ${items.length} items to ${filename}!`
-    );
+    exportToCsv(items, 'stock-inventory.csv');
+    showToast('CSV file exported successfully', 'success');
   };
 
-  // Import from Excel or CSV
   const handleImportFile = async (file: File) => {
     try {
       const parsed = await parseExcelOrCsvFile(file);
       if (parsed.length === 0) {
-        showToast(
-          lang === 'ur'
-            ? 'فائل میں اشیاء کا کوئی ڈیٹا نہیں ملا۔'
-            : 'No valid stock rows found in the uploaded file.',
-          'error'
-        );
+        showToast('No valid items found in the uploaded file.', 'error');
         return;
       }
-      const newStockItems: StockItem[] = parsed.map((p) => ({
+
+      const newItems: StockItem[] = parsed.map((p) => ({
         id: generateItemId(),
         itemName: p.itemName,
-        unit: p.unit,
+        unit: p.unit || 'Pieces',
         quantity: p.quantity,
         updatedAt: new Date().toISOString(),
       }));
 
-      const combined = [...newStockItems, ...items];
-      updateItemsAndPersist(combined);
-      showToast(
-        lang === 'ur'
-          ? `فائل "${file.name}" سے ${newStockItems.length} اشیاء شامل ہو گئیں!`
-          : `Imported ${newStockItems.length} items from "${file.name}"!`,
-        'success'
-      );
+      // Combine with existing items
+      const combined = [...newItems, ...items];
+      updateItems(combined);
+      showToast(`Imported ${newItems.length} items from ${file.name}`, 'success');
     } catch (err: any) {
-      console.error('Import error:', err);
-      showToast(
-        lang === 'ur'
-          ? 'فائل پڑھنے میں غلطی ہوئی۔ برائے مہربانی درست ایکسل یا CSV فائل منتخب کریں۔'
-          : 'Failed to parse file. Please upload a valid Excel or CSV file.',
-        'error'
-      );
+      console.error('File import error:', err);
+      showToast('Failed to import file. Please check format.', 'error');
     }
   };
 
-  const handleResetSampleData = () => {
-    updateItemsAndPersist(INITIAL_STOCK_ITEMS);
-    showToast(
-      lang === 'ur'
-        ? 'نمونہ اسٹاک ڈیٹا لوڈ کر دیا گیا ہے۔'
-        : 'Loaded sample stock items.'
-    );
-  };
-
-  if (!isInitialized) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm font-bold text-slate-600">
-            {lang === 'ur' ? 'اسٹاک لوڈ ہو رہا ہے...' : 'Loading inventory...'}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div
-      dir={lang === 'ur' ? 'rtl' : 'ltr'}
-      className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans"
-    >
-      {/* Navbar with Excel export, unit management, and Urdu language toggle */}
-      <Navbar
-        itemCount={items.length}
-        lang={lang}
-        t={t}
-        onToggleLanguage={handleToggleLanguage}
-        onOpenUnitManagement={() => setIsUnitModalOpen(true)}
-        onExportExcel={handleExportExcel}
-        onExportCsv={handleExportCsv}
-        onImportFile={handleImportFile}
-        onResetSampleData={handleResetSampleData}
-      />
-
-      {/* Floating Status Toast */}
+    <div className="min-h-screen bg-slate-100/70 text-slate-900 font-sans flex flex-col antialiased selection:bg-emerald-100 selection:text-emerald-900 pb-20 sm:pb-8">
+      {/* Toast Notification - Mobile Friendly */}
       {toast && (
-        <div
-          id="status-toast"
-          className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 mt-3"
-        >
+        <div className="fixed top-3 inset-x-3 sm:inset-x-auto sm:top-5 sm:right-5 z-50 animate-in slide-in-from-top-3 duration-200 pointer-events-none">
           <div
-            className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 text-xs sm:text-sm font-bold shadow-xs transition-all ${
-              toast.type === 'error'
-                ? 'bg-rose-50 text-rose-800 border-rose-200'
-                : toast.type === 'info'
-                ? 'bg-slate-100 text-slate-800 border-slate-200'
-                : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+            className={`pointer-events-auto px-4 py-3 rounded-2xl shadow-xl border flex items-center justify-between gap-3 text-xs sm:text-sm font-semibold max-w-md mx-auto sm:mx-0 ${
+              toast.type === 'success'
+                ? 'bg-emerald-950 text-emerald-50 border-emerald-700'
+                : toast.type === 'error'
+                ? 'bg-rose-950 text-rose-50 border-rose-700'
+                : 'bg-slate-900 text-slate-50 border-slate-700'
             }`}
           >
-            <span>{toast.message}</span>
+            <div className="flex items-center gap-2.5 min-w-0">
+              {toast.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              ) : toast.type === 'error' ? (
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              ) : (
+                <Info className="w-4 h-4 text-blue-400 shrink-0" />
+              )}
+              <span className="truncate">{toast.message}</span>
+            </div>
             <button
               type="button"
               onClick={() => setToast(null)}
-              className="text-slate-400 hover:text-slate-600 cursor-pointer font-bold px-1"
+              className="min-h-[32px] min-w-[32px] flex items-center justify-center text-white/60 hover:text-white cursor-pointer -mr-1"
+              aria-label="Dismiss notification"
             >
-              ✕
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
       )}
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* Quick Action Bar for Export, Units & Add */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs">
-          <div>
-            <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
-              {t.appName} - {t.threeColNote.split('|')[0]}
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {lang === 'ur'
-                ? 'کسی لاگ ان کی ضرورت نہیں، تمام ڈیٹا آپ کے براؤزر میں محفوظ رہتا ہے اور فوری ایکسل میں ڈاؤنلوڈ کیا جا سکتا ہے۔'
-                : 'Zero login required. Everything lives securely inside your app with instant Excel export.'}
-            </p>
-          </div>
+      {/* Main Navbar */}
+      <Navbar
+        itemCount={items.length}
+        globalThreshold={globalThreshold}
+        onExportExcel={handleExportExcel}
+        onExportCsv={handleExportCsv}
+        onImportFile={handleImportFile}
+        onOpenUnitModal={() => setIsUnitModalOpen(true)}
+        onOpenThresholdModal={() => setIsThresholdModalOpen(true)}
+        onAddNewItem={() => setIsAddModalOpen(true)}
+      />
 
-          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-            {/* Unit Management Trigger */}
-            <button
-              id="btn-quick-manage-units"
-              type="button"
-              onClick={() => setIsUnitModalOpen(true)}
-              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100/90 border border-emerald-200 rounded-xl transition-colors cursor-pointer"
-            >
-              <Scale className="w-3.5 h-3.5 text-emerald-700" />
-              <span>{t.manageUnits}</span>
-            </button>
+      {/* Main Container */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-7 space-y-4 sm:space-y-6">
+        {/* KPI / Stock Metrics (Tap to filter) */}
+        <StockSummary
+          items={items}
+          globalThreshold={globalThreshold}
+          activeFilter={activeFilter}
+          onSelectFilter={setActiveFilter}
+          onOpenThresholdModal={() => setIsThresholdModalOpen(true)}
+        />
 
-            {/* Export Excel Button */}
-            <button
-              id="btn-quick-export-excel"
-              type="button"
-              onClick={handleExportExcel}
-              disabled={items.length === 0}
-              className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold text-emerald-900 bg-emerald-100 hover:bg-emerald-200/90 border border-emerald-300 rounded-xl transition-colors cursor-pointer disabled:opacity-40"
-            >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-              <span>{t.exportExcel}</span>
-              <Download className="w-3.5 h-3.5 text-emerald-700" />
-            </button>
-
-            {/* Add Item Button */}
-            <button
-              id="btn-quick-add-item"
-              type="button"
-              onClick={() => setIsAddModalOpen(true)}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl shadow-xs transition-colors cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>{t.addItem}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Top Summary Bar */}
-        <StockSummary items={items} t={t} />
-
-        {/* Primary 3-Column Stock Management Table */}
+        {/* Stock Inventory List & Table */}
         <StockTable
           items={items}
-          lang={lang}
-          t={t}
+          globalThreshold={globalThreshold}
+          activeFilter={activeFilter}
+          onFilterChange={setActiveFilter}
           onAddItem={() => setIsAddModalOpen(true)}
           onEditItem={(item) => setEditingItem(item)}
-          onDeleteItem={(item) => setDeletingItem(item)}
+          onDeleteItem={(item) => setItemToDelete(item)}
           onQuickQuantityChange={handleQuickQuantityChange}
           onExportExcel={handleExportExcel}
+          onOpenThresholdModal={() => setIsThresholdModalOpen(true)}
         />
       </main>
 
-      {/* Add Item Modal */}
+      {/* Mobile Floating Action Button (FAB) for 1-Tap Thumb Addition */}
+      <button
+        id="btn-mobile-fab-add"
+        type="button"
+        onClick={() => setIsAddModalOpen(true)}
+        className="sm:hidden fixed bottom-5 right-4 z-40 min-h-[52px] px-4 py-3 rounded-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold shadow-xl shadow-emerald-950/30 flex items-center justify-center gap-2 transition-transform active:scale-95 cursor-pointer border border-emerald-500"
+        aria-label="Add new item"
+      >
+        <Plus className="w-5 h-5" />
+        <span className="text-sm font-bold pr-1">Add Item</span>
+      </button>
+
+      {/* Modals */}
       <AddItemModal
         isOpen={isAddModalOpen}
         units={units}
-        lang={lang}
-        t={t}
+        defaultThreshold={globalThreshold}
         onClose={() => setIsAddModalOpen(false)}
-        onOpenUnitManagement={() => {
-          setIsAddModalOpen(false);
-          setIsUnitModalOpen(true);
-        }}
         onAdd={handleAddItem}
+        onOpenUnitModal={() => setIsUnitModalOpen(true)}
       />
 
-      {/* Edit Item Modal */}
       <EditItemModal
-        isOpen={Boolean(editingItem)}
+        isOpen={!!editingItem}
         item={editingItem}
         units={units}
-        lang={lang}
-        t={t}
+        defaultThreshold={globalThreshold}
         onClose={() => setEditingItem(null)}
-        onOpenUnitManagement={() => {
-          setEditingItem(null);
-          setIsUnitModalOpen(true);
-        }}
-        onSave={handleUpdateItem}
+        onSave={handleSaveEditItem}
+        onOpenUnitModal={() => setIsUnitModalOpen(true)}
       />
 
-      {/* Unit Management Modal */}
       <UnitManagementModal
         isOpen={isUnitModalOpen}
         units={units}
-        lang={lang}
-        t={t}
         onClose={() => setIsUnitModalOpen(false)}
         onAddUnit={handleAddUnit}
         onUpdateUnit={handleUpdateUnit}
@@ -490,25 +349,25 @@ export default function App() {
         onResetUnits={handleResetUnits}
       />
 
-      {/* Confirm Delete Item Dialog */}
+      <ThresholdSettingsModal
+        isOpen={isThresholdModalOpen}
+        currentThreshold={globalThreshold}
+        onClose={() => setIsThresholdModalOpen(false)}
+        onSaveThreshold={handleSaveThreshold}
+      />
+
       <ConfirmDialog
-        isOpen={Boolean(deletingItem)}
-        title={t.deleteConfirmTitle}
-        message={
-          deletingItem
-            ? t.deleteConfirmMsg(
-                deletingItem.itemName,
-                deletingItem.quantity,
-                deletingItem.unit
-              )
-            : ''
-        }
-        confirmLabel={t.confirmDelete}
-        cancelLabel={t.cancel}
-        confirmVariant="danger"
-        onConfirm={handleConfirmDelete}
-        onCancel={() => setDeletingItem(null)}
+        isOpen={!!itemToDelete}
+        title="Delete Stock Item"
+        message={`Are you sure you want to remove "${itemToDelete?.itemName}" from your inventory? This action cannot be undone.`}
+        confirmLabel="Delete Item"
+        cancelLabel="Keep Item"
+        isDestructive={true}
+        onConfirm={handleDeleteItemConfirm}
+        onCancel={() => setItemToDelete(null)}
       />
     </div>
   );
 }
+
+export default App;
