@@ -1,9 +1,10 @@
 import * as XLSX from 'xlsx';
-import { StockItem } from '../types';
+import { StockItem, CompanyProfile } from '../types';
 
 /**
   * Exports current stock items to an Excel (.xlsx) file with:
   * - Item Name
+  * - Company
   * - Unit
   * - Current Quantity
   * - Low Stock Alert Threshold
@@ -12,21 +13,31 @@ import { StockItem } from '../types';
   */
 export function exportToExcel(
   items: StockItem[],
-  filename = 'stock-inventory.xlsx'
+  filename = 'stock-inventory.xlsx',
+  companies?: CompanyProfile[]
 ): void {
-  const data = items.map((item) => ({
-    'Item Name': item.itemName,
-    Unit: item.unit,
-    'Current Stock': item.quantity,
-    'Low Stock Alert (Min)': item.lowStockThreshold ?? 5,
-    'Production Date': item.productionDate || '',
-    Notes: item.notes || '',
-  }));
+  const companyMap = new Map((companies || []).map((c) => [c.id, c.name]));
+  const data = items.map((item) => {
+    const compName =
+      (item.companyId ? companyMap.get(item.companyId) : undefined) ||
+      item.companyName ||
+      'General';
+    return {
+      'Item Name': item.itemName,
+      Company: compName,
+      Unit: item.unit,
+      'Current Stock': item.quantity,
+      'Low Stock Alert (Min)': item.lowStockThreshold ?? 5,
+      'Production Date': item.productionDate || '',
+      Notes: item.notes || '',
+    };
+  });
 
   const worksheet = XLSX.utils.json_to_sheet(data);
 
   worksheet['!cols'] = [
     { wch: 36 }, // Item Name
+    { wch: 24 }, // Company
     { wch: 18 }, // Unit
     { wch: 16 }, // Current Stock
     { wch: 22 }, // Low Stock Alert
@@ -45,10 +56,13 @@ export function exportToExcel(
   */
 export function exportToCsv(
   items: StockItem[],
-  filename = 'stock-inventory.csv'
+  filename = 'stock-inventory.csv',
+  companies?: CompanyProfile[]
 ): void {
+  const companyMap = new Map((companies || []).map((c) => [c.id, c.name]));
   const headers = [
     'Item Name',
+    'Company',
     'Unit',
     'Current Stock',
     'Low Stock Alert',
@@ -64,8 +78,13 @@ export function exportToCsv(
       }
       return s;
     };
+    const compName =
+      (item.companyId ? companyMap.get(item.companyId) : undefined) ||
+      item.companyName ||
+      'General';
     return [
       escape(item.itemName),
+      escape(compName),
       escape(item.unit),
       escape(item.quantity),
       escape(item.lowStockThreshold ?? 5),

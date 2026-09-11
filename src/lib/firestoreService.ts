@@ -8,7 +8,7 @@ import {
   limit,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
-import { StockItem, StockUnit, UserSetting, OperatorProfile } from '../types';
+import { StockItem, StockUnit, UserSetting, OperatorProfile, CompanyProfile } from '../types';
 import { GlobalAuditRecord } from './stockStorage';
 
 // ==========================================
@@ -40,6 +40,8 @@ export function subscribeStockItems(
             lowStockThreshold: Number(data.lowStockThreshold) ?? 5,
             productionDate: data.productionDate || undefined,
             notes: data.notes || undefined,
+            companyId: data.companyId || undefined,
+            companyName: data.companyName || undefined,
             createdAt: data.createdAt,
             updatedAt: data.updatedAt,
             userId: data.userId || undefined,
@@ -85,6 +87,8 @@ export async function saveStockItemToFirestore(
       lowStockThreshold: Number(item.lowStockThreshold) ?? 5,
       productionDate: item.productionDate || null,
       notes: item.notes || null,
+      companyId: item.companyId || null,
+      companyName: item.companyName || null,
       createdAt: item.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       userId: userId || item.userId || null,
@@ -137,6 +141,7 @@ export function subscribeStockUnits(
             name: data.name,
             code: data.code || undefined,
             isDefault: !!data.isDefault,
+            companyId: data.companyId || undefined,
             userId: data.userId || undefined,
           });
         });
@@ -166,6 +171,7 @@ export async function saveStockUnitToFirestore(
       name: unit.name,
       code: unit.code || null,
       isDefault: !!unit.isDefault,
+      companyId: unit.companyId || null,
       userId: userId || unit.userId || null,
     };
     await setDoc(docRef, payload, { merge: true });
@@ -223,6 +229,8 @@ export function subscribeAuditLogs(
             userEmail: data.userEmail || undefined,
             userPhotoURL: data.userPhotoURL || undefined,
             userId: data.userId || undefined,
+            companyId: data.companyId || undefined,
+            companyName: data.companyName || undefined,
           });
         });
         // Sort descending by timestamp in memory to avoid index requirements
@@ -263,6 +271,8 @@ export async function saveAuditLogToFirestore(
       performedBy: log.performedBy || 'Store Operator',
       userEmail: log.userEmail || null,
       userPhotoURL: log.userPhotoURL || null,
+      companyId: log.companyId || null,
+      companyName: log.companyName || null,
       userId: userId || log.userId || null,
     };
     await setDoc(docRef, payload);
@@ -292,6 +302,7 @@ export function subscribeUserSettings(
             userId: data.userId,
             confirmOnDelete: !!data.confirmOnDelete,
             operatorName: data.operatorName || undefined,
+            activeCompanyId: data.activeCompanyId || undefined,
             updatedAt: data.updatedAt,
           });
         } else {
@@ -313,7 +324,8 @@ export function subscribeUserSettings(
 export async function saveUserSettingsToFirestore(
   userId: string,
   confirmOnDelete: boolean,
-  operatorName?: string
+  operatorName?: string,
+  activeCompanyId?: string
 ): Promise<void> {
   const docPath = `user_settings/${userId}`;
   try {
@@ -326,9 +338,103 @@ export async function saveUserSettingsToFirestore(
     if (operatorName) {
       payload.operatorName = operatorName;
     }
+    if (activeCompanyId) {
+      payload.activeCompanyId = activeCompanyId;
+    }
     await setDoc(docRef, payload, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, docPath);
+  }
+}
+
+// ==========================================
+// 5. Company Profiles Services (Multi-Company)
+// ==========================================
+
+export function subscribeCompanies(
+  onCompanies: (companies: CompanyProfile[]) => void,
+  onError?: (error: unknown) => void
+): () => void {
+  const collectionPath = 'companies';
+  try {
+    const q = query(
+      collection(db, collectionPath),
+      limit(50)
+    );
+
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const companies: CompanyProfile[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          companies.push({
+            id: data.id,
+            name: data.name,
+            code: data.code || undefined,
+            tagline: data.tagline || undefined,
+            currency: data.currency || '$',
+            taxId: data.taxId || undefined,
+            email: data.email || undefined,
+            phone: data.phone || undefined,
+            address: data.address || undefined,
+            color: data.color || 'emerald',
+            isDefault: !!data.isDefault,
+            createdAt: data.createdAt,
+            updatedAt: data.updatedAt,
+            userId: data.userId || undefined,
+          });
+        });
+        onCompanies(companies);
+      },
+      (error) => {
+        console.error('Snapshot error on companies:', error);
+        onError?.(error);
+        handleFirestoreError(error, OperationType.GET, collectionPath);
+      }
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, collectionPath);
+    return () => {};
+  }
+}
+
+export async function saveCompanyToFirestore(
+  company: CompanyProfile,
+  userId?: string
+): Promise<void> {
+  const docPath = `companies/${company.id}`;
+  try {
+    const docRef = doc(db, 'companies', company.id);
+    const payload = {
+      id: company.id,
+      name: company.name,
+      code: company.code || null,
+      tagline: company.tagline || null,
+      currency: company.currency || '$',
+      taxId: company.taxId || null,
+      email: company.email || null,
+      phone: company.phone || null,
+      address: company.address || null,
+      color: company.color || 'emerald',
+      isDefault: !!company.isDefault,
+      createdAt: company.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      userId: userId || company.userId || null,
+    };
+    await setDoc(docRef, payload, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, docPath);
+  }
+}
+
+export async function deleteCompanyFromFirestore(companyId: string): Promise<void> {
+  const docPath = `companies/${companyId}`;
+  try {
+    const docRef = doc(db, 'companies', companyId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, docPath);
   }
 }
 
@@ -341,10 +447,17 @@ export async function migrateLocalDataToCloud(
   localUnits: StockUnit[],
   localLogs: GlobalAuditRecord[],
   operator: OperatorProfile,
-  userId?: string
+  userId?: string,
+  localCompanies?: CompanyProfile[]
 ): Promise<{ migratedItems: number; migratedLogs: number }> {
   let migratedItems = 0;
   let migratedLogs = 0;
+
+  if (localCompanies && localCompanies.length > 0) {
+    for (const company of localCompanies) {
+      await saveCompanyToFirestore(company, userId);
+    }
+  }
 
   for (const item of localItems) {
     await saveStockItemToFirestore(item, operator, userId);

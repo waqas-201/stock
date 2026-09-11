@@ -18,11 +18,14 @@ import {
   Eye,
   History,
   User,
+  Building2,
 } from 'lucide-react';
-import { StockItem, StockFilter, SortField, SortOrder } from '../types';
+import { StockItem, StockFilter, SortField, SortOrder, CompanyProfile } from '../types';
 
 interface StockTableProps {
   items: StockItem[];
+  companies?: CompanyProfile[];
+  activeCompanyId?: string;
   activeFilter: StockFilter;
   confirmOnDelete: boolean;
   onToggleConfirmOnDelete: () => void;
@@ -34,10 +37,13 @@ interface StockTableProps {
   onExportExcel: () => void;
   onViewItemDetails: (item: StockItem) => void;
   onOpenAuditTrail: () => void;
+  onOpenCompanyModal?: () => void;
 }
 
 export const StockTable: React.FC<StockTableProps> = ({
-  items,
+  items = [],
+  companies = [],
+  activeCompanyId = 'all',
   activeFilter,
   confirmOnDelete,
   onToggleConfirmOnDelete,
@@ -48,6 +54,7 @@ export const StockTable: React.FC<StockTableProps> = ({
   onQuickQuantityChange,
   onViewItemDetails,
   onOpenAuditTrail,
+  onOpenCompanyModal,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('name');
@@ -90,7 +97,8 @@ export const StockTable: React.FC<StockTableProps> = ({
   };
 
   // Filter items
-  const filteredItems = items.filter((item) => {
+  const safeItems = Array.isArray(items) ? items : [];
+  const filteredItems = safeItems.filter((item) => {
     const query = searchQuery.toLowerCase().trim();
     if (query) {
       const matchName = item.itemName.toLowerCase().includes(query);
@@ -140,10 +148,10 @@ export const StockTable: React.FC<StockTableProps> = ({
   };
 
   // Count items by category for filter tabs
-  const countAll = items.length;
-  const countInStock = items.filter((i) => isItemInStock(i)).length;
-  const countLowStock = items.filter((i) => isItemLowStock(i)).length;
-  const countOutOfStock = items.filter((i) => (i.quantity || 0) <= 0).length;
+  const countAll = safeItems.length;
+  const countInStock = safeItems.filter((i) => isItemInStock(i)).length;
+  const countLowStock = safeItems.filter((i) => isItemLowStock(i)).length;
+  const countOutOfStock = safeItems.filter((i) => (i.quantity || 0) <= 0).length;
 
   return (
     <div
@@ -417,6 +425,22 @@ export const StockTable: React.FC<StockTableProps> = ({
 
                   {/* Metadata Chips: Unit, Alert Level & Production Date */}
                   <div className="mt-2 flex items-center gap-1.5 flex-wrap text-xs">
+                    {/* Company Profile Chip */}
+                    {companies.length > 0 && (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200"
+                        title={`Company: ${companies.find((c) => c.id === item.companyId)?.name || companies.find((c) => c.isDefault)?.name || 'Primary Company'}`}
+                      >
+                        <Building2 className="w-3 h-3 text-slate-500 shrink-0" />
+                        <span className="truncate max-w-[120px]">
+                          {companies.find((c) => c.id === item.companyId)?.code ||
+                            companies.find((c) => c.id === item.companyId)?.name ||
+                            companies.find((c) => c.isDefault)?.code ||
+                            'Primary'}
+                        </span>
+                      </span>
+                    )}
+
                     <span className="inline-block px-2 py-0.5 bg-slate-100 rounded-md font-semibold text-slate-700">
                       Unit: {item.unit}
                     </span>
@@ -676,12 +700,24 @@ export const StockTable: React.FC<StockTableProps> = ({
                           )}
                         </div>
 
-                        {/* Notes preview under item name */}
-                        {item.notes && (
-                          <p className="text-xs text-slate-500 mt-0.5 line-clamp-1 italic">
-                            {item.notes}
-                          </p>
-                        )}
+                        {/* Company & Notes under item name */}
+                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                          {companies.length > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 font-medium">
+                              <Building2 className="w-3 h-3 text-slate-400 shrink-0" />
+                              <span>
+                                {companies.find((c) => c.id === item.companyId)?.name ||
+                                  companies.find((c) => c.isDefault)?.name ||
+                                  'Primary Company'}
+                              </span>
+                            </span>
+                          )}
+                          {item.notes && (
+                            <p className="text-xs text-slate-400 italic line-clamp-1">
+                              {companies.length > 0 ? '• ' : ''}{item.notes}
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </td>
 

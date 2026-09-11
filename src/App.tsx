@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { StockItem, StockUnit, StockFilter, OperatorProfile } from './types';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { StockItem, StockUnit, StockFilter, OperatorProfile, CompanyProfile } from './types';
 import {
   loadStoredStock,
   saveStoredStock,
@@ -19,6 +19,12 @@ import {
   saveManagedUnits,
   DEFAULT_UNITS,
 } from './lib/unitStorage';
+import {
+  loadStoredCompanies,
+  saveStoredCompanies,
+  loadActiveCompanyId,
+  saveActiveCompanyId,
+} from './lib/companyStorage';
 import {
   exportToExcel,
   exportToCsv,
@@ -44,6 +50,9 @@ import {
   saveAuditLogToFirestore,
   subscribeUserSettings,
   saveUserSettingsToFirestore,
+  subscribeCompanies,
+  saveCompanyToFirestore,
+  deleteCompanyFromFirestore,
   migrateLocalDataToCloud,
 } from './lib/firestoreService';
 
@@ -57,6 +66,7 @@ import { ItemDetailsModal } from './components/ItemDetailsModal';
 import { AuditTrailModal } from './components/AuditTrailModal';
 import { UnitManagementModal } from './components/UnitManagementModal';
 import { OperatorModal } from './components/OperatorModal';
+import { CompanyProfileModal } from './components/CompanyProfileModal';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { UnauthorizedDomainModal } from './components/UnauthorizedDomainModal';
 import {
@@ -74,6 +84,7 @@ import {
   UserCheck,
   ShieldCheck,
   Users,
+  Building2,
 } from 'lucide-react';
 
 export function App() {
@@ -86,6 +97,8 @@ export function App() {
   // App states
   const [items, setItems] = useState<StockItem[]>(() => loadStoredStock());
   const [units, setUnits] = useState<StockUnit[]>(() => loadManagedUnits());
+  const [companies, setCompanies] = useState<CompanyProfile[]>(() => loadStoredCompanies());
+  const [activeCompanyId, setActiveCompanyId] = useState<string>(() => loadActiveCompanyId());
   const [activeFilter, setActiveFilter] = useState<StockFilter>('all');
   const [globalLogs, setGlobalLogs] = useState<GlobalAuditRecord[]>(() =>
     loadGlobalAuditLog()
@@ -96,6 +109,7 @@ export function App() {
     loadOperatorProfile()
   );
   const [isOperatorModalOpen, setIsOperatorModalOpen] = useState(false);
+  const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
 
   // User choice: whether to show confirmation dialog before deleting items
   const [confirmOnDelete, setConfirmOnDelete] = useState<boolean>(() =>
@@ -177,12 +191,14 @@ export function App() {
             try {
               const localUnits = loadManagedUnits();
               const localLogs = loadGlobalAuditLog();
+              const localCompanies = loadStoredCompanies();
               const { migratedItems } = await migrateLocalDataToCloud(
                 localItems,
                 localUnits,
                 localLogs,
                 operator,
-                currentUser.uid
+                currentUser.uid,
+                localCompanies
               );
               if (migratedItems > 0) {
                 showToast(
@@ -244,6 +260,86 @@ export function App() {
     });
     return () => unsubscribe();
   }, [currentUser]);
+
+  // Real-time Firestore synchronizer for companies
+  useEffect(() => {
+    if (!currentUser) return;
+    const unsubscribe = subscribeCompanies((firestoreCompanies) => {
+      if (firestoreCompanies.length > 0) {
+        setCompanies(firestoreCompanies);
+        saveStoredCompanies(firestoreCompanies);
+      }
+    });
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  // Company management handlers
+  const handleSelectCompany = (companyId: string) => {
+    setActiveCompanyId(companyId);
+    saveActiveCompanyId(companyId);
+    const selected = companies.find((c) => c.id === companyId);
+    showToast(
+      companyId === 'all'
+        ? 'Viewing inventory for All Companies'
+        : `Switched to ${selected?.name || 'Company'}`,
+      'info'
+    );
+  };
+
+  const handleSaveCompany = (company: CompanyProfile) => {
+    const exists = companies.some((c) => c.id === company.id);
+    let updated: CompanyProfile[];
+    if (exists) {
+      updated = companies.map((c) => (c.id === company.id ? company : c));
+      showToast(`Updated company "${company.name}"`, 'success');
+    } else {
+      updated = [...companies, company];
+      showToast(`Added company "${company.name}"`, 'success');
+    }
+    setCompanies(updated);
+    saveStoredCompanies(updated);
+    if (currentUser) {
+      saveCompanyToFirestore(company, currentUser.uid).catch(console.error);
+    }
+  };
+
+  const handleDeleteCompany = (companyId: string) => {
+    const target = companies.find((c) => c.id === companyId);
+    if (!target) return;
+
+    // Check if any items are assigned to this company
+    const usedBy = items.filter((i) => i.companyId === companyId);
+    if (usedBy.length > 0) {
+      showToast(`Cannot delete "${target.name}": contains ${usedBy.length} inventory items.`, 'error');
+      return;
+    }
+
+    const updated = companies.filter((c) => c.id !== companyId);
+    setCompanies(updated);
+    saveStoredCompanies(updated);
+    if (activeCompanyId === companyId) {
+      setActiveCompanyId('all');
+      saveActiveCompanyId('all');
+    }
+    if (currentUser) {
+      deleteCompanyFromFirestore(companyId).catch(console.error);
+    }
+    showToast(`Removed company "${target.name}"`, 'info');
+  };
+
+  const handleSetDefaultCompany = (companyId: string) => {
+    const updated = companies.map((c) => ({
+      ...c,
+      isDefault: c.id === companyId,
+    }));
+    setCompanies(updated);
+    saveStoredCompanies(updated);
+    if (currentUser) {
+      updated.forEach((c) => saveCompanyToFirestore(c, currentUser.uid).catch(console.error));
+    }
+    const target = updated.find((c) => c.id === companyId);
+    showToast(`Set "${target?.name}" as default company`, 'success');
+  };
 
   // Persist items locally and to Cloud DB
   const updateItems = (newItems: StockItem[]) => {
@@ -407,26 +503,55 @@ export function App() {
     showToast('Reset units to default list', 'info');
   };
 
-  // Stock items actions with production date, notes, and complete audit trail
+  // Filtered items based on active company profile selection
+  const filteredItemsByCompany = useMemo(() => {
+    const safeItems = Array.isArray(items) ? items : [];
+    if (activeCompanyId === 'all') {
+      return safeItems;
+    }
+    return safeItems.filter((item) => {
+      if (item.companyId) {
+        return item.companyId === activeCompanyId;
+      }
+      // If legacy item has no companyId, associate it with the default company
+      const safeCompanies = Array.isArray(companies) ? companies : [];
+      const defComp = safeCompanies.find((c) => c.isDefault) || safeCompanies[0];
+      return defComp?.id === activeCompanyId;
+    });
+  }, [items, activeCompanyId, companies]);
+
+  // Stock items actions with company, production date, notes, and complete audit trail
   const handleAddItem = (
     itemName: string,
     unit: string,
     quantity: number,
     lowStockThreshold: number,
     productionDate?: string,
-    notes?: string
+    notes?: string,
+    companyId?: string
   ) => {
+    const chosenCompanyId =
+      companyId ||
+      (activeCompanyId !== 'all'
+        ? activeCompanyId
+        : companies.find((c) => c.isDefault)?.id || companies[0]?.id);
+    const targetComp = companies.find((c) => c.id === chosenCompanyId);
+
     const now = new Date().toISOString();
     const auditEntry = createAuditEntry(
       'created',
-      'Item added to inventory',
+      `Item added${targetComp ? ` (${targetComp.name})` : ''}`,
       `Initial stock: ${quantity} ${unit}, Alert threshold: ≤ ${lowStockThreshold}${
+        targetComp ? `, Company: ${targetComp.name}` : ''
+      }${
         productionDate ? `, Production Date: ${productionDate}` : ''
       }${notes ? `, Notes: ${notes}` : ''}`,
       undefined,
       quantity,
       operator.name,
-      operator.email
+      operator.email,
+      targetComp?.id,
+      targetComp?.name
     );
 
     const newItem: StockItem = {
@@ -437,6 +562,7 @@ export function App() {
       lowStockThreshold,
       productionDate,
       notes,
+      companyId: targetComp?.id,
       createdAt: now,
       updatedAt: now,
       userId: currentUser?.uid,
@@ -458,6 +584,8 @@ export function App() {
       unit: newItem.unit,
       performedBy: operator.name,
       userEmail: operator.email,
+      companyId: targetComp?.id,
+      companyName: targetComp?.name,
     });
     setGlobalLogs((prev) => [globalEntry, ...prev]);
 
@@ -468,7 +596,7 @@ export function App() {
     }
 
     showToast(
-      `Added "${itemName}" (Stock: ${quantity} ${unit}, Alert ≤ ${lowStockThreshold}) by ${operator.name}`,
+      `Added "${itemName}"${targetComp ? ` for ${targetComp.name}` : ''} by ${operator.name}`,
       'success'
     );
   };
@@ -480,10 +608,15 @@ export function App() {
     quantity: number,
     lowStockThreshold: number,
     productionDate?: string,
-    notes?: string
+    notes?: string,
+    companyId?: string
   ) => {
     const current = items.find((i) => i.id === id);
     if (!current) return;
+
+    const chosenCompanyId = companyId || current.companyId;
+    const targetComp = companies.find((c) => c.id === chosenCompanyId);
+    const prevComp = companies.find((c) => c.id === current.companyId);
 
     const changes: string[] = [];
     if (current.itemName !== itemName) {
@@ -498,6 +631,11 @@ export function App() {
     if (current.lowStockThreshold !== lowStockThreshold) {
       changes.push(
         `Alert limit: ≤${current.lowStockThreshold ?? 5} → ≤${lowStockThreshold}`
+      );
+    }
+    if (current.companyId !== chosenCompanyId) {
+      changes.push(
+        `Company: "${prevComp?.name || 'None'}" → "${targetComp?.name || 'None'}"`
       );
     }
     if (current.productionDate !== productionDate) {
@@ -518,7 +656,9 @@ export function App() {
       current.quantity,
       quantity,
       operator.name,
-      operator.email
+      operator.email,
+      targetComp?.id,
+      targetComp?.name
     );
 
     const updatedTrail = [auditEntry, ...(current.auditTrail || [])];
@@ -531,6 +671,7 @@ export function App() {
       lowStockThreshold,
       productionDate,
       notes,
+      companyId: targetComp?.id,
       updatedAt: new Date().toISOString(),
       userId: currentUser?.uid || current.userId,
       lastModifiedByName: operator.name,
@@ -549,6 +690,8 @@ export function App() {
       unit,
       performedBy: operator.name,
       userEmail: operator.email,
+      companyId: targetComp?.id,
+      companyName: targetComp?.name,
     });
     setGlobalLogs((prev) => [globalEntry, ...prev]);
 
@@ -581,13 +724,15 @@ export function App() {
       deleteStockItemFromFirestore(item.id).catch(console.error);
     }
 
+    const itemComp = companies.find((c) => c.id === item.companyId);
+
     // Log deletion in global audit trail so it's always traceable
     const deleteEntry = appendGlobalAuditLog({
       action: 'deleted',
       summary: `Removed item "${item.itemName}" from inventory`,
       details: `Had ${item.quantity} ${item.unit} when deleted (Alert limit was ≤ ${
         item.lowStockThreshold ?? 5
-      })`,
+      })${itemComp ? `, Company: ${itemComp.name}` : ''}`,
       previousQuantity: item.quantity,
       newQuantity: 0,
       delta: -item.quantity,
@@ -596,6 +741,8 @@ export function App() {
       unit: item.unit,
       performedBy: operator.name,
       userEmail: operator.email,
+      companyId: itemComp?.id,
+      companyName: itemComp?.name,
     });
     setGlobalLogs((prev) => [deleteEntry, ...prev]);
 
@@ -635,6 +782,8 @@ export function App() {
           unit: item.unit,
           performedBy: operator.name,
           userEmail: operator.email,
+          companyId: itemComp?.id,
+          companyName: itemComp?.name,
         });
         setGlobalLogs((prev) => [restoreEntry, ...prev]);
 
@@ -679,6 +828,8 @@ export function App() {
     const newQty = Math.max(0, (item.quantity || 0) + delta);
     if (newQty === item.quantity) return;
 
+    const itemComp = companies.find((c) => c.id === item.companyId);
+
     const auditEntry = createAuditEntry(
       'quantity_changed',
       delta > 0
@@ -688,7 +839,9 @@ export function App() {
       item.quantity,
       newQty,
       operator.name,
-      operator.email
+      operator.email,
+      itemComp?.id,
+      itemComp?.name
     );
 
     const updatedTrail = [auditEntry, ...(item.auditTrail || [])];
@@ -714,6 +867,8 @@ export function App() {
       unit: item.unit,
       performedBy: operator.name,
       userEmail: operator.email,
+      companyId: itemComp?.id,
+      companyName: itemComp?.name,
     });
     setGlobalLogs((prev) => [globalEntry, ...prev]);
 
@@ -729,23 +884,31 @@ export function App() {
     }
   };
 
-  // File export & import
+  // File export & import with Company Context
   const handleExportExcel = () => {
-    if (items.length === 0) {
-      showToast('No items to export.', 'info');
+    if (filteredItemsByCompany.length === 0) {
+      showToast('No items to export for this company view.', 'info');
       return;
     }
-    exportToExcel(items, 'stock-inventory.xlsx');
-    showToast('Excel file exported successfully', 'success');
+    const filename =
+      activeCompanyId === 'all'
+        ? 'stock-inventory-all-companies.xlsx'
+        : `${companies.find((c) => c.id === activeCompanyId)?.code.toLowerCase() || 'company'}-stock.xlsx`;
+    exportToExcel(filteredItemsByCompany, filename, companies);
+    showToast('Excel file exported with company details', 'success');
   };
 
   const handleExportCsv = () => {
-    if (items.length === 0) {
-      showToast('No items to export.', 'info');
+    if (filteredItemsByCompany.length === 0) {
+      showToast('No items to export for this company view.', 'info');
       return;
     }
-    exportToCsv(items, 'stock-inventory.csv');
-    showToast('CSV file exported successfully', 'success');
+    const filename =
+      activeCompanyId === 'all'
+        ? 'stock-inventory-all-companies.csv'
+        : `${companies.find((c) => c.id === activeCompanyId)?.code.toLowerCase() || 'company'}-stock.csv`;
+    exportToCsv(filteredItemsByCompany, filename, companies);
+    showToast('CSV file exported with company details', 'success');
   };
 
   const handleImportFile = async (file: File) => {
@@ -756,17 +919,26 @@ export function App() {
         return;
       }
 
+      const targetCompany =
+        activeCompanyId !== 'all'
+          ? companies.find((c) => c.id === activeCompanyId)
+          : companies.find((c) => c.isDefault) || companies[0];
+
       const now = new Date().toISOString();
       const newItems: StockItem[] = parsed.map((p) => {
         const id = generateItemId();
         const auditEntry = createAuditEntry(
           'created',
           'Item imported from file',
-          `Imported from ${file.name} with quantity ${p.quantity} ${p.unit}`,
+          `Imported from ${file.name} with quantity ${p.quantity} ${p.unit}${
+            targetCompany ? ` (${targetCompany.name})` : ''
+          }`,
           undefined,
           p.quantity,
           operator.name,
-          operator.email
+          operator.email,
+          targetCompany?.id,
+          targetCompany?.name
         );
 
         return {
@@ -777,6 +949,7 @@ export function App() {
           lowStockThreshold: p.lowStockThreshold ?? 5,
           productionDate: p.productionDate,
           notes: p.notes,
+          companyId: targetCompany?.id,
           createdAt: now,
           updatedAt: now,
           userId: currentUser?.uid,
@@ -885,7 +1058,8 @@ export function App() {
 
       {/* Main Navbar with Delete Confirmation Choice, Audit Trail, and Google Sign-in */}
       <Navbar
-        itemCount={items.length}
+        items={items}
+        itemCount={filteredItemsByCompany.length}
         confirmOnDelete={confirmOnDelete}
         onToggleConfirmOnDelete={handleToggleConfirmOnDelete}
         onExportExcel={handleExportExcel}
@@ -900,6 +1074,10 @@ export function App() {
         isAuthLoading={isAuthLoading}
         onSignInWithGoogle={handleSignInWithGoogle}
         onSignOut={handleSignOut}
+        companies={companies}
+        activeCompanyId={activeCompanyId}
+        onSelectCompany={handleSelectCompany}
+        onOpenCompanyModal={() => setIsCompanyModalOpen(true)}
       />
 
       {/* Cloud DB & Shared Access Status Banner */}
@@ -1000,14 +1178,14 @@ export function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-7 space-y-4 sm:space-y-6">
         {/* KPI / Stock Metrics (Tap to filter) */}
         <StockSummary
-          items={items}
+          items={filteredItemsByCompany}
           activeFilter={activeFilter}
           onSelectFilter={setActiveFilter}
         />
 
         {/* Stock Inventory List & Table with Metadata & Trail view */}
         <StockTable
-          items={items}
+          items={filteredItemsByCompany}
           activeFilter={activeFilter}
           confirmOnDelete={confirmOnDelete}
           onToggleConfirmOnDelete={handleToggleConfirmOnDelete}
@@ -1019,6 +1197,9 @@ export function App() {
           onExportExcel={handleExportExcel}
           onViewItemDetails={(item) => setSelectedItemForDetails(item)}
           onOpenAuditTrail={() => setIsAuditTrailModalOpen(true)}
+          companies={companies}
+          activeCompanyId={activeCompanyId}
+          onOpenCompanyModal={() => setIsCompanyModalOpen(true)}
         />
       </main>
 
@@ -1039,9 +1220,12 @@ export function App() {
       <AddItemModal
         isOpen={isAddModalOpen}
         units={units}
+        companies={companies}
+        activeCompanyId={activeCompanyId}
         onClose={() => setIsAddModalOpen(false)}
         onAdd={handleAddItem}
         onOpenUnitModal={() => setIsUnitModalOpen(true)}
+        onOpenCompanyModal={() => setIsCompanyModalOpen(true)}
       />
 
       {/* 2. Edit Item Modal */}
@@ -1049,15 +1233,18 @@ export function App() {
         isOpen={!!editingItem}
         item={editingItem}
         units={units}
+        companies={companies}
         onClose={() => setEditingItem(null)}
         onSave={handleSaveEditItem}
         onOpenUnitModal={() => setIsUnitModalOpen(true)}
+        onOpenCompanyModal={() => setIsCompanyModalOpen(true)}
       />
 
       {/* 3. Item Details & Complete Audit Trail Modal */}
       <ItemDetailsModal
         isOpen={!!selectedItemForDetails}
         item={selectedItemForDetails}
+        companies={companies}
         onClose={() => setSelectedItemForDetails(null)}
         onEdit={(item) => {
           setSelectedItemForDetails(null);
@@ -1124,6 +1311,19 @@ export function App() {
         domain={currentDomain || (typeof window !== 'undefined' ? window.location.hostname : '')}
         onRetryGoogleSignIn={handleSignInWithGoogle}
         onQuickConnect={handleQuickConnect}
+      />
+
+      {/* 9. Multiple Company Profiles Manager Modal */}
+      <CompanyProfileModal
+        isOpen={isCompanyModalOpen}
+        onClose={() => setIsCompanyModalOpen(false)}
+        companies={companies}
+        activeCompanyId={activeCompanyId}
+        onSelectCompany={handleSelectCompany}
+        onSaveCompany={handleSaveCompany}
+        onDeleteCompany={handleDeleteCompany}
+        onSetDefault={handleSetDefaultCompany}
+        items={items}
       />
     </div>
   );

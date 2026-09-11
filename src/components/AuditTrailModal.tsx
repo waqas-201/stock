@@ -14,6 +14,7 @@ import {
   Layers,
   User,
   ShieldCheck,
+  Building2,
 } from 'lucide-react';
 import { GlobalAuditRecord } from '../lib/stockStorage';
 
@@ -27,9 +28,10 @@ interface AuditTrailModalProps {
 export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
   isOpen,
   onClose,
-  logs,
+  logs = [],
   onClearLogs,
 }) => {
+  const safeLogs = Array.isArray(logs) ? logs : [];
   const [searchTerm, setSearchTerm] = useState('');
   const [filterAction, setFilterAction] = useState<string>('all');
   const [selectedStaff, setSelectedStaff] = useState<string>('all');
@@ -37,17 +39,17 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
   // Extract unique staff members
   const staffMembers = useMemo(() => {
     const set = new Set<string>();
-    logs.forEach((l) => {
+    safeLogs.forEach((l) => {
       if (l.performedBy && l.performedBy.trim()) {
         set.add(l.performedBy.trim());
       }
     });
     return Array.from(set).sort();
-  }, [logs]);
+  }, [safeLogs]);
 
   if (!isOpen) return null;
 
-  const filteredLogs = logs.filter((log) => {
+  const filteredLogs = safeLogs.filter((log) => {
     const matchesSearch =
       searchTerm === '' ||
       log.itemName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -282,6 +284,13 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                               ? 'STOCK ADJUST'
                               : 'EDITED'}
                           </span>
+
+                          {log.companyName && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                              <Building2 className="w-3 h-3 text-slate-500 shrink-0" />
+                              <span>{log.companyName}</span>
+                            </span>
+                          )}
                         </div>
 
                         {/* Who did this modification attribution banner */}

@@ -1,3 +1,20 @@
+export interface CompanyProfile {
+  id: string;
+  name: string;
+  code?: string;
+  tagline?: string;
+  currency?: string;
+  taxId?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  color?: string; // Theme badge accent e.g. 'emerald' | 'blue' | 'indigo' | 'violet' | 'amber' | 'rose'
+  isDefault?: boolean;
+  createdAt: string;
+  updatedAt: string;
+  userId?: string;
+}
+
 export interface ItemAuditEntry {
   id: string;
   action: 'created' | 'quantity_changed' | 'edited' | 'deleted' | 'restored';
@@ -11,6 +28,8 @@ export interface ItemAuditEntry {
   userEmail?: string;
   userPhotoURL?: string;
   userId?: string;
+  companyId?: string;
+  companyName?: string;
 }
 
 export interface StockItem {
@@ -21,6 +40,8 @@ export interface StockItem {
   lowStockThreshold: number; // Individual low stock alert threshold for this specific item
   productionDate?: string; // Optional production / manufacturing date (YYYY-MM-DD)
   notes?: string; // Optional notes (e.g., batch number, shelf, supplier, remarks)
+  companyId?: string; // Scoped to company profile
+  companyName?: string;
   createdAt?: string;
   updatedAt?: string;
   userId?: string;
@@ -39,6 +60,7 @@ export interface StockUnit {
   code?: string;
   isDefault?: boolean;
   userId?: string;
+  companyId?: string;
 }
 
 export interface OperatorProfile {
@@ -52,6 +74,7 @@ export interface UserSetting {
   userId: string;
   confirmOnDelete: boolean;
   operatorName?: string;
+  activeCompanyId?: string;
   updatedAt?: string;
 }
 

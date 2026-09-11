@@ -10,6 +10,8 @@ export interface GlobalAuditRecord extends ItemAuditEntry {
   itemId: string;
   itemName: string;
   unit: string;
+  companyId?: string;
+  companyName?: string;
 }
 
 export function createAuditEntry(
@@ -19,7 +21,9 @@ export function createAuditEntry(
   previousQuantity?: number,
   newQuantity?: number,
   operatorOrName?: OperatorProfile | string | null,
-  operatorEmail?: string
+  operatorEmail?: string,
+  companyId?: string,
+  companyName?: string
 ): ItemAuditEntry {
   const delta =
     previousQuantity !== undefined && newQuantity !== undefined
@@ -51,6 +55,8 @@ export function createAuditEntry(
     performedBy: actorName,
     userEmail: email,
     userPhotoURL: photoURL,
+    companyId,
+    companyName,
   };
 }
 

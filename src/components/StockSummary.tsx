@@ -9,21 +9,22 @@ interface StockSummaryProps {
 }
 
 export const StockSummary: React.FC<StockSummaryProps> = ({
-  items,
+  items = [],
   activeFilter = 'all',
   onSelectFilter,
 }) => {
-  const totalItems = items.length;
-  const totalQuantity = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
-  const outOfStockCount = items.filter((item) => (item.quantity || 0) <= 0).length;
+  const safeItems = Array.isArray(items) ? items : [];
+  const totalItems = safeItems.length;
+  const totalQuantity = safeItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
+  const outOfStockCount = safeItems.filter((item) => (item.quantity || 0) <= 0).length;
 
   // Individual item low stock: quantity > 0 and <= item's specific lowStockThreshold
-  const lowStockCount = items.filter((item) => {
+  const lowStockCount = safeItems.filter((item) => {
     const threshold = item.lowStockThreshold ?? 5;
     return (item.quantity || 0) > 0 && (item.quantity || 0) <= threshold;
   }).length;
 
-  const inStockCount = items.filter((item) => {
+  const inStockCount = safeItems.filter((item) => {
     const threshold = item.lowStockThreshold ?? 5;
     return (item.quantity || 0) > threshold;
   }).length;

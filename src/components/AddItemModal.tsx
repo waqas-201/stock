@@ -9,12 +9,15 @@ import {
   Calendar,
   FileText,
   Clock,
+  Building2,
 } from 'lucide-react';
-import { StockUnit } from '../types';
+import { StockUnit, CompanyProfile } from '../types';
 
 interface AddItemModalProps {
   isOpen: boolean;
   units: StockUnit[];
+  companies?: CompanyProfile[];
+  activeCompanyId?: string;
   onClose: () => void;
   onAdd: (
     itemName: string,
@@ -22,17 +25,22 @@ interface AddItemModalProps {
     quantity: number,
     lowStockThreshold: number,
     productionDate?: string,
-    notes?: string
+    notes?: string,
+    companyId?: string
   ) => void;
   onOpenUnitModal: () => void;
+  onOpenCompanyModal?: () => void;
 }
 
 export const AddItemModal: React.FC<AddItemModalProps> = ({
   isOpen,
   units,
+  companies = [],
+  activeCompanyId,
   onClose,
   onAdd,
   onOpenUnitModal,
+  onOpenCompanyModal,
 }) => {
   const [itemName, setItemName] = useState('');
   const [unit, setUnit] = useState<string>('');
@@ -40,6 +48,7 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
   const [threshold, setThreshold] = useState<string>('5');
   const [productionDate, setProductionDate] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -53,8 +62,14 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
       if (units && units.length > 0 && units[0]?.name) {
         setUnit(units[0].name);
       }
+      if (activeCompanyId && activeCompanyId !== 'all') {
+        setSelectedCompanyId(activeCompanyId);
+      } else if (companies && companies.length > 0) {
+        const defaultComp = companies.find((c) => c.isDefault) || companies[0];
+        setSelectedCompanyId(defaultComp.id);
+      }
     }
-  }, [isOpen, units]);
+  }, [isOpen, units, activeCompanyId, companies]);
 
   if (!isOpen) return null;
 
@@ -103,7 +118,8 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
       parsedQty,
       parsedThreshold,
       productionDate.trim() || undefined,
-      notes.trim() || undefined
+      notes.trim() || undefined,
+      selectedCompanyId || undefined
     );
     onClose();
   };
@@ -138,7 +154,7 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
                 Add Stock Item
               </h3>
               <p className="text-xs text-slate-500 truncate">
-                Configure inventory, alert limits & production details
+                Configure inventory, company allocation & alert limits
               </p>
             </div>
           </div>
@@ -162,6 +178,45 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
             <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
               <span>{error}</span>
+            </div>
+          )}
+
+          {/* Company Profile Allocation */}
+          {companies && companies.length > 0 && (
+            <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+              <div className="flex items-center justify-between mb-1.5">
+                <label
+                  htmlFor="add-item-company"
+                  className="block text-xs font-bold uppercase tracking-wider text-slate-700"
+                >
+                  Assign to Company Profile
+                </label>
+                {onOpenCompanyModal && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenCompanyModal();
+                    }}
+                    className="inline-flex items-center gap-1 text-[11px] text-emerald-700 hover:text-emerald-900 font-bold cursor-pointer"
+                  >
+                    <Building2 className="w-3 h-3" />
+                    <span>Manage Companies</span>
+                  </button>
+                )}
+              </div>
+              <select
+                id="add-item-company"
+                value={selectedCompanyId}
+                onChange={(e) => setSelectedCompanyId(e.target.value)}
+                className="w-full px-3 py-2 text-xs sm:text-sm font-semibold bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 text-slate-900"
+              >
+                {companies.map((comp) => (
+                  <option key={comp.id} value={comp.id}>
+                    {comp.name} {comp.code ? `(${comp.code})` : ''} {comp.isDefault ? '• Default' : ''}
+                  </option>
+                ))}
+              </select>
             </div>
           )}
 

@@ -17,12 +17,14 @@ import {
   ArrowDownRight,
   User,
   ShieldCheck,
+  Building2,
 } from 'lucide-react';
-import { StockItem, ItemAuditEntry } from '../types';
+import { StockItem, ItemAuditEntry, CompanyProfile } from '../types';
 
 interface ItemDetailsModalProps {
   isOpen: boolean;
   item: StockItem | null;
+  companies?: CompanyProfile[];
   onClose: () => void;
   onEdit: (item: StockItem) => void;
   onQuickQuantityChange: (item: StockItem, delta: number) => void;
@@ -31,6 +33,7 @@ interface ItemDetailsModalProps {
 export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
   isOpen,
   item,
+  companies = [],
   onClose,
   onEdit,
   onQuickQuantityChange,
@@ -40,6 +43,8 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
   const threshold = item.lowStockThreshold ?? 5;
   const isOutOfStock = item.quantity <= 0;
   const isLowStock = !isOutOfStock && item.quantity <= threshold;
+
+  const assignedCompany = companies.find((c) => c.id === item.companyId) || companies.find((c) => c.isDefault) || companies[0];
 
   // Format date helper
   const formatDate = (dateStr?: string) => {
@@ -238,6 +243,37 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Company Entity Allocation */}
+          {assignedCompany && (
+            <div className="p-3.5 bg-slate-50 border border-slate-200/90 rounded-2xl flex items-center justify-between">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-slate-200/80 text-slate-700 flex items-center justify-center shrink-0">
+                  <Building2 className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
+                    Company Profile
+                  </span>
+                  <span className="font-semibold text-xs sm:text-sm text-slate-900 truncate block">
+                    {assignedCompany.name}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {assignedCompany.code && (
+                  <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-[10px] font-bold font-mono text-slate-600">
+                    {assignedCompany.code}
+                  </span>
+                )}
+                {assignedCompany.currency && (
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-[10px] font-bold text-emerald-800">
+                    {assignedCompany.currency}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Collaborative Staff Attribution & Audit Overview */}
           <div className="p-3.5 bg-emerald-50/70 border border-emerald-200/90 rounded-2xl">

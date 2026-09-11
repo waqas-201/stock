@@ -83,12 +83,39 @@
         "userId": { "type": "string", "maxLength": 128 },
         "confirmOnDelete": { "type": "boolean" },
         "operatorName": { "type": "string", "maxLength": 100 },
+        "activeCompanyId": { "type": "string", "maxLength": 128 },
         "updatedAt": { "type": "string", "maxLength": 50 }
       },
       "required": ["userId", "confirmOnDelete"]
+    },
+    "CompanyProfile": {
+      "title": "Company Profile",
+      "description": "Multi-company profile configuration containing branding, code, currency, and address",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 200 },
+        "code": { "type": "string", "maxLength": 30 },
+        "tagline": { "type": "string", "maxLength": 300 },
+        "currency": { "type": "string", "maxLength": 20 },
+        "taxId": { "type": "string", "maxLength": 50 },
+        "email": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "address": { "type": "string", "maxLength": 300 },
+        "color": { "type": "string", "maxLength": 50 },
+        "isDefault": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 },
+        "userId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "name", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
+    "/companies/{companyId}": {
+      "schema": { "$ref": "#/entities/CompanyProfile" },
+      "description": "Multi-company profiles collection for corporate inventory management"
+    },
     "/stock_items/{itemId}": {
       "schema": { "$ref": "#/entities/StockItem" },
       "description": "Shared collaborative inventory stock items collection with modification attribution"

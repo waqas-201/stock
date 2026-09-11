@@ -29,6 +29,24 @@ service cloud.firestore {
       return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    // Validation for Company Profile
+    function isValidCompany(data) {
+      return data.id is string && isValidId(data.id)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 200
+        && (!('code' in data) || data.code == null || (data.code is string && data.code.size() <= 30))
+        && (!('tagline' in data) || data.tagline == null || (data.tagline is string && data.tagline.size() <= 300))
+        && (!('currency' in data) || data.currency == null || (data.currency is string && data.currency.size() <= 20))
+        && (!('taxId' in data) || data.taxId == null || (data.taxId is string && data.taxId.size() <= 50))
+        && (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 100))
+        && (!('phone' in data) || data.phone == null || (data.phone is string && data.phone.size() <= 50))
+        && (!('address' in data) || data.address == null || (data.address is string && data.address.size() <= 300))
+        && (!('color' in data) || data.color == null || (data.color is string && data.color.size() <= 50))
+        && (!('isDefault' in data) || data.isDefault is bool)
+        && data.createdAt is string && data.createdAt.size() <= 50
+        && data.updatedAt is string && data.updatedAt.size() <= 50
+        && (!('userId' in data) || data.userId == null || (data.userId is string && data.userId.size() <= 128));
+    }
+
     // Validation for Stock Item with modification attribution
     function isValidStockItem(data) {
       return data.id is string && isValidId(data.id)
@@ -38,6 +56,8 @@ service cloud.firestore {
         && data.lowStockThreshold is number && data.lowStockThreshold >= 0
         && (!('productionDate' in data) || data.productionDate == null || (data.productionDate is string && data.productionDate.size() <= 30))
         && (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 2000))
+        && (!('companyId' in data) || data.companyId == null || (data.companyId is string && data.companyId.size() <= 128))
+        && (!('companyName' in data) || data.companyName == null || (data.companyName is string && data.companyName.size() <= 200))
         && data.createdAt is string && data.createdAt.size() <= 50
         && data.updatedAt is string && data.updatedAt.size() <= 50
         && (!('createdByName' in data) || data.createdByName == null || (data.createdByName is string && data.createdByName.size() <= 100))
@@ -53,6 +73,7 @@ service cloud.firestore {
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 50
         && (!('code' in data) || data.code == null || (data.code is string && data.code.size() <= 20))
         && (!('isDefault' in data) || data.isDefault is bool)
+        && (!('companyId' in data) || data.companyId == null || (data.companyId is string && data.companyId.size() <= 128))
         && (!('userId' in data) || data.userId == null || (data.userId is string && data.userId.size() <= 128));
     }
 
@@ -72,6 +93,8 @@ service cloud.firestore {
         && data.performedBy is string && data.performedBy.size() >= 1 && data.performedBy.size() <= 100
         && (!('userEmail' in data) || data.userEmail == null || (data.userEmail is string && data.userEmail.size() <= 100))
         && (!('userPhotoURL' in data) || data.userPhotoURL == null || (data.userPhotoURL is string && data.userPhotoURL.size() <= 500))
+        && (!('companyId' in data) || data.companyId == null || (data.companyId is string && data.companyId.size() <= 128))
+        && (!('companyName' in data) || data.companyName == null || (data.companyName is string && data.companyName.size() <= 200))
         && (!('userId' in data) || data.userId == null || (data.userId is string && data.userId.size() <= 128));
     }
 
@@ -80,7 +103,26 @@ service cloud.firestore {
       return data.userId is string && data.userId == request.auth.uid
         && data.confirmOnDelete is bool
         && (!('operatorName' in data) || data.operatorName == null || (data.operatorName is string && data.operatorName.size() <= 100))
+        && (!('activeCompanyId' in data) || data.activeCompanyId == null || (data.activeCompanyId is string && data.activeCompanyId.size() <= 128))
         && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 50));
+    }
+
+    // 0. Shared Companies collection: Collaborative multi-company profiles
+    match /companies/{companyId} {
+      allow get, list: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && isValidId(companyId)
+        && incoming().id == companyId
+        && isValidCompany(incoming());
+
+      allow update: if isSignedIn()
+        && isValidId(companyId)
+        && incoming().id == existing().id
+        && isValidCompany(incoming());
+
+      allow delete: if isSignedIn()
+        && isValidId(companyId);
     }
 
     // 1. Shared Stock Items collection: Full collaborative CRUD for all verified team members/clients
