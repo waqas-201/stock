@@ -1,7 +1,8 @@
-import { StockItem, ItemAuditEntry } from '../types';
+import { StockItem, ItemAuditEntry, OperatorProfile } from '../types';
 
 const STORAGE_KEY = 'in_app_stock_items_en_v5';
 const GLOBAL_LOG_KEY = 'stock_inventory_global_audit_trail_v1';
+const OPERATOR_KEY = 'stock_active_operator_profile_v1';
 
 export const DEFAULT_ITEM_LOW_STOCK = 5;
 
@@ -16,12 +17,27 @@ export function createAuditEntry(
   summary: string,
   details?: string,
   previousQuantity?: number,
-  newQuantity?: number
+  newQuantity?: number,
+  operatorOrName?: OperatorProfile | string | null,
+  operatorEmail?: string
 ): ItemAuditEntry {
   const delta =
     previousQuantity !== undefined && newQuantity !== undefined
       ? newQuantity - previousQuantity
       : undefined;
+
+  let actorName = 'Store Operator';
+  let email: string | undefined = undefined;
+  let photoURL: string | undefined = undefined;
+
+  if (typeof operatorOrName === 'string') {
+    actorName = operatorOrName.trim() || 'Store Operator';
+    email = operatorEmail;
+  } else if (operatorOrName && typeof operatorOrName === 'object') {
+    actorName = operatorOrName.name?.trim() || 'Store Operator';
+    email = operatorOrName.email;
+    photoURL = operatorOrName.photoURL;
+  }
 
   return {
     id: 'aud_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
@@ -32,6 +48,9 @@ export function createAuditEntry(
     previousQuantity,
     newQuantity,
     delta,
+    performedBy: actorName,
+    userEmail: email,
+    userPhotoURL: photoURL,
   };
 }
 
@@ -46,6 +65,10 @@ export const INITIAL_STOCK_ITEMS: StockItem[] = [
     notes: 'Warehouse Rack B-2. Double A brand.',
     createdAt: '2026-08-20T09:00:00.000Z',
     updatedAt: '2026-09-08T14:30:00.000Z',
+    createdByName: 'Waqas (Admin)',
+    createdByEmail: 'waqasvu892@gmail.com',
+    lastModifiedByName: 'Waqas (Admin)',
+    lastModifiedByEmail: 'waqasvu892@gmail.com',
     auditTrail: [
       {
         id: 'aud_init_1',
@@ -54,6 +77,8 @@ export const INITIAL_STOCK_ITEMS: StockItem[] = [
         summary: 'Item added to inventory',
         details: 'Initial quantity: 50 Reams, Alert limit: ≤ 10',
         newQuantity: 50,
+        performedBy: 'Waqas (Admin)',
+        userEmail: 'waqasvu892@gmail.com',
       },
       {
         id: 'aud_init_2',
@@ -63,6 +88,8 @@ export const INITIAL_STOCK_ITEMS: StockItem[] = [
         previousQuantity: 50,
         newQuantity: 45,
         delta: -5,
+        performedBy: 'Waqas (Admin)',
+        userEmail: 'waqasvu892@gmail.com',
       },
     ],
   },
@@ -76,6 +103,9 @@ export const INITIAL_STOCK_ITEMS: StockItem[] = [
     notes: 'Supplier: Stationery Depot Ltd. Lot #2607',
     createdAt: '2026-08-22T11:15:00.000Z',
     updatedAt: '2026-09-10T10:20:00.000Z',
+    createdByName: 'Waqas (Admin)',
+    createdByEmail: 'waqasvu892@gmail.com',
+    lastModifiedByName: 'Dispatch Team',
     auditTrail: [
       {
         id: 'aud_init_3',
@@ -84,6 +114,8 @@ export const INITIAL_STOCK_ITEMS: StockItem[] = [
         summary: 'Item added to inventory',
         details: 'Initial quantity: 20 Boxes, Alert limit: ≤ 15',
         newQuantity: 20,
+        performedBy: 'Waqas (Admin)',
+        userEmail: 'waqasvu892@gmail.com',
       },
       {
         id: 'aud_init_4',
@@ -93,6 +125,7 @@ export const INITIAL_STOCK_ITEMS: StockItem[] = [
         previousQuantity: 20,
         newQuantity: 12,
         delta: -8,
+        performedBy: 'Dispatch Team',
       },
     ],
   },
@@ -106,6 +139,8 @@ export const INITIAL_STOCK_ITEMS: StockItem[] = [
     notes: 'Premium grain, Harvest 2026, Bin #4',
     createdAt: '2026-08-25T08:00:00.000Z',
     updatedAt: '2026-09-05T16:00:00.000Z',
+    createdByName: 'Stock Manager',
+    lastModifiedByName: 'Stock Manager',
     auditTrail: [
       {
         id: 'aud_init_5',
@@ -114,6 +149,7 @@ export const INITIAL_STOCK_ITEMS: StockItem[] = [
         summary: 'Item added to inventory',
         details: 'Initial quantity: 15 Bags, Alert limit: ≤ 10',
         newQuantity: 15,
+        performedBy: 'Stock Manager',
       },
     ],
   },
@@ -127,6 +163,8 @@ export const INITIAL_STOCK_ITEMS: StockItem[] = [
     notes: 'Batch CO-881. Cold pressed.',
     createdAt: '2026-08-28T12:00:00.000Z',
     updatedAt: '2026-09-07T11:00:00.000Z',
+    createdByName: 'Warehouse Desk',
+    lastModifiedByName: 'Warehouse Desk',
   },
   {
     id: 'item_5',
@@ -138,6 +176,8 @@ export const INITIAL_STOCK_ITEMS: StockItem[] = [
     notes: 'Keep in dry room.',
     createdAt: '2026-08-29T10:00:00.000Z',
     updatedAt: '2026-09-09T09:00:00.000Z',
+    createdByName: 'Storekeeper',
+    lastModifiedByName: 'Storekeeper',
   },
   {
     id: 'item_6',
@@ -149,6 +189,8 @@ export const INITIAL_STOCK_ITEMS: StockItem[] = [
     notes: 'Reorder pending from MedSupply.',
     createdAt: '2026-08-15T10:00:00.000Z',
     updatedAt: '2026-09-11T08:00:00.000Z',
+    createdByName: 'Safety Officer',
+    lastModifiedByName: 'Safety Officer',
   },
   {
     id: 'item_7',
@@ -160,6 +202,8 @@ export const INITIAL_STOCK_ITEMS: StockItem[] = [
     notes: 'Shipping desk stock.',
     createdAt: '2026-09-01T14:00:00.000Z',
     updatedAt: '2026-09-10T15:00:00.000Z',
+    createdByName: 'Shipping Desk',
+    lastModifiedByName: 'Shipping Desk',
   },
   {
     id: 'item_8',
@@ -171,6 +215,8 @@ export const INITIAL_STOCK_ITEMS: StockItem[] = [
     notes: 'Shelf C-1',
     createdAt: '2026-09-02T16:00:00.000Z',
     updatedAt: '2026-09-09T17:00:00.000Z',
+    createdByName: 'Stationery Clerk',
+    lastModifiedByName: 'Stationery Clerk',
   },
 ];
 
@@ -339,3 +385,41 @@ export function saveConfirmOnDelete(enabled: boolean): void {
 export function generateItemId(): string {
   return 'item_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
 }
+
+/**
+ * Loads the active operator profile from localStorage.
+ * Defaults to "Waqas (Admin)" or "Store Operator".
+ */
+export function loadActiveOperator(): OperatorProfile {
+  try {
+    const raw = localStorage.getItem(OPERATOR_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.name === 'string' && parsed.name.trim().length > 0) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load active operator profile:', err);
+  }
+  return {
+    name: 'Waqas (Admin)',
+    email: 'waqasvu892@gmail.com',
+    role: 'Administrator',
+  };
+}
+
+/**
+ * Saves the active operator profile to localStorage
+ */
+export function saveActiveOperator(operator: OperatorProfile): void {
+  try {
+    localStorage.setItem(OPERATOR_KEY, JSON.stringify(operator));
+  } catch (err) {
+    console.error('Failed to save active operator profile:', err);
+  }
+}
+
+export const loadOperatorProfile = loadActiveOperator;
+export const saveOperatorProfile = saveActiveOperator;
+

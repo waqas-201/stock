@@ -1,0 +1,155 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny-all catch-all safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Validation for Stock Item with modification attribution
+    function isValidStockItem(data) {
+      return data.id is string && isValidId(data.id)
+        && data.itemName is string && data.itemName.size() >= 1 && data.itemName.size() <= 200
+        && data.unit is string && data.unit.size() >= 1 && data.unit.size() <= 50
+        && data.quantity is number && data.quantity >= 0
+        && data.lowStockThreshold is number && data.lowStockThreshold >= 0
+        && (!('productionDate' in data) || data.productionDate == null || (data.productionDate is string && data.productionDate.size() <= 30))
+        && (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 2000))
+        && data.createdAt is string && data.createdAt.size() <= 50
+        && data.updatedAt is string && data.updatedAt.size() <= 50
+        && (!('createdByName' in data) || data.createdByName == null || (data.createdByName is string && data.createdByName.size() <= 100))
+        && (!('createdByEmail' in data) || data.createdByEmail == null || (data.createdByEmail is string && data.createdByEmail.size() <= 100))
+        && (!('lastModifiedByName' in data) || data.lastModifiedByName == null || (data.lastModifiedByName is string && data.lastModifiedByName.size() <= 100))
+        && (!('lastModifiedByEmail' in data) || data.lastModifiedByEmail == null || (data.lastModifiedByEmail is string && data.lastModifiedByEmail.size() <= 100))
+        && (!('userId' in data) || data.userId == null || (data.userId is string && data.userId.size() <= 128));
+    }
+
+    // Validation for Stock Unit
+    function isValidStockUnit(data) {
+      return data.id is string && isValidId(data.id)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 50
+        && (!('code' in data) || data.code == null || (data.code is string && data.code.size() <= 20))
+        && (!('isDefault' in data) || data.isDefault is bool)
+        && (!('userId' in data) || data.userId == null || (data.userId is string && data.userId.size() <= 128));
+    }
+
+    // Validation for Audit Log with performer attribution
+    function isValidAuditLog(data) {
+      return data.id is string && isValidId(data.id)
+        && data.timestamp is string && data.timestamp.size() <= 50
+        && data.action is string && data.action.size() >= 1 && data.action.size() <= 50
+        && data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 200
+        && (!('details' in data) || data.details == null || (data.details is string && data.details.size() <= 2000))
+        && data.itemId is string && isValidId(data.itemId)
+        && data.itemName is string && data.itemName.size() >= 1 && data.itemName.size() <= 200
+        && data.unit is string && data.unit.size() >= 1 && data.unit.size() <= 50
+        && (!('previousQuantity' in data) || data.previousQuantity == null || data.previousQuantity is number)
+        && (!('newQuantity' in data) || data.newQuantity == null || data.newQuantity is number)
+        && (!('delta' in data) || data.delta == null || data.delta is number)
+        && data.performedBy is string && data.performedBy.size() >= 1 && data.performedBy.size() <= 100
+        && (!('userEmail' in data) || data.userEmail == null || (data.userEmail is string && data.userEmail.size() <= 100))
+        && (!('userPhotoURL' in data) || data.userPhotoURL == null || (data.userPhotoURL is string && data.userPhotoURL.size() <= 500))
+        && (!('userId' in data) || data.userId == null || (data.userId is string && data.userId.size() <= 128));
+    }
+
+    // Validation for User Settings
+    function isValidUserSetting(data) {
+      return data.userId is string && data.userId == request.auth.uid
+        && data.confirmOnDelete is bool
+        && (!('operatorName' in data) || data.operatorName == null || (data.operatorName is string && data.operatorName.size() <= 100))
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 50));
+    }
+
+    // 1. Shared Stock Items collection: Full collaborative CRUD for all verified team members/clients
+    match /stock_items/{itemId} {
+      allow get, list: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && isValidId(itemId)
+        && incoming().id == itemId
+        && isValidStockItem(incoming());
+
+      allow update: if isSignedIn()
+        && isValidId(itemId)
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && isValidStockItem(incoming());
+
+      allow delete: if isSignedIn()
+        && isValidId(itemId);
+    }
+
+    // 2. Shared Stock Units collection
+    match /stock_units/{unitId} {
+      allow get, list: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && isValidId(unitId)
+        && incoming().id == unitId
+        && isValidStockUnit(incoming());
+
+      allow update: if isSignedIn()
+        && isValidId(unitId)
+        && incoming().id == existing().id
+        && isValidStockUnit(incoming());
+
+      allow delete: if isSignedIn()
+        && isValidId(unitId);
+    }
+
+    // 3. Shared Tamper-Proof Audit Logs collection: append-only
+    match /audit_logs/{logId} {
+      allow get, list: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && isValidId(logId)
+        && incoming().id == logId
+        && isValidAuditLog(incoming());
+
+      // Audit logs are strictly immutable: no user can erase or tamper with history
+      allow update, delete: if false;
+    }
+
+    // 4. User Settings collection
+    match /user_settings/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if isOwner(userId);
+
+      allow create: if isOwner(userId)
+        && isValidId(userId)
+        && incoming().userId == userId
+        && isValidUserSetting(incoming());
+
+      allow update: if isOwner(userId)
+        && isValidId(userId)
+        && incoming().userId == userId
+        && isValidUserSetting(incoming());
+
+      allow delete: if isOwner(userId);
+    }
+  }
+}
+

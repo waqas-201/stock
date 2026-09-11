@@ -17,6 +17,7 @@ import {
   FileText,
   Eye,
   History,
+  User,
 } from 'lucide-react';
 import { StockItem, StockFilter, SortField, SortOrder } from '../types';
 
@@ -500,6 +501,24 @@ export const StockTable: React.FC<StockTableProps> = ({
                   </div>
                 </div>
 
+                {/* Operator Attribution Info on Card */}
+                <div className="pt-1.5 flex items-center justify-between text-[11px] text-slate-500">
+                  <span className="flex items-center gap-1 truncate">
+                    <User className="w-3 h-3 text-emerald-600 shrink-0" />
+                    <span className="truncate">
+                      By <strong className="text-slate-700 font-semibold">{item.lastModifiedByName || item.createdByName || 'Staff Member'}</strong>
+                    </span>
+                  </span>
+                  {item.updatedAt && (
+                    <span className="text-[10px] text-slate-400 shrink-0">
+                      {new Date(item.updatedAt).toLocaleDateString(undefined, {
+                        month: 'short',
+                        day: 'numeric',
+                      })}
+                    </span>
+                  )}
+                </div>
+
                 {/* Card Bottom: View Trail, Edit & Delete (Min 44px touch targets) */}
                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5">
                   <button
@@ -595,6 +614,9 @@ export const StockTable: React.FC<StockTableProps> = ({
                     <span>Production Date</span>
                     <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
                   </button>
+                </th>
+                <th className="py-3.5 px-4 min-w-[150px] font-bold uppercase text-slate-600">
+                  <span>Last Modified</span>
                 </th>
                 <th className="py-3.5 px-4 text-right w-40 font-bold uppercase">
                   Actions
@@ -731,6 +753,28 @@ export const StockTable: React.FC<StockTableProps> = ({
                       ) : (
                         <span className="text-xs text-slate-400 italic">—</span>
                       )}
+                    </td>
+
+                    {/* Last Modified Attribution Column */}
+                    <td className="py-3.5 px-4">
+                      <div className="flex flex-col text-xs">
+                        <span className="font-semibold text-slate-800 flex items-center gap-1">
+                          <User className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span className="truncate max-w-[130px]">
+                            {item.lastModifiedByName || item.createdByName || 'Staff Member'}
+                          </span>
+                        </span>
+                        {item.updatedAt && (
+                          <span className="text-[11px] text-slate-400 pl-4.5">
+                            {new Date(item.updatedAt).toLocaleDateString(undefined, {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Actions Column */}

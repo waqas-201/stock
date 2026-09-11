@@ -12,6 +12,8 @@ import {
   RotateCcw,
   Calendar,
   Layers,
+  User,
+  ShieldCheck,
 } from 'lucide-react';
 import { GlobalAuditRecord } from '../lib/stockStorage';
 
@@ -30,6 +32,18 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterAction, setFilterAction] = useState<string>('all');
+  const [selectedStaff, setSelectedStaff] = useState<string>('all');
+
+  // Extract unique staff members
+  const staffMembers = useMemo(() => {
+    const set = new Set<string>();
+    logs.forEach((l) => {
+      if (l.performedBy && l.performedBy.trim()) {
+        set.add(l.performedBy.trim());
+      }
+    });
+    return Array.from(set).sort();
+  }, [logs]);
 
   if (!isOpen) return null;
 
@@ -38,6 +52,8 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
       searchTerm === '' ||
       log.itemName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       log.summary.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (log.performedBy && log.performedBy.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (log.userEmail && log.userEmail.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (log.details && log.details.toLowerCase().includes(searchTerm.toLowerCase()));
 
     const matchesAction =
@@ -47,7 +63,11 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
       (filterAction === 'quantity' && log.action === 'quantity_changed') ||
       (filterAction === 'edited' && log.action === 'edited');
 
-    return matchesSearch && matchesAction;
+    const matchesStaff =
+      selectedStaff === 'all' ||
+      (log.performedBy && log.performedBy.trim() === selectedStaff);
+
+    return matchesSearch && matchesAction && matchesStaff;
   });
 
   const formatDateTime = (dateStr: string) => {
@@ -91,10 +111,10 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                 id="audit-trail-title"
                 className="text-base sm:text-lg font-bold text-slate-900 leading-tight truncate"
               >
-                Inventory Audit Trail & Activity Log
+                Inventory Audit Trail & Staff Accountability
               </h3>
               <p className="text-xs text-slate-500 truncate">
-                Full chronological record of added, modified & removed items
+                Full chronological record showing who added, changed, or deleted stock
               </p>
             </div>
           </div>
@@ -109,17 +129,40 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
         </div>
 
         {/* Toolbar: Search and Filter Tabs */}
-        <div className="p-3.5 sm:px-6 bg-slate-50/50 border-b border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 shrink-0">
-          {/* Search bar */}
-          <div className="relative flex-1 min-w-0">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search history by item name or event..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-900 placeholder:text-slate-400"
-            />
+        <div className="p-3.5 sm:px-6 bg-slate-50/70 border-b border-slate-200 space-y-2.5 shrink-0">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+            {/* Search bar */}
+            <div className="relative flex-1 min-w-0">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search by item name, staff member, or action..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-indigo-500 text-slate-900 placeholder:text-slate-400"
+              />
+            </div>
+
+            {/* Staff Member Selector */}
+            {staffMembers.length > 0 && (
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-xs font-semibold text-slate-500 hidden sm:inline">
+                  Staff:
+                </span>
+                <select
+                  value={selectedStaff}
+                  onChange={(e) => setSelectedStaff(e.target.value)}
+                  className="px-3 py-2 text-xs font-semibold bg-white border border-slate-300 rounded-xl text-slate-800 focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                >
+                  <option value="all">All Staff Members ({staffMembers.length})</option>
+                  {staffMembers.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Action filters */}
@@ -135,7 +178,7 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                 key={tab.id}
                 type="button"
                 onClick={() => setFilterAction(tab.id)}
-                className={`min-h-[32px] px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-colors cursor-pointer ${
+                className={`min-h-[30px] px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-colors cursor-pointer ${
                   filterAction === tab.id
                     ? 'bg-indigo-600 text-white shadow-2xs'
                     : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
@@ -156,9 +199,9 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
               </div>
               <p className="text-sm font-bold text-slate-700">No activity logs found</p>
               <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
-                {searchTerm || filterAction !== 'all'
-                  ? 'Try clearing the search filter.'
-                  : 'Actions like adding, adjusting, editing, or deleting items will automatically log here.'}
+                {searchTerm || filterAction !== 'all' || selectedStaff !== 'all'
+                  ? 'Try clearing the search or staff filter.'
+                  : 'Actions like adding, adjusting, editing, or deleting items will automatically log here with staff attribution.'}
               </p>
             </div>
           ) : (
@@ -241,7 +284,20 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                           </span>
                         </div>
 
-                        <p className="text-xs text-slate-700 font-medium mt-0.5">
+                        {/* Who did this modification attribution banner */}
+                        <div className="mt-1 flex items-center gap-2 flex-wrap">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-900 border border-emerald-200/80">
+                            <User className="w-3 h-3 text-emerald-600 shrink-0" />
+                            <span>Staff: <strong className="text-emerald-950 font-extrabold">{log.performedBy || 'Staff Member'}</strong></span>
+                          </span>
+                          {log.userEmail && (
+                            <span className="text-[10px] text-slate-400">
+                              ({log.userEmail})
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-xs text-slate-700 font-medium mt-1">
                           {log.summary}
                         </p>
 
@@ -287,6 +343,9 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
         <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 shrink-0">
           <div className="text-xs text-slate-500">
             Total records: <strong className="text-slate-700">{logs.length}</strong>
+            {selectedStaff !== 'all' && (
+              <span> (showing {filteredLogs.length} for {selectedStaff})</span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {onClearLogs && logs.length > 0 && (
@@ -311,3 +370,4 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
     </div>
   );
 };
+
