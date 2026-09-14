@@ -1,6 +1,6 @@
 {
   "name": "Stock Management",
-  "description": "Clean mobile and desktop stock inventory management app with multiple company profiles, persistent Google Cloud Firestore database, individual per-item low-stock thresholds, audit trails, and Excel export.",
-  "requestFramePermissions": [],
+  "description": "Clean mobile and desktop stock inventory management app with persistent Google Cloud Firestore database, voice search and voice CRUD operations, low-stock thresholds, audit trails, and Excel export.",
+  "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

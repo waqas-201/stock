@@ -17,34 +17,32 @@ import {
   ArrowDownRight,
   User,
   ShieldCheck,
-  Building2,
 } from 'lucide-react';
-import { StockItem, ItemAuditEntry, CompanyProfile } from '../types';
+import { StockItem, ItemAuditEntry } from '../types';
+import { getTagStyle } from '../lib/tagUtils';
 
 interface ItemDetailsModalProps {
   isOpen: boolean;
   item: StockItem | null;
-  companies?: CompanyProfile[];
   onClose: () => void;
   onEdit: (item: StockItem) => void;
   onQuickQuantityChange: (item: StockItem, delta: number) => void;
+  onSelectTag?: (tag: string) => void;
 }
 
 export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
   isOpen,
   item,
-  companies = [],
   onClose,
   onEdit,
   onQuickQuantityChange,
+  onSelectTag,
 }) => {
   if (!isOpen || !item) return null;
 
   const threshold = item.lowStockThreshold ?? 5;
   const isOutOfStock = item.quantity <= 0;
   const isLowStock = !isOutOfStock && item.quantity <= threshold;
-
-  const assignedCompany = companies.find((c) => c.id === item.companyId) || companies.find((c) => c.isDefault) || companies[0];
 
   // Format date helper
   const formatDate = (dateStr?: string) => {
@@ -244,37 +242,6 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
             </div>
           </div>
 
-          {/* Company Entity Allocation */}
-          {assignedCompany && (
-            <div className="p-3.5 bg-slate-50 border border-slate-200/90 rounded-2xl flex items-center justify-between">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-xl bg-slate-200/80 text-slate-700 flex items-center justify-center shrink-0">
-                  <Building2 className="w-4 h-4" />
-                </div>
-                <div className="min-w-0">
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
-                    Company Profile
-                  </span>
-                  <span className="font-semibold text-xs sm:text-sm text-slate-900 truncate block">
-                    {assignedCompany.name}
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                {assignedCompany.code && (
-                  <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-[10px] font-bold font-mono text-slate-600">
-                    {assignedCompany.code}
-                  </span>
-                )}
-                {assignedCompany.currency && (
-                  <span className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-[10px] font-bold text-emerald-800">
-                    {assignedCompany.currency}
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-
           {/* Collaborative Staff Attribution & Audit Overview */}
           <div className="p-3.5 bg-emerald-50/70 border border-emerald-200/90 rounded-2xl">
             <div className="flex items-center gap-2 mb-2">
@@ -322,6 +289,56 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Labels & Tags Section */}
+          <div className="p-3.5 bg-slate-50/90 border border-slate-200 rounded-2xl space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-700">
+                <Tag className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Product Labels & Tags</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onEdit(item);
+                }}
+                className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 cursor-pointer"
+              >
+                {item.tags && item.tags.length > 0 ? 'Edit Tags' : '+ Add Tags'}
+              </button>
+            </div>
+            {item.tags && item.tags.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {item.tags.map((tag, idx) => {
+                  const style = getTagStyle(tag);
+                  return (
+                    <button
+                      key={`${tag}-${idx}`}
+                      type="button"
+                      onClick={() => {
+                        if (onSelectTag) {
+                          onSelectTag(tag);
+                          onClose();
+                        }
+                      }}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border ${style.bg} ${style.text} ${style.border} ${style.hover} transition-all cursor-pointer shadow-2xs`}
+                      title={`Filter inventory by tag "${tag}"`}
+                    >
+                      <span>#{tag}</span>
+                      {onSelectTag && (
+                        <span className="text-[10px] opacity-60">↗</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400 italic pt-0.5">
+                No labels or tags assigned to this product yet.
+              </p>
+            )}
           </div>
 
           {/* Optional Notes Section */}

@@ -12,6 +12,7 @@
         "lowStockThreshold": { "type": "number" },
         "productionDate": { "type": "string", "maxLength": 30 },
         "notes": { "type": "string", "maxLength": 2000 },
+        "tags": { "type": "array", "items": { "type": "string" } },
         "createdAt": { "type": "string", "maxLength": 50 },
         "updatedAt": { "type": "string", "maxLength": 50 },
         "userId": { "type": "string", "maxLength": 128 },

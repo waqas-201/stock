@@ -56,6 +56,7 @@ service cloud.firestore {
         && data.lowStockThreshold is number && data.lowStockThreshold >= 0
         && (!('productionDate' in data) || data.productionDate == null || (data.productionDate is string && data.productionDate.size() <= 30))
         && (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 2000))
+        && (!('tags' in data) || data.tags == null || (data.tags is list))
         && (!('companyId' in data) || data.companyId == null || (data.companyId is string && data.companyId.size() <= 128))
         && (!('companyName' in data) || data.companyName == null || (data.companyName is string && data.companyName.size() <= 200))
         && data.createdAt is string && data.createdAt.size() <= 50

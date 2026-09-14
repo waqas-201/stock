@@ -18,14 +18,16 @@ import {
   Eye,
   History,
   User,
-  Building2,
+  Mic,
+  Sparkles,
+  Tag as TagIcon,
+  Hash,
 } from 'lucide-react';
-import { StockItem, StockFilter, SortField, SortOrder, CompanyProfile } from '../types';
+import { StockItem, StockFilter, SortField, SortOrder } from '../types';
+import { getTagStyle, getUniqueTagsWithCounts } from '../lib/tagUtils';
 
 interface StockTableProps {
   items: StockItem[];
-  companies?: CompanyProfile[];
-  activeCompanyId?: string;
   activeFilter: StockFilter;
   confirmOnDelete: boolean;
   onToggleConfirmOnDelete: () => void;
@@ -37,13 +39,15 @@ interface StockTableProps {
   onExportExcel: () => void;
   onViewItemDetails: (item: StockItem) => void;
   onOpenAuditTrail: () => void;
-  onOpenCompanyModal?: () => void;
+  onOpenVoiceAssistant?: () => void;
+  searchQuery?: string;
+  onSearchQueryChange?: (query: string) => void;
+  selectedTag?: string | null;
+  onSelectTag?: (tag: string | null) => void;
 }
 
 export const StockTable: React.FC<StockTableProps> = ({
   items = [],
-  companies = [],
-  activeCompanyId = 'all',
   activeFilter,
   confirmOnDelete,
   onToggleConfirmOnDelete,
@@ -54,9 +58,32 @@ export const StockTable: React.FC<StockTableProps> = ({
   onQuickQuantityChange,
   onViewItemDetails,
   onOpenAuditTrail,
-  onOpenCompanyModal,
+  onOpenVoiceAssistant,
+  searchQuery: externalSearchQuery,
+  onSearchQueryChange,
+  selectedTag: externalSelectedTag,
+  onSelectTag,
 }) => {
-  const [searchQuery, setSearchQuery] = useState('');
+  const [internalSearchQuery, setInternalSearchQuery] = useState('');
+  const searchQuery = externalSearchQuery !== undefined ? externalSearchQuery : internalSearchQuery;
+  const setSearchQuery = (val: string) => {
+    if (onSearchQueryChange) {
+      onSearchQueryChange(val);
+    } else {
+      setInternalSearchQuery(val);
+    }
+  };
+
+  const [internalSelectedTag, setInternalSelectedTag] = useState<string | null>(null);
+  const selectedTag = externalSelectedTag !== undefined ? externalSelectedTag : internalSelectedTag;
+  const setSelectedTag = (tag: string | null) => {
+    if (onSelectTag) {
+      onSelectTag(tag);
+    } else {
+      setInternalSelectedTag(tag);
+    }
+  };
+
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   // Default to card view for touch & mobile usability
@@ -96,19 +123,32 @@ export const StockTable: React.FC<StockTableProps> = ({
     }
   };
 
-  // Filter items
+  // Unique tags extracted from inventory items
   const safeItems = Array.isArray(items) ? items : [];
+  const uniqueTags = getUniqueTagsWithCounts(safeItems);
+
+  // Filter items
   const filteredItems = safeItems.filter((item) => {
+    // 1. Tag Filter
+    if (selectedTag && (!Array.isArray(item.tags) || !item.tags.includes(selectedTag))) {
+      return false;
+    }
+
+    // 2. Search query (matches item name, unit, notes, batch/date, and tags)
     const query = searchQuery.toLowerCase().trim();
     if (query) {
+      const cleanQ = query.replace(/^#+/, '');
       const matchName = item.itemName.toLowerCase().includes(query);
       const matchUnit = item.unit.toLowerCase().includes(query);
       const matchNotes = item.notes?.toLowerCase().includes(query) ?? false;
       const matchProdDate = item.productionDate?.includes(query) ?? false;
-      if (!matchName && !matchUnit && !matchNotes && !matchProdDate) {
+      const matchTags = Array.isArray(item.tags) && item.tags.some((t) => t.toLowerCase().includes(cleanQ));
+      if (!matchName && !matchUnit && !matchNotes && !matchProdDate && !matchTags) {
         return false;
       }
     }
+
+    // 3. Status filter tab
     if (activeFilter === 'in_stock') return isItemInStock(item);
     if (activeFilter === 'low_stock') return isItemLowStock(item);
     if (activeFilter === 'out_of_stock') return (item.quantity || 0) <= 0;
@@ -133,6 +173,15 @@ export const StockTable: React.FC<StockTableProps> = ({
       const aDate = a.productionDate || '';
       const bDate = b.productionDate || '';
       const cmp = aDate.localeCompare(bDate);
+      return sortOrder === 'asc' ? cmp : -cmp;
+    }
+    if (sortField === 'tags') {
+      const aTags = Array.isArray(a.tags) && a.tags.length > 0 ? a.tags.join(', ') : '';
+      const bTags = Array.isArray(b.tags) && b.tags.length > 0 ? b.tags.join(', ') : '';
+      if (!aTags && !bTags) return 0;
+      if (!aTags) return 1;
+      if (!bTags) return -1;
+      const cmp = aTags.localeCompare(bTags);
       return sortOrder === 'asc' ? cmp : -cmp;
     }
     return 0;
@@ -171,19 +220,47 @@ export const StockTable: React.FC<StockTableProps> = ({
               placeholder="Search items by name, notes, batch, unit..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-9 py-2.5 min-h-[44px] text-base sm:text-sm text-slate-900 bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent placeholder:text-slate-400"
+              className="w-full pl-9 pr-16 py-2.5 min-h-[44px] text-base sm:text-sm text-slate-900 bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent placeholder:text-slate-400"
             />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 min-w-[28px] min-h-[28px] flex items-center justify-center text-slate-400 hover:text-slate-600 cursor-pointer"
-                aria-label="Clear search"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="min-w-[28px] min-h-[28px] flex items-center justify-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                  aria-label="Clear search"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+              {onOpenVoiceAssistant && (
+                <button
+                  type="button"
+                  onClick={onOpenVoiceAssistant}
+                  className="min-w-[32px] min-h-[32px] flex items-center justify-center text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                  title="Voice search & instructions (Add, Check, Update, Delete)"
+                  aria-label="Voice Search"
+                >
+                  <Mic className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
+
+          {/* Voice Search & Instruction Assistant button */}
+          {onOpenVoiceAssistant && (
+            <button
+              id="btn-voice-assistant"
+              type="button"
+              onClick={onOpenVoiceAssistant}
+              className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3 sm:px-3.5 py-2 text-xs sm:text-sm font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100/80 active:bg-emerald-200/70 border border-emerald-300 rounded-xl shadow-2xs transition-all cursor-pointer shrink-0"
+              title="Speak voice instructions to Search, Create, Read, Update, or Delete stock"
+            >
+              <Mic className="w-4 h-4 text-emerald-600 shrink-0 animate-pulse" />
+              <span className="hidden sm:inline">Voice Assistant</span>
+              <span className="sm:hidden">Voice</span>
+            </button>
+          )}
 
           {/* Audit Trail quick shortcut */}
           <button
@@ -281,13 +358,14 @@ export const StockTable: React.FC<StockTableProps> = ({
               )}
             </button>
 
-            {/* Sort Toggle for Mobile */}
+            {/* Sort Toggle for Mobile & Compact */}
             <button
               type="button"
               onClick={() => {
                 if (sortField === 'name') toggleSort('quantity');
                 else if (sortField === 'quantity') toggleSort('threshold');
                 else if (sortField === 'threshold') toggleSort('production_date');
+                else if (sortField === 'production_date') toggleSort('tags');
                 else toggleSort('name');
               }}
               title={`Sort by ${sortField} (${sortOrder})`}
@@ -300,6 +378,8 @@ export const StockTable: React.FC<StockTableProps> = ({
                   ? 'Alert Level'
                   : sortField === 'production_date'
                   ? 'Prod. Date'
+                  : sortField === 'tags'
+                  ? 'Tags'
                   : sortField}
               </span>
               <span className="text-[10px] text-slate-400">
@@ -336,6 +416,85 @@ export const StockTable: React.FC<StockTableProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Row 3: Product Labels & Tags Filter Bar */}
+        {uniqueTags.length > 0 && (
+          <div
+            id="tag-filter-bar"
+            className="pt-2 border-t border-slate-200/80 flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1"
+          >
+            <div className="flex items-center gap-1 text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 pl-0.5 pr-1">
+              <TagIcon className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="hidden xs:inline">Tags:</span>
+            </div>
+
+            {/* "All Tags" button */}
+            <button
+              type="button"
+              onClick={() => setSelectedTag(null)}
+              className={`min-h-[30px] px-2.5 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 ${
+                selectedTag === null
+                  ? 'bg-slate-900 text-white shadow-2xs'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              <span>All Tags</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                  selectedTag === null ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                {safeItems.length}
+              </span>
+            </button>
+
+            {/* Individual Tag Pills */}
+            {uniqueTags.map(({ name, count }) => {
+              const isSelected = selectedTag === name;
+              const style = getTagStyle(name);
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => setSelectedTag(isSelected ? null : name)}
+                  className={`min-h-[30px] px-2.5 py-1 text-xs font-semibold rounded-lg border transition-all cursor-pointer shrink-0 flex items-center gap-1.5 ${
+                    isSelected
+                      ? `${style.activeBg} shadow-2xs ring-2 ring-emerald-500/20`
+                      : `${style.bg} ${style.text} ${style.border} ${style.hover}`
+                  }`}
+                  title={
+                    isSelected
+                      ? `Click to clear filter for "${name}"`
+                      : `Filter inventory by tag "${name}" (${count} items)`
+                  }
+                >
+                  <Hash className="w-3 h-3 opacity-60" />
+                  <span>{name}</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                      isSelected ? 'bg-black/20 text-white' : 'bg-black/5 text-current'
+                    }`}
+                  >
+                    {count}
+                  </span>
+                  {isSelected && <X className="w-3 h-3 ml-0.5" />}
+                </button>
+              );
+            })}
+
+            {/* Reset active tag filter */}
+            {selectedTag && (
+              <button
+                type="button"
+                onClick={() => setSelectedTag(null)}
+                className="text-xs text-rose-600 hover:text-rose-800 font-semibold px-2 py-1 underline shrink-0 cursor-pointer flex items-center gap-0.5"
+              >
+                <X className="w-3 h-3" />
+                <span>Clear Tag</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Main Content Area */}
@@ -348,13 +507,27 @@ export const StockTable: React.FC<StockTableProps> = ({
             <p className="text-base font-bold text-slate-800">
               {items.length === 0
                 ? 'No inventory items yet'
+                : selectedTag
+                ? `No items found with tag "#${selectedTag}"`
                 : 'No items match this filter'}
             </p>
             <p className="text-xs text-slate-500 max-w-xs">
               {items.length === 0
                 ? 'Start tracking your stock with individual low-stock alerts and production dates.'
+                : selectedTag
+                ? `There are no products currently tagged with #${selectedTag} under this view.`
                 : 'Try adjusting your search keyword or switching the filter tab.'}
             </p>
+            {selectedTag && (
+              <button
+                type="button"
+                onClick={() => setSelectedTag(null)}
+                className="mt-2 min-h-[38px] inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-xl shadow-2xs cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Clear "#{selectedTag}" Filter</span>
+              </button>
+            )}
             {items.length === 0 && (
               <button
                 type="button"
@@ -425,22 +598,6 @@ export const StockTable: React.FC<StockTableProps> = ({
 
                   {/* Metadata Chips: Unit, Alert Level & Production Date */}
                   <div className="mt-2 flex items-center gap-1.5 flex-wrap text-xs">
-                    {/* Company Profile Chip */}
-                    {companies.length > 0 && (
-                      <span
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200"
-                        title={`Company: ${companies.find((c) => c.id === item.companyId)?.name || companies.find((c) => c.isDefault)?.name || 'Primary Company'}`}
-                      >
-                        <Building2 className="w-3 h-3 text-slate-500 shrink-0" />
-                        <span className="truncate max-w-[120px]">
-                          {companies.find((c) => c.id === item.companyId)?.code ||
-                            companies.find((c) => c.id === item.companyId)?.name ||
-                            companies.find((c) => c.isDefault)?.code ||
-                            'Primary'}
-                        </span>
-                      </span>
-                    )}
-
                     <span className="inline-block px-2 py-0.5 bg-slate-100 rounded-md font-semibold text-slate-700">
                       Unit: {item.unit}
                     </span>
@@ -479,6 +636,36 @@ export const StockTable: React.FC<StockTableProps> = ({
                       </span>
                     )}
                   </div>
+
+                  {/* Product Tags on Card */}
+                  {Array.isArray(item.tags) && item.tags.length > 0 && (
+                    <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
+                      {item.tags.map((tag) => {
+                        const style = getTagStyle(tag);
+                        const isSelected = selectedTag === tag;
+                        return (
+                          <button
+                            key={tag}
+                            type="button"
+                            onClick={() => setSelectedTag(isSelected ? null : tag)}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold border transition-all cursor-pointer ${
+                              isSelected
+                                ? `${style.activeBg} ring-2 ring-emerald-500/20`
+                                : `${style.bg} ${style.text} ${style.border} ${style.hover}`
+                            }`}
+                            title={
+                              isSelected
+                                ? `Click to clear filter for "${tag}"`
+                                : `Filter items by tag "${tag}"`
+                            }
+                          >
+                            <Hash className="w-2.5 h-2.5 opacity-60" />
+                            <span>{tag}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* Card Middle: Quantity Display & 44px+ Quick Touch Stepper */}
@@ -639,6 +826,17 @@ export const StockTable: React.FC<StockTableProps> = ({
                     <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
                   </button>
                 </th>
+                <th className="py-3.5 px-4 min-w-[140px]">
+                  <button
+                    type="button"
+                    onClick={() => toggleSort('tags')}
+                    className="inline-flex items-center gap-1.5 hover:text-slate-900 cursor-pointer font-bold uppercase text-slate-600"
+                  >
+                    <TagIcon className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Tags</span>
+                    <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                  </button>
+                </th>
                 <th className="py-3.5 px-4 min-w-[150px] font-bold uppercase text-slate-600">
                   <span>Last Modified</span>
                 </th>
@@ -700,24 +898,14 @@ export const StockTable: React.FC<StockTableProps> = ({
                           )}
                         </div>
 
-                        {/* Company & Notes under item name */}
-                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                          {companies.length > 0 && (
-                            <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 font-medium">
-                              <Building2 className="w-3 h-3 text-slate-400 shrink-0" />
-                              <span>
-                                {companies.find((c) => c.id === item.companyId)?.name ||
-                                  companies.find((c) => c.isDefault)?.name ||
-                                  'Primary Company'}
-                              </span>
-                            </span>
-                          )}
-                          {item.notes && (
+                        {/* Notes under item name */}
+                        {item.notes && (
+                          <div className="mt-0.5">
                             <p className="text-xs text-slate-400 italic line-clamp-1">
-                              {companies.length > 0 ? '• ' : ''}{item.notes}
+                              {item.notes}
                             </p>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </div>
                     </td>
 
@@ -788,6 +976,40 @@ export const StockTable: React.FC<StockTableProps> = ({
                         </span>
                       ) : (
                         <span className="text-xs text-slate-400 italic">—</span>
+                      )}
+                    </td>
+
+                    {/* Product Tags Column */}
+                    <td className="py-3.5 px-4">
+                      {Array.isArray(item.tags) && item.tags.length > 0 ? (
+                        <div className="flex items-center gap-1 flex-wrap max-w-[200px]">
+                          {item.tags.map((tag) => {
+                            const style = getTagStyle(tag);
+                            const isSelected = selectedTag === tag;
+                            return (
+                              <button
+                                key={tag}
+                                type="button"
+                                onClick={() => setSelectedTag(isSelected ? null : tag)}
+                                className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold border transition-all cursor-pointer ${
+                                  isSelected
+                                    ? `${style.activeBg} ring-1 ring-emerald-400`
+                                    : `${style.bg} ${style.text} ${style.border} hover:opacity-80`
+                                }`}
+                                title={
+                                  isSelected
+                                    ? `Click to clear filter for "${tag}"`
+                                    : `Filter items by tag "${tag}"`
+                                }
+                              >
+                                <Hash className="w-2 h-2 opacity-60" />
+                                <span>{tag}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-300 italic">—</span>
                       )}
                     </td>
 

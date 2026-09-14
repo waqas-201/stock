@@ -1,20 +1,3 @@
-export interface CompanyProfile {
-  id: string;
-  name: string;
-  code?: string;
-  tagline?: string;
-  currency?: string;
-  taxId?: string;
-  email?: string;
-  phone?: string;
-  address?: string;
-  color?: string; // Theme badge accent e.g. 'emerald' | 'blue' | 'indigo' | 'violet' | 'amber' | 'rose'
-  isDefault?: boolean;
-  createdAt: string;
-  updatedAt: string;
-  userId?: string;
-}
-
 export interface ItemAuditEntry {
   id: string;
   action: 'created' | 'quantity_changed' | 'edited' | 'deleted' | 'restored';
@@ -24,12 +7,10 @@ export interface ItemAuditEntry {
   previousQuantity?: number;
   newQuantity?: number;
   delta?: number;
-  performedBy: string; // Name or role of staff/client who performed the action (e.g. "Waqas", "Warehouse Desk")
+  performedBy: string; // Name of staff who performed the action (e.g. "Waqas")
   userEmail?: string;
   userPhotoURL?: string;
   userId?: string;
-  companyId?: string;
-  companyName?: string;
 }
 
 export interface StockItem {
@@ -40,8 +21,7 @@ export interface StockItem {
   lowStockThreshold: number; // Individual low stock alert threshold for this specific item
   productionDate?: string; // Optional production / manufacturing date (YYYY-MM-DD)
   notes?: string; // Optional notes (e.g., batch number, shelf, supplier, remarks)
-  companyId?: string; // Scoped to company profile
-  companyName?: string;
+  tags?: string[]; // Optional product labels or categorization tags (e.g., "Office", "Groceries", "Warehouse")
   createdAt?: string;
   updatedAt?: string;
   userId?: string;
@@ -60,7 +40,6 @@ export interface StockUnit {
   code?: string;
   isDefault?: boolean;
   userId?: string;
-  companyId?: string;
 }
 
 export interface OperatorProfile {
@@ -74,11 +53,10 @@ export interface UserSetting {
   userId: string;
   confirmOnDelete: boolean;
   operatorName?: string;
-  activeCompanyId?: string;
   updatedAt?: string;
 }
 
 export type StockFilter = 'all' | 'in_stock' | 'low_stock' | 'out_of_stock';
-export type SortField = 'name' | 'quantity' | 'threshold' | 'date' | 'production_date';
+export type SortField = 'name' | 'quantity' | 'threshold' | 'date' | 'production_date' | 'tags';
 export type SortOrder = 'asc' | 'desc';
 

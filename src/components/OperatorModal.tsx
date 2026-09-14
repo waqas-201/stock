@@ -22,7 +22,7 @@ interface OperatorModalProps {
 }
 
 const PRESET_ROLES = [
-  'Store Manager',
+  'Team Member',
   'Warehouse Staff',
   'Receiving Clerk',
   'Dispatch Team',
@@ -30,9 +30,9 @@ const PRESET_ROLES = [
 ];
 
 const DEFAULT_OPERATOR: OperatorProfile = {
-  name: 'Waqas (Admin)',
+  name: 'Waqas',
   email: 'waqasvu892@gmail.com',
-  role: 'Administrator',
+  role: 'Team Member',
 };
 
 export const OperatorModal: React.FC<OperatorModalProps> = ({
@@ -45,8 +45,8 @@ export const OperatorModal: React.FC<OperatorModalProps> = ({
   currentUser,
 }) => {
   const activeOp = currentOperator || currentProfile || DEFAULT_OPERATOR;
-  const activeName = activeOp?.name || 'Waqas (Admin)';
-  const activeRole = activeOp?.role || 'Administrator';
+  const activeName = activeOp?.name || 'Waqas';
+  const activeRole = activeOp?.role && !/admin|manager/i.test(activeOp.role) ? activeOp.role : 'Team Member';
 
   const [name, setName] = useState(activeName);
   const [role, setRole] = useState(activeRole);
@@ -54,8 +54,8 @@ export const OperatorModal: React.FC<OperatorModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       const op = currentOperator || currentProfile || DEFAULT_OPERATOR;
-      setName(op?.name || 'Waqas (Admin)');
-      setRole(op?.role || 'Administrator');
+      setName(op?.name || 'Waqas');
+      setRole(op?.role && !/admin|manager/i.test(op.role) ? op.role : 'Team Member');
     }
   }, [isOpen, currentOperator, currentProfile]);
 
@@ -71,7 +71,7 @@ export const OperatorModal: React.FC<OperatorModalProps> = ({
       name: trimmed,
       email: currentUser?.email || op?.email || '',
       photoURL: currentUser?.photoURL || op?.photoURL,
-      role: role.trim() || 'Administrator',
+      role: role.trim() || 'Team Member',
     };
 
     if (onSaveOperator) {

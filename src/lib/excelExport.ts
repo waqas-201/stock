@@ -1,34 +1,28 @@
 import * as XLSX from 'xlsx';
-import { StockItem, CompanyProfile } from '../types';
+import { StockItem } from '../types';
 
 /**
   * Exports current stock items to an Excel (.xlsx) file with:
   * - Item Name
-  * - Company
   * - Unit
   * - Current Quantity
   * - Low Stock Alert Threshold
   * - Production Date
+  * - Tags
   * - Notes
   */
 export function exportToExcel(
   items: StockItem[],
-  filename = 'stock-inventory.xlsx',
-  companies?: CompanyProfile[]
+  filename = 'stock-inventory.xlsx'
 ): void {
-  const companyMap = new Map((companies || []).map((c) => [c.id, c.name]));
   const data = items.map((item) => {
-    const compName =
-      (item.companyId ? companyMap.get(item.companyId) : undefined) ||
-      item.companyName ||
-      'General';
     return {
       'Item Name': item.itemName,
-      Company: compName,
       Unit: item.unit,
       'Current Stock': item.quantity,
       'Low Stock Alert (Min)': item.lowStockThreshold ?? 5,
       'Production Date': item.productionDate || '',
+      Tags: Array.isArray(item.tags) && item.tags.length > 0 ? item.tags.join(', ') : '',
       Notes: item.notes || '',
     };
   });
@@ -37,11 +31,11 @@ export function exportToExcel(
 
   worksheet['!cols'] = [
     { wch: 36 }, // Item Name
-    { wch: 24 }, // Company
     { wch: 18 }, // Unit
     { wch: 16 }, // Current Stock
     { wch: 22 }, // Low Stock Alert
     { wch: 18 }, // Production Date
+    { wch: 26 }, // Tags
     { wch: 36 }, // Notes
   ];
 
@@ -56,17 +50,15 @@ export function exportToExcel(
   */
 export function exportToCsv(
   items: StockItem[],
-  filename = 'stock-inventory.csv',
-  companies?: CompanyProfile[]
+  filename = 'stock-inventory.csv'
 ): void {
-  const companyMap = new Map((companies || []).map((c) => [c.id, c.name]));
   const headers = [
     'Item Name',
-    'Company',
     'Unit',
     'Current Stock',
     'Low Stock Alert',
     'Production Date',
+    'Tags',
     'Notes',
   ];
 
@@ -78,17 +70,13 @@ export function exportToCsv(
       }
       return s;
     };
-    const compName =
-      (item.companyId ? companyMap.get(item.companyId) : undefined) ||
-      item.companyName ||
-      'General';
     return [
       escape(item.itemName),
-      escape(compName),
       escape(item.unit),
       escape(item.quantity),
       escape(item.lowStockThreshold ?? 5),
       escape(item.productionDate || ''),
+      escape(Array.isArray(item.tags) && item.tags.length > 0 ? item.tags.join('; ') : ''),
       escape(item.notes || ''),
     ].join(',');
   });
@@ -119,6 +107,7 @@ export async function parseExcelOrCsvFile(
     lowStockThreshold: number;
     productionDate?: string;
     notes?: string;
+    tags?: string[];
   }[]
 > {
   return new Promise((resolve, reject) => {
@@ -163,6 +152,7 @@ export async function parseExcelOrCsvFile(
           lowStockThreshold: number;
           productionDate?: string;
           notes?: string;
+          tags?: string[];
         }[] = [];
 
         for (let i = startIndex; i < rawRows.length; i++) {
@@ -188,7 +178,16 @@ export async function parseExcelOrCsvFile(
             : Math.max(0, parsedThreshold);
 
           const rawProdDate = row[4] ? String(row[4]).trim() : '';
-          const rawNotes = row[5] ? String(row[5]).trim() : '';
+          const rawTags = row[5] ? String(row[5]).trim() : '';
+          const rawNotes = row[6] ? String(row[6]).trim() : '';
+
+          let tags: string[] | undefined;
+          if (rawTags) {
+            tags = rawTags
+              .split(/[,;|]/)
+              .map((t) => t.trim().replace(/^#/, ''))
+              .filter((t) => t.length > 0);
+          }
 
           if (itemName) {
             parsedItems.push({
@@ -197,6 +196,7 @@ export async function parseExcelOrCsvFile(
               quantity,
               lowStockThreshold,
               productionDate: rawProdDate || undefined,
+              tags: tags && tags.length > 0 ? tags : undefined,
               notes: rawNotes || undefined,
             });
           }

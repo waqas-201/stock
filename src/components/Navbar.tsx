@@ -19,11 +19,9 @@ import {
   UserCheck,
   User,
   Users,
-  Building2,
 } from 'lucide-react';
 import type { User as FirebaseUser } from '../lib/firebase';
-import { OperatorProfile, CompanyProfile, StockItem } from '../types';
-import { CompanySelector } from './CompanySelector';
+import { OperatorProfile, StockItem } from '../types';
 
 interface NavbarProps {
   itemCount: number;
@@ -41,10 +39,6 @@ interface NavbarProps {
   onSignOut: () => void;
   currentOperator?: OperatorProfile;
   onOpenOperatorModal: () => void;
-  companies?: CompanyProfile[];
-  activeCompanyId?: string;
-  onSelectCompany?: (companyId: string) => void;
-  onOpenCompanyModal?: () => void;
   items?: StockItem[];
 }
 
@@ -64,15 +58,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSignOut,
   currentOperator,
   onOpenOperatorModal,
-  companies = [],
-  activeCompanyId = 'all',
-  onSelectCompany = (_companyId: string) => {},
-  onOpenCompanyModal = () => {},
   items = [],
 }) => {
-  const opName = currentOperator?.name || 'Waqas (Admin)';
+  const rawName = currentOperator?.name || 'Waqas';
+  const opName = rawName.replace(/\s*\(Admin\)/gi, '').trim() || 'Waqas';
   const opInitial = opName.charAt(0).toUpperCase() || 'W';
-  const opRole = currentOperator?.role || 'Staff Member';
+  const rawRole = currentOperator?.role || 'Team Member';
+  const opRole = /admin|manager/i.test(rawRole) ? 'Team Member' : rawRole;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -139,16 +131,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {/* Desktop and Tablet Action Tools */}
             <div className="hidden md:flex items-center gap-2 sm:gap-2.5">
-              {/* Company Profile Switcher */}
-              <CompanySelector
-                companies={companies}
-                activeCompanyId={activeCompanyId}
-                onSelectCompany={onSelectCompany}
-                onOpenManageModal={onOpenCompanyModal}
-                onManageCompanies={onOpenCompanyModal}
-                items={items}
-              />
-
               {/* Active Staff / Operator Attribution Switcher */}
               <button
                 id="btn-active-operator"
@@ -305,24 +287,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {/* Mobile Actions Header (Touch-optimized buttons) */}
             <div className="flex md:hidden items-center gap-1.5 shrink-0">
-              {/* Active Company Button on mobile */}
-              <button
-                type="button"
-                onClick={onOpenCompanyModal}
-                className="min-h-[44px] px-2 py-1.5 inline-flex items-center justify-center gap-1 text-xs font-bold bg-white text-slate-800 border border-slate-300 rounded-xl cursor-pointer shadow-2xs"
-                title="Manage Companies / Switch Profile"
-                aria-label="Active company profile"
-              >
-                <Building2 className="w-3.5 h-3.5 text-slate-700 shrink-0" />
-                <span className="max-w-[55px] truncate text-[11px] font-bold">
-                  {activeCompanyId === 'all'
-                    ? 'All'
-                    : companies.find((c) => c.id === activeCompanyId)?.code ||
-                      companies.find((c) => c.id === activeCompanyId)?.name?.slice(0, 6) ||
-                      'Comp'}
-                </span>
-              </button>
-
               {/* Active Operator Switcher on mobile */}
               <button
                 type="button"
@@ -527,44 +491,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </button>
                 </div>
               )}
-            </div>
-
-            {/* Active Company Profile inside Drawer */}
-            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-slate-200 text-slate-700 flex items-center justify-center">
-                    <Building2 className="w-3.5 h-3.5" />
-                  </div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                    Company Profile
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsMobileMenuOpen(false);
-                    onOpenCompanyModal();
-                  }}
-                  className="text-xs font-bold text-emerald-700 hover:text-emerald-900 cursor-pointer"
-                >
-                  Manage Profiles
-                </button>
-              </div>
-
-              <select
-                id="mobile-nav-company-select"
-                value={activeCompanyId}
-                onChange={(e) => onSelectCompany(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-bold bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 text-slate-900"
-              >
-                <option value="all">🏢 All Companies ({companies.length})</option>
-                {companies.map((comp) => (
-                  <option key={comp.id} value={comp.id}>
-                    {comp.name} {comp.code ? `(${comp.code})` : ''} {comp.isDefault ? '• Default' : ''}
-                  </option>
-                ))}
-              </select>
             </div>
 
             {/* Active Staff Profile inside Drawer */}

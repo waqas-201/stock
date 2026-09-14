@@ -10,15 +10,15 @@ import {
   Calendar,
   FileText,
   Clock,
-  Building2,
 } from 'lucide-react';
-import { StockItem, StockUnit, CompanyProfile } from '../types';
+import { StockItem, StockUnit } from '../types';
+import { TagInput } from './TagInput';
 
 interface EditItemModalProps {
   isOpen: boolean;
   item: StockItem | null;
   units: StockUnit[];
-  companies?: CompanyProfile[];
+  availableTags?: string[];
   onClose: () => void;
   onSave: (
     id: string,
@@ -28,21 +28,19 @@ interface EditItemModalProps {
     lowStockThreshold: number,
     productionDate?: string,
     notes?: string,
-    companyId?: string
+    tags?: string[]
   ) => void;
   onOpenUnitModal: () => void;
-  onOpenCompanyModal?: () => void;
 }
 
 export const EditItemModal: React.FC<EditItemModalProps> = ({
   isOpen,
   item,
   units,
-  companies = [],
+  availableTags = [],
   onClose,
   onSave,
   onOpenUnitModal,
-  onOpenCompanyModal,
 }) => {
   const [itemName, setItemName] = useState('');
   const [unit, setUnit] = useState('');
@@ -50,7 +48,7 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
   const [threshold, setThreshold] = useState('5');
   const [productionDate, setProductionDate] = useState('');
   const [notes, setNotes] = useState('');
-  const [companyId, setCompanyId] = useState<string>('');
+  const [tags, setTags] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -63,10 +61,10 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
       );
       setProductionDate(item.productionDate || '');
       setNotes(item.notes || '');
-      setCompanyId(item.companyId || (companies[0]?.id || ''));
+      setTags(Array.isArray(item.tags) ? [...item.tags] : []);
       setError(null);
     }
-  }, [item, isOpen, companies]);
+  }, [item, isOpen]);
 
   if (!isOpen || !item) return null;
 
@@ -115,7 +113,7 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
       parsedThreshold,
       productionDate.trim() || undefined,
       notes.trim() || undefined,
-      companyId || undefined
+      tags
     );
     onClose();
   };
@@ -150,7 +148,7 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
                 Edit Stock Item
               </h3>
               <p className="text-xs text-slate-500 truncate">
-                Update stock level, company allocation, alerts & details
+                Update stock level, alerts & details
               </p>
             </div>
           </div>
@@ -174,45 +172,6 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
             <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
               <span>{error}</span>
-            </div>
-          )}
-
-          {/* Company Profile Allocation */}
-          {companies && companies.length > 0 && (
-            <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
-              <div className="flex items-center justify-between mb-1.5">
-                <label
-                  htmlFor="edit-item-company"
-                  className="block text-xs font-bold uppercase tracking-wider text-slate-700"
-                >
-                  Assigned Company Profile
-                </label>
-                {onOpenCompanyModal && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onOpenCompanyModal();
-                    }}
-                    className="inline-flex items-center gap-1 text-[11px] text-emerald-700 hover:text-emerald-900 font-bold cursor-pointer"
-                  >
-                    <Building2 className="w-3 h-3" />
-                    <span>Manage Companies</span>
-                  </button>
-                )}
-              </div>
-              <select
-                id="edit-item-company"
-                value={companyId}
-                onChange={(e) => setCompanyId(e.target.value)}
-                className="w-full px-3 py-2 text-xs sm:text-sm font-semibold bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 text-slate-900"
-              >
-                {companies.map((comp) => (
-                  <option key={comp.id} value={comp.id}>
-                    {comp.name} {comp.code ? `(${comp.code})` : ''} {comp.isDefault ? '• Default' : ''}
-                  </option>
-                ))}
-              </select>
             </div>
           )}
 
@@ -433,7 +392,17 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
             </p>
           </div>
 
-          {/* 6. Notes / Remarks */}
+          {/* 6. Product Labels & Tags */}
+          <div className="p-3.5 bg-slate-50/80 border border-slate-200 rounded-2xl">
+            <TagInput
+              tags={tags}
+              onChange={setTags}
+              availableTags={availableTags}
+              placeholder="e.g. Office, Stationery, Food, Fragile..."
+            />
+          </div>
+
+          {/* 7. Notes / Remarks */}
           <div className="p-3.5 bg-slate-50/80 border border-slate-200 rounded-2xl space-y-1.5">
             <label
               htmlFor="edit-item-notes"

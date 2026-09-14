@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { StockItem, StockUnit, StockFilter, OperatorProfile, CompanyProfile } from './types';
+import { StockItem, StockUnit, StockFilter, OperatorProfile } from './types';
 import {
   loadStoredStock,
   saveStoredStock,
@@ -20,19 +20,12 @@ import {
   DEFAULT_UNITS,
 } from './lib/unitStorage';
 import {
-  loadStoredCompanies,
-  saveStoredCompanies,
-  loadActiveCompanyId,
-  saveActiveCompanyId,
-} from './lib/companyStorage';
-import {
   exportToExcel,
   exportToCsv,
   parseExcelOrCsvFile,
 } from './lib/excelExport';
 import {
   auth,
-  testConnection,
   signInWithGoogle,
   signInQuickAccess,
   signOutUser,
@@ -50,11 +43,9 @@ import {
   saveAuditLogToFirestore,
   subscribeUserSettings,
   saveUserSettingsToFirestore,
-  subscribeCompanies,
-  saveCompanyToFirestore,
-  deleteCompanyFromFirestore,
   migrateLocalDataToCloud,
 } from './lib/firestoreService';
+import { VoiceCommandResult } from './lib/voiceNlp';
 
 // Components
 import { Navbar } from './components/Navbar';
@@ -66,7 +57,7 @@ import { ItemDetailsModal } from './components/ItemDetailsModal';
 import { AuditTrailModal } from './components/AuditTrailModal';
 import { UnitManagementModal } from './components/UnitManagementModal';
 import { OperatorModal } from './components/OperatorModal';
-import { CompanyProfileModal } from './components/CompanyProfileModal';
+import { VoiceAssistantModal } from './components/VoiceAssistantModal';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { UnauthorizedDomainModal } from './components/UnauthorizedDomainModal';
 import {
@@ -84,7 +75,7 @@ import {
   UserCheck,
   ShieldCheck,
   Users,
-  Building2,
+  Mic,
 } from 'lucide-react';
 
 export function App() {
@@ -97,9 +88,23 @@ export function App() {
   // App states
   const [items, setItems] = useState<StockItem[]>(() => loadStoredStock());
   const [units, setUnits] = useState<StockUnit[]>(() => loadManagedUnits());
-  const [companies, setCompanies] = useState<CompanyProfile[]>(() => loadStoredCompanies());
-  const [activeCompanyId, setActiveCompanyId] = useState<string>(() => loadActiveCompanyId());
+  const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<StockFilter>('all');
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+
+  // Available unique tags across inventory for autocomplete and suggestion pills
+  const availableTags = useMemo(() => {
+    const set = new Set<string>();
+    items.forEach((item) => {
+      if (Array.isArray(item.tags)) {
+        item.tags.forEach((t) => {
+          if (t && t.trim()) set.add(t.trim());
+        });
+      }
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [items]);
+
   const [globalLogs, setGlobalLogs] = useState<GlobalAuditRecord[]>(() =>
     loadGlobalAuditLog()
   );
@@ -109,7 +114,7 @@ export function App() {
     loadOperatorProfile()
   );
   const [isOperatorModalOpen, setIsOperatorModalOpen] = useState(false);
-  const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
+  const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
 
   // User choice: whether to show confirmation dialog before deleting items
   const [confirmOnDelete, setConfirmOnDelete] = useState<boolean>(() =>
@@ -153,20 +158,20 @@ export function App() {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  // Initial Firebase connection check & auth listener
+  // Auth state listener
   useEffect(() => {
-    testConnection();
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       setIsAuthLoading(false);
       if (user) {
         setOperator((prev) => {
-          const prevName = prev?.name || 'Waqas (Admin)';
-          const isGeneric = prevName === 'Staff Member' || prevName === 'Store Operator';
+          const rawName = prev?.name || 'Waqas';
+          const cleanName = rawName.replace(/\s*\(Admin\)/gi, '').trim() || 'Waqas';
+          const isGeneric = cleanName === 'Staff Member' || cleanName === 'Store Operator';
           const updated: OperatorProfile = {
-            name: isGeneric && user.displayName ? user.displayName : prevName,
+            name: isGeneric && user.displayName ? user.displayName : cleanName,
             email: user.email || prev?.email || '',
-            role: prev?.role || 'Administrator',
+            role: prev?.role && !/admin|manager/i.test(prev.role) ? prev.role : 'Team Member',
             photoURL: user.photoURL || prev?.photoURL,
           };
           saveOperatorProfile(updated);
@@ -191,14 +196,12 @@ export function App() {
             try {
               const localUnits = loadManagedUnits();
               const localLogs = loadGlobalAuditLog();
-              const localCompanies = loadStoredCompanies();
               const { migratedItems } = await migrateLocalDataToCloud(
                 localItems,
                 localUnits,
                 localLogs,
                 operator,
-                currentUser.uid,
-                localCompanies
+                currentUser.uid
               );
               if (migratedItems > 0) {
                 showToast(
@@ -260,86 +263,6 @@ export function App() {
     });
     return () => unsubscribe();
   }, [currentUser]);
-
-  // Real-time Firestore synchronizer for companies
-  useEffect(() => {
-    if (!currentUser) return;
-    const unsubscribe = subscribeCompanies((firestoreCompanies) => {
-      if (firestoreCompanies.length > 0) {
-        setCompanies(firestoreCompanies);
-        saveStoredCompanies(firestoreCompanies);
-      }
-    });
-    return () => unsubscribe();
-  }, [currentUser]);
-
-  // Company management handlers
-  const handleSelectCompany = (companyId: string) => {
-    setActiveCompanyId(companyId);
-    saveActiveCompanyId(companyId);
-    const selected = companies.find((c) => c.id === companyId);
-    showToast(
-      companyId === 'all'
-        ? 'Viewing inventory for All Companies'
-        : `Switched to ${selected?.name || 'Company'}`,
-      'info'
-    );
-  };
-
-  const handleSaveCompany = (company: CompanyProfile) => {
-    const exists = companies.some((c) => c.id === company.id);
-    let updated: CompanyProfile[];
-    if (exists) {
-      updated = companies.map((c) => (c.id === company.id ? company : c));
-      showToast(`Updated company "${company.name}"`, 'success');
-    } else {
-      updated = [...companies, company];
-      showToast(`Added company "${company.name}"`, 'success');
-    }
-    setCompanies(updated);
-    saveStoredCompanies(updated);
-    if (currentUser) {
-      saveCompanyToFirestore(company, currentUser.uid).catch(console.error);
-    }
-  };
-
-  const handleDeleteCompany = (companyId: string) => {
-    const target = companies.find((c) => c.id === companyId);
-    if (!target) return;
-
-    // Check if any items are assigned to this company
-    const usedBy = items.filter((i) => i.companyId === companyId);
-    if (usedBy.length > 0) {
-      showToast(`Cannot delete "${target.name}": contains ${usedBy.length} inventory items.`, 'error');
-      return;
-    }
-
-    const updated = companies.filter((c) => c.id !== companyId);
-    setCompanies(updated);
-    saveStoredCompanies(updated);
-    if (activeCompanyId === companyId) {
-      setActiveCompanyId('all');
-      saveActiveCompanyId('all');
-    }
-    if (currentUser) {
-      deleteCompanyFromFirestore(companyId).catch(console.error);
-    }
-    showToast(`Removed company "${target.name}"`, 'info');
-  };
-
-  const handleSetDefaultCompany = (companyId: string) => {
-    const updated = companies.map((c) => ({
-      ...c,
-      isDefault: c.id === companyId,
-    }));
-    setCompanies(updated);
-    saveStoredCompanies(updated);
-    if (currentUser) {
-      updated.forEach((c) => saveCompanyToFirestore(c, currentUser.uid).catch(console.error));
-    }
-    const target = updated.find((c) => c.id === companyId);
-    showToast(`Set "${target?.name}" as default company`, 'success');
-  };
 
   // Persist items locally and to Cloud DB
   const updateItems = (newItems: StockItem[]) => {
@@ -503,24 +426,7 @@ export function App() {
     showToast('Reset units to default list', 'info');
   };
 
-  // Filtered items based on active company profile selection
-  const filteredItemsByCompany = useMemo(() => {
-    const safeItems = Array.isArray(items) ? items : [];
-    if (activeCompanyId === 'all') {
-      return safeItems;
-    }
-    return safeItems.filter((item) => {
-      if (item.companyId) {
-        return item.companyId === activeCompanyId;
-      }
-      // If legacy item has no companyId, associate it with the default company
-      const safeCompanies = Array.isArray(companies) ? companies : [];
-      const defComp = safeCompanies.find((c) => c.isDefault) || safeCompanies[0];
-      return defComp?.id === activeCompanyId;
-    });
-  }, [items, activeCompanyId, companies]);
-
-  // Stock items actions with company, production date, notes, and complete audit trail
+  // Stock items actions with production date, notes, tags, and complete audit trail
   const handleAddItem = (
     itemName: string,
     unit: string,
@@ -528,30 +434,25 @@ export function App() {
     lowStockThreshold: number,
     productionDate?: string,
     notes?: string,
-    companyId?: string
+    tags?: string[]
   ) => {
-    const chosenCompanyId =
-      companyId ||
-      (activeCompanyId !== 'all'
-        ? activeCompanyId
-        : companies.find((c) => c.isDefault)?.id || companies[0]?.id);
-    const targetComp = companies.find((c) => c.id === chosenCompanyId);
-
     const now = new Date().toISOString();
+    const cleanTags = Array.isArray(tags)
+      ? tags.map((t) => t.trim().replace(/^#+/, '')).filter((t) => t.length > 0)
+      : [];
+
     const auditEntry = createAuditEntry(
       'created',
-      `Item added${targetComp ? ` (${targetComp.name})` : ''}`,
+      'Item added',
       `Initial stock: ${quantity} ${unit}, Alert threshold: ≤ ${lowStockThreshold}${
-        targetComp ? `, Company: ${targetComp.name}` : ''
-      }${
         productionDate ? `, Production Date: ${productionDate}` : ''
-      }${notes ? `, Notes: ${notes}` : ''}`,
+      }${cleanTags.length > 0 ? `, Tags: [${cleanTags.join(', ')}]` : ''}${
+        notes ? `, Notes: ${notes}` : ''
+      }`,
       undefined,
       quantity,
       operator.name,
-      operator.email,
-      targetComp?.id,
-      targetComp?.name
+      operator.email
     );
 
     const newItem: StockItem = {
@@ -562,7 +463,7 @@ export function App() {
       lowStockThreshold,
       productionDate,
       notes,
-      companyId: targetComp?.id,
+      tags: cleanTags,
       createdAt: now,
       updatedAt: now,
       userId: currentUser?.uid,
@@ -584,8 +485,6 @@ export function App() {
       unit: newItem.unit,
       performedBy: operator.name,
       userEmail: operator.email,
-      companyId: targetComp?.id,
-      companyName: targetComp?.name,
     });
     setGlobalLogs((prev) => [globalEntry, ...prev]);
 
@@ -595,10 +494,7 @@ export function App() {
       saveAuditLogToFirestore(globalEntry, currentUser.uid).catch(console.error);
     }
 
-    showToast(
-      `Added "${itemName}"${targetComp ? ` for ${targetComp.name}` : ''} by ${operator.name}`,
-      'success'
-    );
+    showToast(`Added "${itemName}" by ${operator.name}`, 'success');
   };
 
   const handleSaveEditItem = (
@@ -609,14 +505,14 @@ export function App() {
     lowStockThreshold: number,
     productionDate?: string,
     notes?: string,
-    companyId?: string
+    tags?: string[]
   ) => {
     const current = items.find((i) => i.id === id);
     if (!current) return;
 
-    const chosenCompanyId = companyId || current.companyId;
-    const targetComp = companies.find((c) => c.id === chosenCompanyId);
-    const prevComp = companies.find((c) => c.id === current.companyId);
+    const cleanTags = Array.isArray(tags)
+      ? tags.map((t) => t.trim().replace(/^#+/, '')).filter((t) => t.length > 0)
+      : [];
 
     const changes: string[] = [];
     if (current.itemName !== itemName) {
@@ -633,17 +529,17 @@ export function App() {
         `Alert limit: ≤${current.lowStockThreshold ?? 5} → ≤${lowStockThreshold}`
       );
     }
-    if (current.companyId !== chosenCompanyId) {
-      changes.push(
-        `Company: "${prevComp?.name || 'None'}" → "${targetComp?.name || 'None'}"`
-      );
-    }
     if (current.productionDate !== productionDate) {
       changes.push(
         `Prod Date: ${current.productionDate || 'None'} → ${
           productionDate || 'None'
         }`
       );
+    }
+    const currentTagsStr = Array.isArray(current.tags) ? current.tags.join(', ') : '';
+    const newTagsStr = cleanTags.join(', ');
+    if (currentTagsStr !== newTagsStr) {
+      changes.push(`Tags: [${currentTagsStr || 'none'}] → [${newTagsStr || 'none'}]`);
     }
     if (current.notes !== notes) {
       changes.push(notes ? 'Notes updated' : 'Notes cleared');
@@ -656,9 +552,7 @@ export function App() {
       current.quantity,
       quantity,
       operator.name,
-      operator.email,
-      targetComp?.id,
-      targetComp?.name
+      operator.email
     );
 
     const updatedTrail = [auditEntry, ...(current.auditTrail || [])];
@@ -671,7 +565,7 @@ export function App() {
       lowStockThreshold,
       productionDate,
       notes,
-      companyId: targetComp?.id,
+      tags: cleanTags,
       updatedAt: new Date().toISOString(),
       userId: currentUser?.uid || current.userId,
       lastModifiedByName: operator.name,
@@ -690,8 +584,6 @@ export function App() {
       unit,
       performedBy: operator.name,
       userEmail: operator.email,
-      companyId: targetComp?.id,
-      companyName: targetComp?.name,
     });
     setGlobalLogs((prev) => [globalEntry, ...prev]);
 
@@ -724,15 +616,13 @@ export function App() {
       deleteStockItemFromFirestore(item.id).catch(console.error);
     }
 
-    const itemComp = companies.find((c) => c.id === item.companyId);
-
     // Log deletion in global audit trail so it's always traceable
     const deleteEntry = appendGlobalAuditLog({
       action: 'deleted',
       summary: `Removed item "${item.itemName}" from inventory`,
       details: `Had ${item.quantity} ${item.unit} when deleted (Alert limit was ≤ ${
         item.lowStockThreshold ?? 5
-      })${itemComp ? `, Company: ${itemComp.name}` : ''}`,
+      })`,
       previousQuantity: item.quantity,
       newQuantity: 0,
       delta: -item.quantity,
@@ -741,8 +631,6 @@ export function App() {
       unit: item.unit,
       performedBy: operator.name,
       userEmail: operator.email,
-      companyId: itemComp?.id,
-      companyName: itemComp?.name,
     });
     setGlobalLogs((prev) => [deleteEntry, ...prev]);
 
@@ -782,8 +670,6 @@ export function App() {
           unit: item.unit,
           performedBy: operator.name,
           userEmail: operator.email,
-          companyId: itemComp?.id,
-          companyName: itemComp?.name,
         });
         setGlobalLogs((prev) => [restoreEntry, ...prev]);
 
@@ -828,8 +714,6 @@ export function App() {
     const newQty = Math.max(0, (item.quantity || 0) + delta);
     if (newQty === item.quantity) return;
 
-    const itemComp = companies.find((c) => c.id === item.companyId);
-
     const auditEntry = createAuditEntry(
       'quantity_changed',
       delta > 0
@@ -839,9 +723,7 @@ export function App() {
       item.quantity,
       newQty,
       operator.name,
-      operator.email,
-      itemComp?.id,
-      itemComp?.name
+      operator.email
     );
 
     const updatedTrail = [auditEntry, ...(item.auditTrail || [])];
@@ -867,8 +749,6 @@ export function App() {
       unit: item.unit,
       performedBy: operator.name,
       userEmail: operator.email,
-      companyId: itemComp?.id,
-      companyName: itemComp?.name,
     });
     setGlobalLogs((prev) => [globalEntry, ...prev]);
 
@@ -884,31 +764,97 @@ export function App() {
     }
   };
 
-  // File export & import with Company Context
+  // Voice Assistant NLP Action Handler (Supports Search, Filter, Create, Read, Update, Delete)
+  const handleVoiceCommand = (cmd: VoiceCommandResult) => {
+    switch (cmd.action) {
+      case 'search': {
+        setSearchQuery(cmd.searchQuery || '');
+        if (cmd.searchQuery) {
+          showToast(`Voice Search: "${cmd.searchQuery}"`, 'info');
+        }
+        break;
+      }
+      case 'filter': {
+        if (cmd.filterType) {
+          setActiveFilter(cmd.filterType);
+        }
+        if (cmd.tagFilter !== undefined) {
+          setSelectedTag(cmd.tagFilter);
+        }
+        if (cmd.searchQuery !== undefined) {
+          setSearchQuery(cmd.searchQuery);
+        }
+        showToast(cmd.feedback, 'info');
+        break;
+      }
+      case 'create': {
+        if (cmd.createdItem) {
+          handleAddItem(
+            cmd.createdItem.itemName,
+            cmd.createdItem.unit,
+            cmd.createdItem.quantity,
+            cmd.createdItem.lowStockThreshold,
+            undefined,
+            cmd.createdItem.notes
+          );
+        }
+        break;
+      }
+      case 'read': {
+        if (cmd.targetItem) {
+          setSelectedItemForDetails(cmd.targetItem);
+          showToast(cmd.feedback, 'info');
+        }
+        break;
+      }
+      case 'update': {
+        if (cmd.targetItem) {
+          if (cmd.newQuantity !== undefined) {
+            handleSaveEditItem(
+              cmd.targetItem.id,
+              cmd.targetItem.itemName,
+              cmd.targetItem.unit,
+              cmd.newQuantity,
+              cmd.targetItem.lowStockThreshold ?? 5,
+              cmd.targetItem.productionDate,
+              cmd.targetItem.notes
+            );
+          } else if (cmd.quantityDelta !== undefined) {
+            handleQuickQuantityChange(cmd.targetItem, cmd.quantityDelta);
+          }
+        }
+        break;
+      }
+      case 'delete': {
+        if (cmd.targetItem) {
+          executeDelete(cmd.targetItem);
+        }
+        break;
+      }
+      default: {
+        showToast(cmd.feedback, 'info');
+        break;
+      }
+    }
+  };
+
+  // File export & import
   const handleExportExcel = () => {
-    if (filteredItemsByCompany.length === 0) {
-      showToast('No items to export for this company view.', 'info');
+    if (items.length === 0) {
+      showToast('No items to export.', 'info');
       return;
     }
-    const filename =
-      activeCompanyId === 'all'
-        ? 'stock-inventory-all-companies.xlsx'
-        : `${companies.find((c) => c.id === activeCompanyId)?.code.toLowerCase() || 'company'}-stock.xlsx`;
-    exportToExcel(filteredItemsByCompany, filename, companies);
-    showToast('Excel file exported with company details', 'success');
+    exportToExcel(items, 'stock-inventory.xlsx');
+    showToast('Excel file exported', 'success');
   };
 
   const handleExportCsv = () => {
-    if (filteredItemsByCompany.length === 0) {
-      showToast('No items to export for this company view.', 'info');
+    if (items.length === 0) {
+      showToast('No items to export.', 'info');
       return;
     }
-    const filename =
-      activeCompanyId === 'all'
-        ? 'stock-inventory-all-companies.csv'
-        : `${companies.find((c) => c.id === activeCompanyId)?.code.toLowerCase() || 'company'}-stock.csv`;
-    exportToCsv(filteredItemsByCompany, filename, companies);
-    showToast('CSV file exported with company details', 'success');
+    exportToCsv(items, 'stock-inventory.csv');
+    showToast('CSV file exported', 'success');
   };
 
   const handleImportFile = async (file: File) => {
@@ -919,26 +865,17 @@ export function App() {
         return;
       }
 
-      const targetCompany =
-        activeCompanyId !== 'all'
-          ? companies.find((c) => c.id === activeCompanyId)
-          : companies.find((c) => c.isDefault) || companies[0];
-
       const now = new Date().toISOString();
       const newItems: StockItem[] = parsed.map((p) => {
         const id = generateItemId();
         const auditEntry = createAuditEntry(
           'created',
           'Item imported from file',
-          `Imported from ${file.name} with quantity ${p.quantity} ${p.unit}${
-            targetCompany ? ` (${targetCompany.name})` : ''
-          }`,
+          `Imported from ${file.name} with quantity ${p.quantity} ${p.unit}`,
           undefined,
           p.quantity,
           operator.name,
-          operator.email,
-          targetCompany?.id,
-          targetCompany?.name
+          operator.email
         );
 
         return {
@@ -949,7 +886,6 @@ export function App() {
           lowStockThreshold: p.lowStockThreshold ?? 5,
           productionDate: p.productionDate,
           notes: p.notes,
-          companyId: targetCompany?.id,
           createdAt: now,
           updatedAt: now,
           userId: currentUser?.uid,
@@ -1059,7 +995,7 @@ export function App() {
       {/* Main Navbar with Delete Confirmation Choice, Audit Trail, and Google Sign-in */}
       <Navbar
         items={items}
-        itemCount={filteredItemsByCompany.length}
+        itemCount={items.length}
         confirmOnDelete={confirmOnDelete}
         onToggleConfirmOnDelete={handleToggleConfirmOnDelete}
         onExportExcel={handleExportExcel}
@@ -1074,10 +1010,6 @@ export function App() {
         isAuthLoading={isAuthLoading}
         onSignInWithGoogle={handleSignInWithGoogle}
         onSignOut={handleSignOut}
-        companies={companies}
-        activeCompanyId={activeCompanyId}
-        onSelectCompany={handleSelectCompany}
-        onOpenCompanyModal={() => setIsCompanyModalOpen(true)}
       />
 
       {/* Cloud DB & Shared Access Status Banner */}
@@ -1178,14 +1110,14 @@ export function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-7 space-y-4 sm:space-y-6">
         {/* KPI / Stock Metrics (Tap to filter) */}
         <StockSummary
-          items={filteredItemsByCompany}
+          items={items}
           activeFilter={activeFilter}
           onSelectFilter={setActiveFilter}
         />
 
-        {/* Stock Inventory List & Table with Metadata & Trail view */}
+        {/* Stock Inventory List & Table with Metadata, Voice Search & Trail view */}
         <StockTable
-          items={filteredItemsByCompany}
+          items={items}
           activeFilter={activeFilter}
           confirmOnDelete={confirmOnDelete}
           onToggleConfirmOnDelete={handleToggleConfirmOnDelete}
@@ -1197,9 +1129,11 @@ export function App() {
           onExportExcel={handleExportExcel}
           onViewItemDetails={(item) => setSelectedItemForDetails(item)}
           onOpenAuditTrail={() => setIsAuditTrailModalOpen(true)}
-          companies={companies}
-          activeCompanyId={activeCompanyId}
-          onOpenCompanyModal={() => setIsCompanyModalOpen(true)}
+          onOpenVoiceAssistant={() => setIsVoiceModalOpen(true)}
+          searchQuery={searchQuery}
+          onSearchQueryChange={setSearchQuery}
+          selectedTag={selectedTag}
+          onSelectTag={setSelectedTag}
         />
       </main>
 
@@ -1220,12 +1154,10 @@ export function App() {
       <AddItemModal
         isOpen={isAddModalOpen}
         units={units}
-        companies={companies}
-        activeCompanyId={activeCompanyId}
+        availableTags={availableTags}
         onClose={() => setIsAddModalOpen(false)}
         onAdd={handleAddItem}
         onOpenUnitModal={() => setIsUnitModalOpen(true)}
-        onOpenCompanyModal={() => setIsCompanyModalOpen(true)}
       />
 
       {/* 2. Edit Item Modal */}
@@ -1233,24 +1165,23 @@ export function App() {
         isOpen={!!editingItem}
         item={editingItem}
         units={units}
-        companies={companies}
+        availableTags={availableTags}
         onClose={() => setEditingItem(null)}
         onSave={handleSaveEditItem}
         onOpenUnitModal={() => setIsUnitModalOpen(true)}
-        onOpenCompanyModal={() => setIsCompanyModalOpen(true)}
       />
 
       {/* 3. Item Details & Complete Audit Trail Modal */}
       <ItemDetailsModal
         isOpen={!!selectedItemForDetails}
         item={selectedItemForDetails}
-        companies={companies}
         onClose={() => setSelectedItemForDetails(null)}
         onEdit={(item) => {
           setSelectedItemForDetails(null);
           setEditingItem(item);
         }}
         onQuickQuantityChange={handleQuickQuantityChange}
+        onSelectTag={(tag) => setSelectedTag(tag)}
       />
 
       {/* 4. Global Inventory Audit Trail & Activity Log Modal */}
@@ -1313,17 +1244,13 @@ export function App() {
         onQuickConnect={handleQuickConnect}
       />
 
-      {/* 9. Multiple Company Profiles Manager Modal */}
-      <CompanyProfileModal
-        isOpen={isCompanyModalOpen}
-        onClose={() => setIsCompanyModalOpen(false)}
-        companies={companies}
-        activeCompanyId={activeCompanyId}
-        onSelectCompany={handleSelectCompany}
-        onSaveCompany={handleSaveCompany}
-        onDeleteCompany={handleDeleteCompany}
-        onSetDefault={handleSetDefaultCompany}
+      {/* 9. Voice Assistant Natural Language Modal */}
+      <VoiceAssistantModal
+        isOpen={isVoiceModalOpen}
+        onClose={() => setIsVoiceModalOpen(false)}
         items={items}
+        units={units}
+        onExecuteCommand={handleVoiceCommand}
       />
     </div>
   );
