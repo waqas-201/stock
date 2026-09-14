@@ -58,6 +58,7 @@ import { AuditTrailModal } from './components/AuditTrailModal';
 import { UnitManagementModal } from './components/UnitManagementModal';
 import { OperatorModal } from './components/OperatorModal';
 import { VoiceAssistantModal } from './components/VoiceAssistantModal';
+import { GeminiStockChatModal } from './components/GeminiStockChatModal';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { UnauthorizedDomainModal } from './components/UnauthorizedDomainModal';
 import {
@@ -115,6 +116,7 @@ export function App() {
   );
   const [isOperatorModalOpen, setIsOperatorModalOpen] = useState(false);
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
+  const [isGeminiChatOpen, setIsGeminiChatOpen] = useState(false);
 
   // User choice: whether to show confirmation dialog before deleting items
   const [confirmOnDelete, setConfirmOnDelete] = useState<boolean>(() =>
@@ -1004,6 +1006,7 @@ export function App() {
         onOpenUnitModal={() => setIsUnitModalOpen(true)}
         onAddNewItem={() => setIsAddModalOpen(true)}
         onOpenAuditTrail={() => setIsAuditTrailModalOpen(true)}
+        onOpenGeminiChat={() => setIsGeminiChatOpen(true)}
         currentOperator={operator}
         onOpenOperatorModal={() => setIsOperatorModalOpen(true)}
         currentUser={currentUser}
@@ -1130,6 +1133,7 @@ export function App() {
           onViewItemDetails={(item) => setSelectedItemForDetails(item)}
           onOpenAuditTrail={() => setIsAuditTrailModalOpen(true)}
           onOpenVoiceAssistant={() => setIsVoiceModalOpen(true)}
+          onOpenGeminiChat={() => setIsGeminiChatOpen(true)}
           searchQuery={searchQuery}
           onSearchQueryChange={setSearchQuery}
           selectedTag={selectedTag}
@@ -1137,17 +1141,32 @@ export function App() {
         />
       </main>
 
-      {/* Mobile Floating Action Button (FAB) for 1-Tap Thumb Addition */}
-      <button
-        id="btn-mobile-fab-add"
-        type="button"
-        onClick={() => setIsAddModalOpen(true)}
-        className="sm:hidden fixed bottom-5 right-4 z-40 min-h-[52px] px-4 py-3 rounded-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold shadow-xl shadow-emerald-950/30 flex items-center justify-center gap-2 transition-transform active:scale-95 cursor-pointer border border-emerald-500"
-        aria-label="Add new item"
-      >
-        <Plus className="w-5 h-5" />
-        <span className="text-sm font-bold pr-1">Add Item</span>
-      </button>
+      {/* Mobile Floating Action Buttons (FAB): Quick AI Chat + Add Item */}
+      <div className="sm:hidden fixed bottom-5 left-3 right-3 z-40 flex items-center justify-between pointer-events-none">
+        {/* Mobile FAB: Talk to Gemini AI */}
+        <button
+          id="btn-mobile-fab-gemini"
+          type="button"
+          onClick={() => setIsGeminiChatOpen(true)}
+          className="pointer-events-auto min-h-[48px] px-3.5 py-2.5 rounded-full bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-bold shadow-lg shadow-slate-950/25 flex items-center justify-center gap-1.5 transition-transform active:scale-95 cursor-pointer border border-slate-700 backdrop-blur-xs"
+          aria-label="Talk to Gemini AI"
+        >
+          <Sparkles className="w-4 h-4 text-amber-300 animate-pulse shrink-0" />
+          <span className="text-xs font-bold">Talk to AI</span>
+        </button>
+
+        {/* Mobile FAB: 1-Tap Add Item */}
+        <button
+          id="btn-mobile-fab-add"
+          type="button"
+          onClick={() => setIsAddModalOpen(true)}
+          className="pointer-events-auto min-h-[48px] px-4 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold shadow-lg shadow-emerald-950/25 flex items-center justify-center gap-1.5 transition-transform active:scale-95 cursor-pointer border border-emerald-500"
+          aria-label="Add new item"
+        >
+          <Plus className="w-4 h-4 shrink-0" />
+          <span className="text-xs font-bold">Add Item</span>
+        </button>
+      </div>
 
       {/* Modals */}
       {/* 1. Add Item Modal */}
@@ -1251,6 +1270,14 @@ export function App() {
         items={items}
         units={units}
         onExecuteCommand={handleVoiceCommand}
+      />
+
+      {/* 10. Gemini AI Interactive Stock Chat Modal */}
+      <GeminiStockChatModal
+        isOpen={isGeminiChatOpen}
+        onClose={() => setIsGeminiChatOpen(false)}
+        items={items}
+        onQuickQuantityChange={handleQuickQuantityChange}
       />
     </div>
   );

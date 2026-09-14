@@ -19,6 +19,7 @@ import {
   UserCheck,
   User,
   Users,
+  Sparkles,
 } from 'lucide-react';
 import type { User as FirebaseUser } from '../lib/firebase';
 import { OperatorProfile, StockItem } from '../types';
@@ -40,6 +41,7 @@ interface NavbarProps {
   currentOperator?: OperatorProfile;
   onOpenOperatorModal: () => void;
   items?: StockItem[];
+  onOpenGeminiChat?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -59,6 +61,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentOperator,
   onOpenOperatorModal,
   items = [],
+  onOpenGeminiChat,
 }) => {
   const rawName = currentOperator?.name || 'Waqas';
   const opName = rawName.replace(/\s*\(Admin\)/gi, '').trim() || 'Waqas';
@@ -272,6 +275,20 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span>Export Excel</span>
               </button>
 
+              {/* Talk to Gemini AI Desktop Button */}
+              {onOpenGeminiChat && (
+                <button
+                  id="btn-navbar-gemini-chat"
+                  type="button"
+                  onClick={onOpenGeminiChat}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 rounded-xl shadow-xs transition-all cursor-pointer ring-1 ring-emerald-500/30"
+                  title="Talk with Gemini AI about your stock"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                  <span>Talk to AI</span>
+                </button>
+              )}
+
               {/* Add Item Desktop Button */}
               <button
                 id="btn-navbar-add-item"
@@ -285,87 +302,37 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             </div>
 
-            {/* Mobile Actions Header (Touch-optimized buttons) */}
+            {/* Mobile Actions Header (Touch-optimized, Guaranteed Zero-Overflow) */}
             <div className="flex md:hidden items-center gap-1.5 shrink-0">
-              {/* Active Operator Switcher on mobile */}
+              {/* Talk to Gemini AI on mobile */}
+              {onOpenGeminiChat && (
+                <button
+                  id="btn-mobile-gemini-chat"
+                  type="button"
+                  onClick={onOpenGeminiChat}
+                  className="min-h-[38px] px-2.5 py-1.5 inline-flex items-center justify-center gap-1 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-700 rounded-xl shadow-xs cursor-pointer active:scale-95 transition-transform"
+                  title="Talk with Gemini AI about your stock"
+                  aria-label="Talk with Gemini AI"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                  <span>Ask AI</span>
+                </button>
+              )}
+
+              {/* Active Operator Switcher on mobile (compact badge) */}
               <button
                 type="button"
                 onClick={onOpenOperatorModal}
-                className="min-h-[44px] px-2.5 py-1.5 inline-flex items-center justify-center gap-1.5 text-xs font-bold bg-white text-slate-800 border border-slate-300 rounded-xl cursor-pointer shadow-2xs"
-                title="Change active staff name"
+                className="min-h-[38px] px-2 py-1.5 inline-flex items-center justify-center gap-1 text-xs font-bold bg-white text-slate-800 border border-slate-300 rounded-xl cursor-pointer shadow-2xs active:bg-slate-50"
+                title={`Active staff: ${opName}`}
                 aria-label="Active staff member"
               >
                 <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-[10px]">
                   {opInitial}
                 </div>
-                <span className="max-w-[65px] truncate text-[11px] font-bold">
+                <span className="max-w-[50px] truncate text-[11px] font-bold">
                   {opName}
                 </span>
-              </button>
-
-              {/* Cloud DB indicator on mobile */}
-              {currentUser ? (
-                <div
-                  className="min-h-[44px] px-2 py-1.5 inline-flex items-center justify-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 rounded-xl"
-                  title={currentUser.isAnonymous ? 'Logged into Cloud DB via Quick Team Pass' : `Logged into Cloud DB as ${currentUser.email}`}
-                >
-                  <CloudCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span className="max-w-[60px] truncate">
-                    {currentUser.displayName?.split(' ')[0] || (currentUser.isAnonymous ? 'Team' : 'Sync')}
-                  </span>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={onSignInWithGoogle}
-                  className="min-h-[44px] px-2 py-1.5 inline-flex items-center justify-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 active:bg-emerald-100 border border-emerald-300 rounded-xl cursor-pointer"
-                  title="Connect Cloud DB"
-                >
-                  <Database className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span>Cloud DB</span>
-                </button>
-              )}
-
-              {/* Quick Delete Indicator / Toggle Button on mobile */}
-              <button
-                type="button"
-                onClick={onToggleConfirmOnDelete}
-                className={`min-h-[44px] px-2.5 py-1.5 inline-flex items-center justify-center gap-1 text-xs font-bold rounded-xl border transition-colors cursor-pointer ${
-                  confirmOnDelete
-                    ? 'bg-slate-100 text-slate-700 border-slate-200'
-                    : 'bg-amber-50 text-amber-900 border-amber-300'
-                }`}
-                title={
-                  confirmOnDelete
-                    ? 'Delete confirmation popup is ON. Tap to switch to Quick Delete.'
-                    : 'Quick Delete is ON (No popup). Tap to turn on confirmation popup.'
-                }
-                aria-label="Toggle delete confirmation choice"
-              >
-                {confirmOnDelete ? (
-                  <>
-                    <ShieldAlert className="w-3.5 h-3.5 text-slate-500" />
-                    <span className="text-[11px]">Ask</span>
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-3.5 h-3.5 text-amber-600" />
-                    <span className="text-[11px] font-bold">Fast</span>
-                  </>
-                )}
-              </button>
-
-              {/* Quick Excel Export on mobile */}
-              <button
-                type="button"
-                onClick={onExportExcel}
-                disabled={itemCount === 0}
-                className="min-h-[44px] min-w-[44px] px-2.5 py-2 inline-flex items-center justify-center gap-1.5 text-xs font-bold text-white bg-emerald-700 active:bg-emerald-800 disabled:opacity-40 rounded-xl shadow-xs cursor-pointer"
-                title="Export Excel"
-                aria-label="Export Excel"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span className="font-semibold text-xs">Excel</span>
               </button>
 
               {/* Mobile Quick Menu Trigger */}
@@ -373,11 +340,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                 id="btn-mobile-nav-menu"
                 type="button"
                 onClick={() => setIsMobileMenuOpen(true)}
-                className="min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-700 bg-slate-100 active:bg-slate-200 border border-slate-200 rounded-xl transition-colors cursor-pointer"
+                className="min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-700 bg-slate-100 active:bg-slate-200 border border-slate-200 rounded-xl transition-colors cursor-pointer"
                 title="More actions"
                 aria-label="Open actions menu"
               >
-                <MoreVertical className="w-5 h-5" />
+                <MoreVertical className="w-4 h-4" />
               </button>
             </div>
           </div>
@@ -424,6 +391,35 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {/* Talk with Gemini AI shortcut inside mobile drawer */}
+            {onOpenGeminiChat && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  onOpenGeminiChat();
+                }}
+                className="w-full p-3.5 bg-gradient-to-r from-emerald-700 via-teal-700 to-emerald-800 text-white rounded-2xl flex items-center justify-between shadow-xs cursor-pointer active:scale-[0.99] transition-transform text-left"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                    <Sparkles className="w-5 h-5 text-amber-300 animate-pulse" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-sm font-bold block text-white">
+                      Talk with Gemini AI
+                    </span>
+                    <span className="text-xs text-emerald-100 block">
+                      Ask about stock, low items, or reorders
+                    </span>
+                  </div>
+                </div>
+                <span className="text-xs font-bold px-2.5 py-1 bg-white/20 rounded-lg text-white shrink-0">
+                  Open AI
+                </span>
+              </button>
+            )}
 
             {/* Cloud DB account status in mobile sheet */}
             <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">

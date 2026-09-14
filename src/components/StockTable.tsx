@@ -10,6 +10,7 @@ import {
   Minus,
   LayoutGrid,
   List,
+  Rows3,
   X,
   ShieldAlert,
   Zap,
@@ -44,6 +45,7 @@ interface StockTableProps {
   onSearchQueryChange?: (query: string) => void;
   selectedTag?: string | null;
   onSelectTag?: (tag: string | null) => void;
+  onOpenGeminiChat?: () => void;
 }
 
 export const StockTable: React.FC<StockTableProps> = ({
@@ -63,6 +65,7 @@ export const StockTable: React.FC<StockTableProps> = ({
   onSearchQueryChange,
   selectedTag: externalSelectedTag,
   onSelectTag,
+  onOpenGeminiChat,
 }) => {
   const [internalSearchQuery, setInternalSearchQuery] = useState('');
   const searchQuery = externalSearchQuery !== undefined ? externalSearchQuery : internalSearchQuery;
@@ -86,8 +89,8 @@ export const StockTable: React.FC<StockTableProps> = ({
 
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
-  // Default to card view for touch & mobile usability
-  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  // Default to compact mobile-first list view for zero horizontal scrolling and instant stock visibility
+  const [viewMode, setViewMode] = useState<'compact' | 'cards' | 'table'>('compact');
 
   // Helper to determine if an item is low stock based on its individual threshold
   const isItemLowStock = (item: StockItem) => {
@@ -247,6 +250,21 @@ export const StockTable: React.FC<StockTableProps> = ({
             </div>
           </div>
 
+          {/* Talk to Gemini AI button in toolbar */}
+          {onOpenGeminiChat && (
+            <button
+              id="btn-stock-gemini-chat"
+              type="button"
+              onClick={onOpenGeminiChat}
+              className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3 sm:px-3.5 py-2 text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 active:scale-95 rounded-xl shadow-xs transition-all cursor-pointer shrink-0"
+              title="Talk with Gemini AI about your stock"
+            >
+              <Sparkles className="w-4 h-4 text-amber-300 shrink-0 animate-pulse" />
+              <span className="hidden sm:inline">Talk to AI</span>
+              <span className="sm:hidden">AI</span>
+            </button>
+          )}
+
           {/* Voice Search & Instruction Assistant button */}
           {onOpenVoiceAssistant && (
             <button
@@ -325,7 +343,7 @@ export const StockTable: React.FC<StockTableProps> = ({
             })}
           </div>
 
-          {/* Right Side: View Toggle (Cards vs Table), Sort & Delete Mode Toggle */}
+          {/* Right Side: View Toggle (Compact vs Cards vs Table), Sort & Delete Mode Toggle */}
           <div className="flex items-center gap-1.5 shrink-0 ml-auto flex-wrap sm:flex-nowrap">
             {/* Quick Delete / Confirm Toggle */}
             <button
@@ -387,31 +405,46 @@ export const StockTable: React.FC<StockTableProps> = ({
               </span>
             </button>
 
-            {/* Layout Mode Toggle */}
-            <div className="flex items-center p-1 bg-slate-100 rounded-xl">
+            {/* Layout Mode Toggle: Compact (Mobile-first, zero-scroll), Cards, Table */}
+            <div className="flex items-center p-0.5 bg-slate-100 rounded-xl border border-slate-200">
+              <button
+                type="button"
+                onClick={() => setViewMode('compact')}
+                className={`min-h-[32px] px-2 py-1 rounded-lg transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold ${
+                  viewMode === 'compact'
+                    ? 'bg-white text-emerald-800 shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+                title="Compact List View (Zero horizontal scrolling on mobile, stock numbers upfront)"
+              >
+                <Rows3 className="w-3.5 h-3.5" />
+                <span className="text-[11px]">Compact</span>
+              </button>
               <button
                 type="button"
                 onClick={() => setViewMode('cards')}
-                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                className={`min-h-[32px] px-2 py-1 rounded-lg transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold ${
                   viewMode === 'cards'
-                    ? 'bg-white text-slate-900 shadow-2xs'
+                    ? 'bg-white text-emerald-800 shadow-2xs'
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
-                title="Card View (Mobile & Desktop Cards)"
+                title="Card Grid View"
               >
-                <LayoutGrid className="w-4 h-4" />
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span className="text-[11px] hidden xs:inline">Cards</span>
               </button>
               <button
                 type="button"
                 onClick={() => setViewMode('table')}
-                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                className={`min-h-[32px] px-2 py-1 rounded-lg transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold ${
                   viewMode === 'table'
-                    ? 'bg-white text-slate-900 shadow-2xs'
+                    ? 'bg-white text-emerald-800 shadow-2xs'
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
-                title="Table View (Dense Spreadsheet View)"
+                title="Table Spreadsheet View"
               >
-                <List className="w-4 h-4" />
+                <List className="w-3.5 h-3.5" />
+                <span className="text-[11px] hidden xs:inline">Table</span>
               </button>
             </div>
           </div>
@@ -539,6 +572,162 @@ export const StockTable: React.FC<StockTableProps> = ({
               </button>
             )}
           </div>
+        </div>
+      ) : viewMode === 'compact' ? (
+        /* ======================================================== */
+        /* COMPACT LIST VIEW (Zero Horizontal Scroll, Mobile-First) */
+        /* ======================================================== */
+        <div className="divide-y divide-slate-100">
+          {sortedItems.map((item) => {
+            const isOutOfStock = (item.quantity || 0) <= 0;
+            const isLowStock = isItemLowStock(item);
+            const itemThreshold = item.lowStockThreshold ?? 5;
+            const prodDateFormatted = formatProductionDate(item.productionDate);
+
+            return (
+              <div
+                key={item.id}
+                id={`compact-stock-row-${item.id}`}
+                className={`p-3 sm:p-4 hover:bg-slate-50/90 transition-colors flex items-center justify-between gap-2.5 sm:gap-4 ${
+                  isOutOfStock
+                    ? 'bg-rose-50/20'
+                    : isLowStock
+                    ? 'bg-amber-50/25'
+                    : ''
+                }`}
+              >
+                {/* Left Side: Item Information (Truncates smoothly without forcing horizontal width) */}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                    {/* Status Pill */}
+                    {isOutOfStock ? (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 shrink-0">
+                        Out
+                      </span>
+                    ) : isLowStock ? (
+                      <span
+                        title={`Low stock: ≤ ${itemThreshold} ${item.unit}`}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 shrink-0"
+                      >
+                        <AlertTriangle className="w-2.5 h-2.5 text-amber-700" />
+                        Low
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                        In Stock
+                      </span>
+                    )}
+
+                    {/* Item Name */}
+                    <button
+                      type="button"
+                      onClick={() => onViewItemDetails(item)}
+                      className="text-sm sm:text-base font-bold text-slate-900 hover:text-emerald-700 text-left truncate cursor-pointer"
+                      title="Tap to view item history & details"
+                    >
+                      {item.itemName}
+                    </button>
+
+                    {/* Unit Badge */}
+                    <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded shrink-0">
+                      {item.unit}
+                    </span>
+                  </div>
+
+                  {/* Secondary Line: Alert Threshold, Production Date, Tags */}
+                  <div className="mt-1 flex items-center gap-2 text-xs text-slate-500 flex-wrap">
+                    <span className={isLowStock ? 'text-amber-800 font-bold' : 'text-slate-500'}>
+                      Alert ≤ {itemThreshold}
+                    </span>
+
+                    {prodDateFormatted && (
+                      <span className="text-slate-400 hidden xs:inline">
+                        • Mfg: {prodDateFormatted}
+                      </span>
+                    )}
+
+                    {item.tags && item.tags.length > 0 && (
+                      <div className="flex items-center gap-1">
+                        {item.tags.slice(0, 2).map((tag) => {
+                          const style = getTagStyle(tag);
+                          return (
+                            <span
+                              key={tag}
+                              className={`text-[10px] px-1.5 py-0.2 rounded font-medium ${style.bg} ${style.text}`}
+                            >
+                              {tag}
+                            </span>
+                          );
+                        })}
+                        {item.tags.length > 2 && (
+                          <span className="text-[10px] text-slate-400">
+                            +{item.tags.length - 2}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right Side: Stock Quantity, Steppers (+ / -), and Quick Edit (Zero horizontal scroll) */}
+                <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                  {/* Stock Quantity */}
+                  <div className="text-right">
+                    <div
+                      className={`text-base sm:text-xl font-bold font-mono tracking-tight leading-none ${
+                        isOutOfStock
+                          ? 'text-rose-600'
+                          : isLowStock
+                          ? 'text-amber-600'
+                          : 'text-slate-900'
+                      }`}
+                    >
+                      {item.quantity.toLocaleString()}
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-medium">
+                      {item.unit}
+                    </div>
+                  </div>
+
+                  {/* Touch Stepper (+ / -) */}
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => onQuickQuantityChange(item, -1)}
+                      disabled={item.quantity <= 0}
+                      className="min-w-[34px] min-h-[34px] rounded-lg bg-slate-100 hover:bg-slate-200 active:bg-slate-300 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center font-bold cursor-pointer"
+                      title="Decrease by 1"
+                      aria-label="Decrease quantity"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onQuickQuantityChange(item, 1)}
+                      className="min-w-[34px] min-h-[34px] rounded-lg bg-emerald-100 hover:bg-emerald-200 active:bg-emerald-300 text-emerald-800 flex items-center justify-center font-bold cursor-pointer"
+                      title="Increase by 1"
+                      aria-label="Increase quantity"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Actions: View Details / Edit */}
+                  <div className="flex items-center">
+                    <button
+                      type="button"
+                      onClick={() => onEditItem(item)}
+                      className="min-w-[34px] min-h-[34px] text-slate-400 hover:text-slate-700 hover:bg-slate-100 active:bg-slate-200 rounded-lg flex items-center justify-center transition-colors cursor-pointer"
+                      title="Edit item"
+                      aria-label="Edit item"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : viewMode === 'cards' ? (
         /* ======================================================== */
@@ -780,10 +969,10 @@ export const StockTable: React.FC<StockTableProps> = ({
           <table id="stock-data-table" className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/80 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200">
-                <th className="py-3 px-3 w-10 text-center text-slate-400 font-normal">
+                <th className="py-3 px-2 sm:px-3 w-8 sm:w-10 text-center text-slate-400 font-normal">
                   #
                 </th>
-                <th className="py-3.5 px-4 min-w-[220px]">
+                <th className="py-3 px-3 sm:px-4 min-w-[170px] sm:min-w-[200px]">
                   <button
                     type="button"
                     onClick={() => toggleSort('name')}
@@ -793,40 +982,40 @@ export const StockTable: React.FC<StockTableProps> = ({
                     <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
                   </button>
                 </th>
-                <th className="py-3.5 px-4 w-28 font-bold uppercase">
-                  <span>Unit</span>
-                </th>
-                <th className="py-3.5 px-4 min-w-[180px]">
+                <th className="py-3 px-3 sm:px-4 min-w-[150px]">
                   <button
                     type="button"
                     onClick={() => toggleSort('quantity')}
-                    className="inline-flex items-center gap-1.5 hover:text-slate-900 cursor-pointer font-bold uppercase"
+                    className="inline-flex items-center gap-1.5 hover:text-slate-900 cursor-pointer font-bold uppercase text-emerald-800"
                   >
                     <span>Current Stock</span>
-                    <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                    <ArrowUpDown className="w-3.5 h-3.5 text-emerald-600" />
                   </button>
                 </th>
-                <th className="py-3.5 px-4 min-w-[140px]">
+                <th className="py-3 px-2 sm:px-4 w-20 sm:w-28 font-bold uppercase">
+                  <span>Unit</span>
+                </th>
+                <th className="py-3 px-3 sm:px-4 min-w-[120px]">
                   <button
                     type="button"
                     onClick={() => toggleSort('threshold')}
                     className="inline-flex items-center gap-1.5 hover:text-slate-900 cursor-pointer font-bold uppercase text-amber-900"
                   >
-                    <span>Low Stock Alert</span>
+                    <span>Alert Level</span>
                     <ArrowUpDown className="w-3.5 h-3.5 text-amber-600" />
                   </button>
                 </th>
-                <th className="py-3.5 px-4 min-w-[140px]">
+                <th className="py-3 px-3 sm:px-4 min-w-[120px]">
                   <button
                     type="button"
                     onClick={() => toggleSort('production_date')}
                     className="inline-flex items-center gap-1.5 hover:text-slate-900 cursor-pointer font-bold uppercase text-slate-600"
                   >
-                    <span>Production Date</span>
+                    <span>Mfg Date</span>
                     <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
                   </button>
                 </th>
-                <th className="py-3.5 px-4 min-w-[140px]">
+                <th className="py-3 px-3 sm:px-4 min-w-[120px]">
                   <button
                     type="button"
                     onClick={() => toggleSort('tags')}
@@ -837,10 +1026,10 @@ export const StockTable: React.FC<StockTableProps> = ({
                     <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
                   </button>
                 </th>
-                <th className="py-3.5 px-4 min-w-[150px] font-bold uppercase text-slate-600">
+                <th className="py-3 px-3 sm:px-4 min-w-[130px] font-bold uppercase text-slate-600">
                   <span>Last Modified</span>
                 </th>
-                <th className="py-3.5 px-4 text-right w-40 font-bold uppercase">
+                <th className="py-3 px-3 sm:px-4 text-right w-36 font-bold uppercase">
                   Actions
                 </th>
               </tr>
@@ -865,11 +1054,11 @@ export const StockTable: React.FC<StockTableProps> = ({
                         : ''
                     }`}
                   >
-                    <td className="py-3.5 px-3 text-center text-xs text-slate-400 font-mono">
+                    <td className="py-3 px-2 sm:px-3 text-center text-xs text-slate-400 font-mono">
                       {index + 1}
                     </td>
 
-                    <td className="py-3.5 px-4">
+                    <td className="py-3 px-3 sm:px-4">
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <span
@@ -880,16 +1069,16 @@ export const StockTable: React.FC<StockTableProps> = ({
                             {item.itemName}
                           </span>
                           {isOutOfStock ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
-                              Out of Stock
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                              Out
                             </span>
                           ) : isLowStock ? (
                             <span
                               title={`Stock is ≤ ${itemThreshold}`}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300"
+                              className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300"
                             >
                               <AlertTriangle className="w-2.5 h-2.5 text-amber-700" />
-                              Low Stock
+                              Low
                             </span>
                           ) : (
                             <span className="inline-flex items-center px-1.5 py-0.2 rounded-md text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200">
@@ -909,13 +1098,8 @@ export const StockTable: React.FC<StockTableProps> = ({
                       </div>
                     </td>
 
-                    <td className="py-3.5 px-4">
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200/80">
-                        {item.unit}
-                      </span>
-                    </td>
-
-                    <td className="py-3.5 px-4">
+                    {/* Current Stock right next to Item Name */}
+                    <td className="py-3 px-3 sm:px-4">
                       <div className="flex items-center gap-2">
                         <span
                           className={`text-base font-bold font-mono ${
@@ -937,7 +1121,7 @@ export const StockTable: React.FC<StockTableProps> = ({
                             type="button"
                             onClick={() => onQuickQuantityChange(item, -1)}
                             disabled={item.quantity <= 0}
-                            className="min-w-[36px] min-h-[36px] rounded-lg bg-slate-100 hover:bg-slate-200 active:bg-slate-300 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center font-bold cursor-pointer"
+                            className="min-w-[32px] min-h-[32px] rounded-lg bg-slate-100 hover:bg-slate-200 active:bg-slate-300 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center font-bold cursor-pointer"
                             aria-label="Decrease quantity"
                           >
                             <Minus className="w-3.5 h-3.5" />
@@ -945,13 +1129,20 @@ export const StockTable: React.FC<StockTableProps> = ({
                           <button
                             type="button"
                             onClick={() => onQuickQuantityChange(item, 1)}
-                            className="min-w-[36px] min-h-[36px] rounded-lg bg-emerald-100 hover:bg-emerald-200 active:bg-emerald-300 text-emerald-800 flex items-center justify-center font-bold cursor-pointer"
+                            className="min-w-[32px] min-h-[32px] rounded-lg bg-emerald-100 hover:bg-emerald-200 active:bg-emerald-300 text-emerald-800 flex items-center justify-center font-bold cursor-pointer"
                             aria-label="Increase quantity"
                           >
                             <Plus className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </div>
+                    </td>
+
+                    {/* Unit */}
+                    <td className="py-3 px-2 sm:px-4">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200/80">
+                        {item.unit}
+                      </span>
                     </td>
 
                     {/* Low Stock Threshold Column */}
