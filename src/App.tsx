@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { StockItem, StockUnit, StockFilter, OperatorProfile } from './types';
+import { StockItem, StockUnit, StockFilter, OperatorProfile, GeminiAgentAction } from './types';
 import {
   loadStoredStock,
   saveStoredStock,
@@ -125,6 +125,7 @@ export function App() {
 
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [restockTargetItem, setRestockTargetItem] = useState<StockItem | null>(null);
   const [editingItem, setEditingItem] = useState<StockItem | null>(null);
   const [selectedItemForDetails, setSelectedItemForDetails] =
     useState<StockItem | null>(null);
@@ -766,6 +767,183 @@ export function App() {
     }
   };
 
+  // Dedicated Inbound / Outbound Stock Increment Handler
+  // Safe: does NOT overwrite the baseline stock; calculates previousQuantity + delta with full audit trail and Undo
+  const handleInboundStock = (
+    item: StockItem,
+    delta: number,
+    reason?: string
+  ): { previousQuantity: number; newQuantity: number; undo: () => void } => {
+    const previousQuantity = item.quantity || 0;
+    const newQty = Math.max(0, previousQuantity + delta);
+
+    const isAddition = delta >= 0;
+    const actionDesc = isAddition
+      ? `Inbound stock added (+${delta} ${item.unit})`
+      : `Stock outbound deduction (${delta} ${item.unit})`;
+    const detailMsg = `${isAddition ? 'Added' : 'Deducted'} ${Math.abs(delta)} ${item.unit}. Baseline stock was ${previousQuantity}, new stock total is ${newQty}.${
+      reason ? ` Reference: ${reason}` : ''
+    }`;
+
+    const auditEntry = createAuditEntry(
+      'quantity_changed',
+      actionDesc,
+      detailMsg,
+      previousQuantity,
+      newQty,
+      operator.name,
+      operator.email
+    );
+
+    const updatedTrail = [auditEntry, ...(item.auditTrail || [])];
+    const updatedItem: StockItem = {
+      ...item,
+      quantity: newQty,
+      updatedAt: new Date().toISOString(),
+      userId: currentUser?.uid || item.userId,
+      lastModifiedByName: operator.name,
+      lastModifiedByEmail: operator.email,
+      auditTrail: updatedTrail,
+    };
+
+    const next = items.map((i) => (i.id === item.id ? updatedItem : i));
+    updateItems(next);
+
+    const globalEntry = appendGlobalAuditLog({
+      ...auditEntry,
+      itemId: item.id,
+      itemName: item.itemName,
+      unit: item.unit,
+      performedBy: operator.name,
+      userEmail: operator.email,
+    });
+    setGlobalLogs((prev) => [globalEntry, ...prev]);
+
+    if (currentUser) {
+      saveStockItemToFirestore(updatedItem, operator, currentUser.uid).catch(console.error);
+      saveAuditLogToFirestore(globalEntry, currentUser.uid).catch(console.error);
+    }
+
+    if (selectedItemForDetails && selectedItemForDetails.id === item.id) {
+      setSelectedItemForDetails(updatedItem);
+    }
+
+    const undo = () => {
+      handleQuickQuantityChange(updatedItem, -delta);
+    };
+
+    showToast(
+      `${isAddition ? 'Restocked' : 'Deducted'} "${item.itemName}": ${delta >= 0 ? '+' : ''}${delta} ${item.unit} (Total: ${newQty})`,
+      'success',
+      {
+        label: 'Undo',
+        onClick: undo,
+      }
+    );
+
+    return { previousQuantity, newQuantity: newQty, undo };
+  };
+
+  // Gemini AI Agent Action Dispatcher (Executes natural language commands directly on the UI)
+  const handleExecuteGeminiAction = (
+    action: GeminiAgentAction
+  ): {
+    success: boolean;
+    message: string;
+    undo?: () => void;
+    previousQuantity?: number;
+    newQuantity?: number;
+  } => {
+    if (action.type === 'update_stock') {
+      const targetName = (action.itemName || '').trim().toLowerCase();
+      const matchedItem = items.find(
+        (i) =>
+          (action.itemId && i.id === action.itemId) ||
+          i.itemName.trim().toLowerCase() === targetName ||
+          i.itemName.trim().toLowerCase().includes(targetName) ||
+          (targetName.length > 2 && targetName.includes(i.itemName.trim().toLowerCase()))
+      );
+
+      if (!matchedItem) {
+        return {
+          success: false,
+          message: `Item "${action.itemName}" was not found in inventory.`,
+        };
+      }
+
+      const delta = action.delta !== undefined ? action.delta : 0;
+      if (delta === 0) {
+        return {
+          success: true,
+          message: `No quantity change specified for "${matchedItem.itemName}".`,
+          previousQuantity: matchedItem.quantity,
+          newQuantity: matchedItem.quantity,
+        };
+      }
+
+      const res = handleInboundStock(
+        matchedItem,
+        delta,
+        action.reason || 'AI Agent Prompt Command'
+      );
+
+      return {
+        success: true,
+        message: `Updated "${matchedItem.itemName}": ${delta > 0 ? '+' : ''}${delta} ${matchedItem.unit} (Total: ${res.newQuantity})`,
+        undo: res.undo,
+        previousQuantity: res.previousQuantity,
+        newQuantity: res.newQuantity,
+      };
+    }
+
+    if (action.type === 'add_item') {
+      const newItemName = action.itemName || 'New Product';
+      const initialQty = action.delta !== undefined ? Math.max(0, action.delta) : 0;
+      const unit = action.unit || 'pcs';
+
+      handleAddItem(
+        newItemName,
+        unit,
+        initialQty,
+        5,
+        undefined,
+        action.reason || 'Created via Gemini AI Command',
+        ['AI-Added']
+      );
+
+      return {
+        success: true,
+        message: `Created new item "${newItemName}" with ${initialQty} ${unit}.`,
+        newQuantity: initialQty,
+      };
+    }
+
+    if (action.type === 'filter_ui') {
+      if (action.filter) {
+        setActiveFilter(action.filter);
+        return {
+          success: true,
+          message: `Switched view filter to: ${action.filter}`,
+        };
+      }
+    }
+
+    if (action.type === 'search_ui') {
+      if (action.searchQuery !== undefined) {
+        setSearchQuery(action.searchQuery);
+        return {
+          success: true,
+          message: `Filtered inventory by "${action.searchQuery}"`,
+        };
+      }
+    }
+
+    return {
+      success: false,
+      message: `Unsupported action type: ${action.type}`,
+    };
+  };
+
   // Voice Assistant NLP Action Handler (Supports Search, Filter, Create, Read, Update, Delete)
   const handleVoiceCommand = (cmd: VoiceCommandResult) => {
     switch (cmd.action) {
@@ -1129,6 +1307,10 @@ export function App() {
           onEditItem={(item) => setEditingItem(item)}
           onDeleteItem={handleDeleteItemClick}
           onQuickQuantityChange={handleQuickQuantityChange}
+          onReceiveStock={(item) => {
+            setRestockTargetItem(item);
+            setIsAddModalOpen(true);
+          }}
           onExportExcel={handleExportExcel}
           onViewItemDetails={(item) => setSelectedItemForDetails(item)}
           onOpenAuditTrail={() => setIsAuditTrailModalOpen(true)}
@@ -1169,13 +1351,19 @@ export function App() {
       </div>
 
       {/* Modals */}
-      {/* 1. Add Item Modal */}
+      {/* 1. Add / Restock Item Modal */}
       <AddItemModal
         isOpen={isAddModalOpen}
         units={units}
+        items={items}
+        preSelectedItem={restockTargetItem}
         availableTags={availableTags}
-        onClose={() => setIsAddModalOpen(false)}
+        onClose={() => {
+          setIsAddModalOpen(false);
+          setRestockTargetItem(null);
+        }}
         onAdd={handleAddItem}
+        onAddMoreStock={handleInboundStock}
         onOpenUnitModal={() => setIsUnitModalOpen(true)}
       />
 
@@ -1200,6 +1388,11 @@ export function App() {
           setEditingItem(item);
         }}
         onQuickQuantityChange={handleQuickQuantityChange}
+        onReceiveStock={(item) => {
+          setSelectedItemForDetails(null);
+          setRestockTargetItem(item);
+          setIsAddModalOpen(true);
+        }}
         onSelectTag={(tag) => setSelectedTag(tag)}
       />
 
@@ -1278,6 +1471,9 @@ export function App() {
         onClose={() => setIsGeminiChatOpen(false)}
         items={items}
         onQuickQuantityChange={handleQuickQuantityChange}
+        onExecuteAgentAction={handleExecuteGeminiAction}
+        onApplyFilter={(f) => setActiveFilter(f)}
+        onSearchItem={(q) => setSearchQuery(q)}
       />
     </div>
   );

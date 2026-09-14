@@ -37,6 +37,7 @@ interface StockTableProps {
   onEditItem: (item: StockItem) => void;
   onDeleteItem: (item: StockItem) => void;
   onQuickQuantityChange: (item: StockItem, delta: number) => void;
+  onReceiveStock?: (item: StockItem) => void;
   onExportExcel: () => void;
   onViewItemDetails: (item: StockItem) => void;
   onOpenAuditTrail: () => void;
@@ -58,6 +59,7 @@ export const StockTable: React.FC<StockTableProps> = ({
   onEditItem,
   onDeleteItem,
   onQuickQuantityChange,
+  onReceiveStock,
   onViewItemDetails,
   onOpenAuditTrail,
   onOpenVoiceAssistant,
@@ -712,8 +714,19 @@ export const StockTable: React.FC<StockTableProps> = ({
                     </button>
                   </div>
 
-                  {/* Actions: View Details / Edit */}
-                  <div className="flex items-center">
+                  {/* Actions: Add Stock / View Details / Edit */}
+                  <div className="flex items-center gap-1">
+                    {onReceiveStock && (
+                      <button
+                        type="button"
+                        onClick={() => onReceiveStock(item)}
+                        className="min-h-[34px] px-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 border border-emerald-200 rounded-lg flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                        title={`Add inbound stock to ${item.itemName}`}
+                      >
+                        <Plus className="w-3.5 h-3.5 text-emerald-700" />
+                        <span className="hidden xs:inline">Add Stock</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => onEditItem(item)}
@@ -932,6 +945,18 @@ export const StockTable: React.FC<StockTableProps> = ({
                   </button>
 
                   <div className="flex items-center gap-1.5">
+                    {onReceiveStock && (
+                      <button
+                        type="button"
+                        onClick={() => onReceiveStock(item)}
+                        className="min-h-[44px] px-3 py-2 inline-flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 border border-emerald-200 rounded-xl transition-colors cursor-pointer shadow-2xs"
+                        title="Add inbound stock to this product"
+                      >
+                        <Plus className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>Add Stock</span>
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       onClick={() => onEditItem(item)}
@@ -1229,6 +1254,17 @@ export const StockTable: React.FC<StockTableProps> = ({
                     {/* Actions Column */}
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-1">
+                        {onReceiveStock && (
+                          <button
+                            type="button"
+                            onClick={() => onReceiveStock(item)}
+                            className="min-h-[34px] px-2.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                            title="Add inbound stock"
+                          >
+                            <Plus className="w-3.5 h-3.5 text-emerald-700" />
+                            <span>Add Stock</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => onViewItemDetails(item)}

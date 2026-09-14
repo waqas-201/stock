@@ -1,18 +1,25 @@
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  // Enable CORS and preflight handling
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+    next();
+  });
 
   app.use(express.json({ limit: '10mb' }));
 
@@ -42,15 +49,6 @@ async function startServer() {
         return res.status(400).json({ error: 'A user message is required.' });
       }
 
-      const ai = new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          },
-        },
-      });
-
       // Prepare structured summary of current inventory
       const itemsList = Array.isArray(stockItems) ? stockItems : [];
       const totalItems = itemsList.length;
@@ -70,36 +68,72 @@ async function startServer() {
 
       // Format inventory items for model context (compact JSON)
       const inventorySnapshot = itemsList.map((item) => ({
+        id: item.id,
         name: item.itemName,
         quantity: item.quantity,
         unit: item.unit,
-        alertThreshold: item.lowStockThreshold,
+        alertThreshold: item.lowStockThreshold ?? 5,
         status: (item.quantity <= 0) ? 'Out of Stock' : (item.quantity <= (item.lowStockThreshold ?? 5)) ? 'Low Stock' : 'In Stock',
         productionDate: item.productionDate || null,
         tags: item.tags || [],
         notes: item.notes || null,
       }));
 
-      const systemInstruction = `You are the Gemini Stock AI Assistant for this inventory management app.
-You talk with users directly about their warehouse and store stock inventory in real time.
+      const systemInstruction = `You are the Active AI Inventory Agent for this warehouse and store inventory system.
+You do NOT just chat—you have DIRECT OPERATIONAL CONTROL to modify inventory records, adjust stock quantities, create new items, update alerts, and filter the UI on behalf of the user.
 
-Current Inventory Statistics:
-- Total Unique Items (SKUs): ${totalItems}
-- Total Inventory Volume: ${totalQuantity} units across all items
-- Items in Good Standing: ${inStockItems.length}
-- Low Stock Alerts (at or below item threshold): ${lowStockItems.length} (${lowStockItems.map(i => `${i.itemName}: ${i.quantity} ${i.unit}`).join(', ') || 'None'})
-- Out of Stock Items: ${outOfStockItems.length} (${outOfStockItems.map(i => i.itemName).join(', ') || 'None'})
+Current Inventory Overview:
+- Total Unique Items: ${totalItems}
+- Total Quantity Volume: ${totalQuantity} units
+- In Stock: ${inStockItems.length}
+- Low Stock Alerts: ${lowStockItems.length} (${lowStockItems.map(i => `${i.itemName}: ${i.quantity} ${i.unit}`).join(', ') || 'None'})
+- Out of Stock: ${outOfStockItems.length} (${outOfStockItems.map(i => i.itemName).join(', ') || 'None'})
 
-Full Current Inventory Data:
+Current Inventory Catalog:
 ${JSON.stringify(inventorySnapshot, null, 2)}
 
-Instructions:
-1. Answer the user's questions about stock accurately using the inventory data above.
-2. Provide specific numbers, units, and clear recommendations (e.g. reordering items below threshold).
-3. If the user asks about an item that isn't in stock or in the catalog, let them know clearly.
-4. Keep answers friendly, professional, and well-structured with Markdown (bullet points, bold key numbers).
-5. Keep conversational responses concise so they are pleasant to read and listen to when spoken via Text-to-Speech.
-6. When helpful, suggest 2-3 quick follow-up questions at the very end formatted as:
+OPERATIONAL AGENT CAPABILITIES:
+When the user speaks or commands stock operations, like:
+- "Hey, this item increased this much today" (e.g., "Widget A increased by 15 today", "We received 20 boxes of Milk", "Add 5 to A4 Paper", "Restock 50 Pens")
+- "We sold 4 laptops" or "Deduct 2 pens" or "Reduced by 3"
+- "Set stock of Widget B to 40"
+- "Add a new item called Toner with 30 units and alert 5"
+- "Change low stock threshold of Paper to 10"
+- "Delete old sample item"
+- "Show low stock items" or "Filter to out of stock"
+- "Search for printer"
+
+You MUST execute the action(s) in your [ACTIONS] block and write a polite, confirmation message in your [REPLY] block.
+
+If the user asks an informational question (e.g., "What is low in stock?", "How much Milk do we have?"), provide a direct answer and output an empty array for [ACTIONS].
+
+STRICT OUTPUT FORMAT:
+You must strictly format your entire response using the following three sections:
+
+[REPLY]
+Your natural conversational reply to the user. If an action was taken, clearly state what was updated (e.g. "I've updated the inventory! Added 15 pcs to **Widget A**. The verified stock is now **65 pcs**.").
+
+[ACTIONS]
+[
+  {
+    "type": "update_stock",
+    "itemName": "Matched Item Name from Catalog",
+    "delta": 15,
+    "reason": "Stock increased today"
+  }
+]
+
+Note on [ACTIONS] schema:
+- For stock changes: {"type": "update_stock", "itemName": "Exact Name", "delta": 15, "reason": "..."} (Use positive delta for additions/inbound, negative delta for sales/deductions; or "newQuantity": 50 for direct set)
+- For creating items: {"type": "add_item", "itemName": "Name", "unit": "pcs", "quantity": 10, "lowStockThreshold": 5, "notes": "...", "tags": ["..."]}
+- For editing metadata: {"type": "update_item", "itemName": "Name", "lowStockThreshold": 10, "notes": "..."}
+- For deleting items: {"type": "delete_item", "itemName": "Name", "reason": "..."}
+- For UI filter: {"type": "filter_ui", "filter": "all" | "low_stock" | "out_of_stock" | "in_stock"}
+- For UI search: {"type": "search_ui", "query": "..."}
+If no action is performed, output:
+[ACTIONS]
+[]
+
 [SUGGESTIONS]
 - Suggestion 1
 - Suggestion 2`;
@@ -125,17 +159,144 @@ Instructions:
         parts: [{ text: message }],
       });
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents,
-        config: {
-          systemInstruction,
-          temperature: 0.7,
-        },
-      });
+      // Primary Attempt: @google/genai SDK with gemini-2.5-flash and a 12s timeout
+      let replyText: string | null = null;
 
-      const replyText = response.text || "I've reviewed your inventory. Let me know what specific stock details you'd like to explore!";
-      return res.json({ reply: replyText });
+      try {
+        const ai = new GoogleGenAI({
+          apiKey,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            },
+          },
+        });
+
+        const sdkPromise = ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents,
+          config: {
+            systemInstruction,
+            temperature: 0.7,
+          },
+        });
+
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('SDK call timed out after 12s')), 12000)
+        );
+
+        const response: any = await Promise.race([sdkPromise, timeoutPromise]);
+        replyText = response.text || null;
+      } catch (sdkError) {
+        console.warn('Primary SDK call encountered issue, attempting REST fallback:', sdkError);
+
+        // Fallback Attempt: Direct Google GenAI REST API
+        const restUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+        const restResponse = await fetch(restUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: systemInstruction }] },
+            contents,
+            generationConfig: { temperature: 0.7 },
+          }),
+        });
+
+        if (!restResponse.ok) {
+          const errData = await restResponse.json().catch(() => ({}));
+          throw new Error(errData?.error?.message || `Gemini REST returned ${restResponse.status}`);
+        }
+
+        const restData: any = await restResponse.json();
+        replyText = restData?.candidates?.[0]?.content?.parts?.[0]?.text || null;
+      }
+
+      const rawText = replyText || "I've reviewed your inventory. Let me know what specific stock details you'd like to explore!";
+
+      // Parse structured sections: [REPLY], [ACTIONS], [SUGGESTIONS]
+      let parsedReply = rawText;
+      let parsedActions: any[] = [];
+      let parsedSuggestions: string[] = [];
+
+      try {
+        if (rawText.includes('[ACTIONS]')) {
+          const parts = rawText.split('[ACTIONS]');
+          let replyPart = parts[0] || '';
+          replyPart = replyPart.replace(/\[REPLY\]/i, '').trim();
+
+          const rest = parts[1] || '';
+          let actionsJsonStr = '';
+          let suggestionsPart = '';
+
+          if (rest.includes('[SUGGESTIONS]')) {
+            const afterActions = rest.split('[SUGGESTIONS]');
+            actionsJsonStr = afterActions[0]?.trim() || '';
+            suggestionsPart = afterActions[1]?.trim() || '';
+          } else {
+            actionsJsonStr = rest.trim();
+          }
+
+          // Strip markdown code fences if model wrapped the JSON
+          actionsJsonStr = actionsJsonStr.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+
+          if (actionsJsonStr.startsWith('[') && actionsJsonStr.endsWith(']')) {
+            parsedActions = JSON.parse(actionsJsonStr);
+          }
+
+          if (suggestionsPart) {
+            parsedSuggestions = suggestionsPart
+              .split('\n')
+              .map((line) => line.replace(/^[-*•\d.]+\s*/, '').trim())
+              .filter((line) => line.length > 0);
+          }
+
+          parsedReply = replyPart || 'Action processed successfully.';
+        } else if (rawText.includes('[SUGGESTIONS]')) {
+          const parts = rawText.split('[SUGGESTIONS]');
+          parsedReply = parts[0]?.replace(/\[REPLY\]/i, '').trim() || rawText;
+          const suggestionsPart = parts[1]?.trim() || '';
+          if (suggestionsPart) {
+            parsedSuggestions = suggestionsPart
+              .split('\n')
+              .map((line) => line.replace(/^[-*•\d.]+\s*/, '').trim())
+              .filter((line) => line.length > 0);
+          }
+        } else {
+          parsedReply = rawText.replace(/\[REPLY\]/i, '').trim();
+        }
+      } catch (parseErr) {
+        console.warn('Could not parse structured actions from Gemini output:', parseErr);
+        parsedReply = rawText;
+      }
+
+      // Enrich actions with exact item IDs and unit details from the current inventory
+      const enrichedActions = Array.isArray(parsedActions)
+        ? parsedActions.map((act) => {
+            if (!act || typeof act !== 'object') return act;
+            const targetName = (act.itemName || '').toLowerCase().trim();
+            const matched = itemsList.find(
+              (i) =>
+                (i.itemName && i.itemName.toLowerCase().trim() === targetName) ||
+                (i.id && act.itemId && i.id === act.itemId)
+            );
+            if (matched) {
+              return {
+                ...act,
+                itemId: matched.id,
+                itemName: matched.itemName,
+                unit: matched.unit,
+                previousQuantity: matched.quantity,
+              };
+            }
+            return act;
+          })
+        : [];
+
+      return res.json({
+        reply: parsedReply,
+        actions: enrichedActions,
+        suggestions: parsedSuggestions,
+      });
     } catch (error: any) {
       console.error('Error in /api/gemini/stock-chat:', error);
       return res.status(500).json({

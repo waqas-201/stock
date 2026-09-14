@@ -27,6 +27,7 @@ interface ItemDetailsModalProps {
   onClose: () => void;
   onEdit: (item: StockItem) => void;
   onQuickQuantityChange: (item: StockItem, delta: number) => void;
+  onReceiveStock?: (item: StockItem) => void;
   onSelectTag?: (tag: string) => void;
 }
 
@@ -36,6 +37,7 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
   onClose,
   onEdit,
   onQuickQuantityChange,
+  onReceiveStock,
   onSelectTag,
 }) => {
   if (!isOpen || !item) return null;
@@ -532,6 +534,20 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2 ml-auto">
+            {onReceiveStock && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onReceiveStock(item);
+                }}
+                className="min-h-[38px] px-3.5 text-xs font-bold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 active:bg-emerald-300 border border-emerald-300 rounded-xl flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                title="Add stock via inbound restock modal"
+              >
+                <Plus className="w-3.5 h-3.5 text-emerald-800" />
+                <span>+ Add Stock</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {

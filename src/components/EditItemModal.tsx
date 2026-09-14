@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import {
   X,
-  Check,
-  Edit2,
+  Plus,
+  Package,
   Scale,
   AlertTriangle,
   Minus,
-  Plus,
   Calendar,
-  FileText,
-  Clock,
+  Layers,
+  ArrowRight,
+  ShieldCheck,
+  CheckCircle2,
+  RefreshCw,
+  Sliders,
 } from 'lucide-react';
 import { StockItem, StockUnit } from '../types';
 import { TagInput } from './TagInput';
@@ -44,18 +47,22 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
 }) => {
   const [itemName, setItemName] = useState('');
   const [unit, setUnit] = useState('');
-  const [quantity, setQuantity] = useState('');
   const [threshold, setThreshold] = useState('5');
   const [productionDate, setProductionDate] = useState('');
   const [notes, setNotes] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // Stock adjustment mode: 'adjustment' (+/- inbound/outbound) vs 'override' (recount stocktake)
+  const [stockMode, setStockMode] = useState<'adjust' | 'override'>('adjust');
+  const [adjustAmount, setAdjustAmount] = useState<string>('0');
+  const [isDeduction, setIsDeduction] = useState<boolean>(false);
+  const [overrideQuantity, setOverrideQuantity] = useState<string>('0');
+
   useEffect(() => {
-    if (item) {
+    if (item && isOpen) {
       setItemName(item.itemName);
       setUnit(item.unit);
-      setQuantity(item.quantity.toString());
       setThreshold(
         item.lowStockThreshold !== undefined ? item.lowStockThreshold.toString() : '5'
       );
@@ -63,15 +70,32 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
       setNotes(item.notes || '');
       setTags(Array.isArray(item.tags) ? [...item.tags] : []);
       setError(null);
+
+      // Reset adjustment
+      setStockMode('adjust');
+      setAdjustAmount('0');
+      setIsDeduction(false);
+      setOverrideQuantity(item.quantity.toString());
     }
   }, [item, isOpen]);
 
   if (!isOpen || !item) return null;
 
-  const handleStepQuantity = (delta: number) => {
-    const curr = parseFloat(quantity) || 0;
-    const next = Math.max(0, curr + delta);
-    setQuantity(next.toString());
+  const baselineQuantity = item.quantity || 0;
+
+  // Calculate resulting quantity
+  let calculatedQuantity = baselineQuantity;
+  if (stockMode === 'adjust') {
+    const delta = parseFloat(adjustAmount) || 0;
+    calculatedQuantity = Math.max(0, baselineQuantity + (isDeduction ? -delta : delta));
+  } else {
+    calculatedQuantity = Math.max(0, parseFloat(overrideQuantity) || 0);
+  }
+
+  const handleStepAdjust = (step: number) => {
+    const curr = parseFloat(adjustAmount) || 0;
+    const next = Math.max(0, curr + step);
+    setAdjustAmount(next.toString());
   };
 
   const handleStepThreshold = (delta: number) => {
@@ -93,9 +117,8 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
       return;
     }
 
-    const parsedQty = parseFloat(quantity);
-    if (isNaN(parsedQty) || parsedQty < 0) {
-      setError('Please enter a valid non-negative quantity');
+    if (isNaN(calculatedQuantity) || calculatedQuantity < 0) {
+      setError('Calculated stock quantity is invalid');
       return;
     }
 
@@ -109,7 +132,7 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
       item.id,
       cleanName,
       unit || item.unit,
-      parsedQty,
+      calculatedQuantity,
       parsedThreshold,
       productionDate.trim() || undefined,
       notes.trim() || undefined,
@@ -117,8 +140,6 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
     );
     onClose();
   };
-
-  const presets = [1, 2, 5, 10, 20];
 
   return (
     <div
@@ -131,24 +152,24 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby="edit-item-modal-title"
-        className="relative w-full max-w-lg bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200/90 my-auto flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200"
+        className="relative w-full max-w-lg bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200/90 my-auto flex flex-col max-h-[92vh] overflow-hidden animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header - Fixed */}
+        {/* Header */}
         <div className="px-5 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/90 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0 shadow-2xs">
-              <Edit2 className="w-5 h-5" />
+              <Package className="w-5 h-5" />
             </div>
             <div className="min-w-0">
               <h3
                 id="edit-item-modal-title"
                 className="text-base sm:text-lg font-bold text-slate-900 leading-tight truncate"
               >
-                Edit Stock Item
+                Edit Item: {item.itemName}
               </h3>
               <p className="text-xs text-slate-500 truncate">
-                Update stock level, alerts & details
+                Update stock levels, unit, alerts & product details
               </p>
             </div>
           </div>
@@ -189,11 +210,11 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
               required
               value={itemName}
               onChange={(e) => setItemName(e.target.value)}
-              className="w-full px-3.5 py-2.5 min-h-[44px] text-sm sm:text-base bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent text-slate-900"
+              className="w-full px-3.5 py-2.5 min-h-[44px] text-sm sm:text-base bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 text-slate-900 font-medium"
             />
           </div>
 
-          {/* 2. Unit Selection */}
+          {/* 2. Unit of Measure Selection */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label
@@ -218,232 +239,335 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
               id="edit-item-unit"
               value={unit}
               onChange={(e) => setUnit(e.target.value)}
-              className="w-full px-3.5 py-2.5 min-h-[44px] text-sm sm:text-base bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent text-slate-900 cursor-pointer"
+              className="w-full px-3.5 py-2.5 min-h-[44px] text-sm sm:text-base bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 text-slate-900 cursor-pointer font-medium"
             >
-              {units && units.map((u) => u?.name ? (
-                <option key={u.id} value={u.name}>
-                  {u.name} {u.code ? `(${u.code})` : ''}
-                </option>
-              ) : null)}
+              {units &&
+                units.map((u) =>
+                  u?.name ? (
+                    <option key={u.id} value={u.name}>
+                      {u.name} {u.code ? `(${u.code})` : ''}
+                    </option>
+                  ) : null
+                )}
             </select>
           </div>
 
-          {/* 3. Quantity & 4. Low Stock Alert Level (Grid with min-w-0) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-            {/* Current Stock */}
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 min-w-0">
-              <div className="flex items-center justify-between">
-                <label
-                  htmlFor="edit-item-quantity"
-                  className="block text-xs font-bold uppercase tracking-wider text-slate-700"
-                >
-                  Current Stock <span className="text-rose-500">*</span>
-                </label>
-                <span className="text-xs font-semibold text-slate-500 truncate max-w-[110px]">
-                  {unit || item.unit}
+          {/* 3. SOPHISTICATED STOCK MANAGEMENT: Baseline Protected + Inbound Addition / Recount */}
+          <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+            {/* Header with Mode Toggle */}
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                  <span>Stock Quantity</span>
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  Current baseline is protected from accidental single-cell overwrites
                 </span>
               </div>
-              <div className="flex items-center gap-1.5">
+
+              {/* Mode switch: Adjust Stock (+/-) vs Recount Override */}
+              <div className="flex items-center p-0.5 bg-slate-200/80 rounded-lg text-[11px] font-bold">
                 <button
                   type="button"
-                  onClick={() => handleStepQuantity(-1)}
-                  className="min-h-[40px] min-w-[40px] rounded-xl bg-white hover:bg-slate-100 active:bg-slate-200 text-slate-700 flex items-center justify-center font-bold border border-slate-300 transition-transform active:scale-95 cursor-pointer shadow-2xs shrink-0"
-                  title="Decrease quantity by 1"
-                  aria-label="Decrease quantity"
+                  onClick={() => setStockMode('adjust')}
+                  className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors ${
+                    stockMode === 'adjust'
+                      ? 'bg-white text-emerald-900 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
                 >
-                  <Minus className="w-4 h-4" />
+                  Add / Adjust
                 </button>
-
-                <input
-                  id="edit-item-quantity"
-                  type="number"
-                  min="0"
-                  step="any"
-                  required
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  className="w-full min-w-0 px-2 py-2 min-h-[40px] text-base font-mono text-center font-bold bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 text-slate-900"
-                />
-
                 <button
                   type="button"
-                  onClick={() => handleStepQuantity(1)}
-                  className="min-h-[40px] min-w-[40px] rounded-xl bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 text-emerald-800 flex items-center justify-center font-bold border border-emerald-300 transition-transform active:scale-95 cursor-pointer shadow-2xs shrink-0"
-                  title="Increase quantity by 1"
-                  aria-label="Increase quantity"
+                  onClick={() => setStockMode('override')}
+                  className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors ${
+                    stockMode === 'override'
+                      ? 'bg-white text-amber-900 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
                 >
-                  <Plus className="w-4 h-4" />
+                  Recount Override
                 </button>
               </div>
             </div>
 
-            {/* Individual Low Stock Alert Level */}
-            <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-2xl space-y-2 min-w-0">
-              <div className="flex items-center justify-between">
-                <label
-                  htmlFor="edit-item-threshold"
-                  className="text-xs font-bold uppercase tracking-wider text-amber-900 flex items-center gap-1"
+            {/* Current Baseline Display */}
+            <div className="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                  Current Verified Baseline
+                </span>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-2xl font-bold font-mono text-slate-900">
+                    {baselineQuantity.toLocaleString()}
+                  </span>
+                  <span className="text-xs font-semibold text-slate-500">
+                    {item.unit}
+                  </span>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] text-slate-400 block">Status</span>
+                <span
+                  className={`text-xs font-bold px-2 py-0.5 rounded-full inline-block ${
+                    baselineQuantity <= 0
+                      ? 'bg-rose-100 text-rose-800'
+                      : baselineQuantity <= (item.lowStockThreshold ?? 5)
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-emerald-100 text-emerald-800'
+                  }`}
                 >
-                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                  <span>Low Stock Alert</span>
-                </label>
-                <span className="text-[11px] font-semibold text-amber-800">
-                  ≤ alert
+                  {baselineQuantity <= 0
+                    ? 'Out of Stock'
+                    : baselineQuantity <= (item.lowStockThreshold ?? 5)
+                    ? 'Low Stock'
+                    : 'In Stock'}
                 </span>
               </div>
+            </div>
 
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => handleStepThreshold(-1)}
-                  className="min-h-[40px] min-w-[40px] rounded-xl bg-white hover:bg-amber-100 active:bg-amber-200 text-slate-700 flex items-center justify-center font-bold border border-amber-300 transition-transform active:scale-95 cursor-pointer shadow-2xs shrink-0"
-                  title="Decrease alert threshold"
-                  aria-label="Decrease threshold"
-                >
-                  <Minus className="w-4 h-4" />
-                </button>
+            {/* Sub-Panel: Add / Deduct Adjustment */}
+            {stockMode === 'adjust' ? (
+              <div className="space-y-2.5 pt-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-700">
+                    Specify Quantity to Add or Deduct:
+                  </span>
+                  <div className="flex items-center gap-1 text-[11px] font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setIsDeduction(false)}
+                      className={`px-2 py-0.5 rounded-md cursor-pointer ${
+                        !isDeduction
+                          ? 'bg-emerald-600 text-white shadow-2xs'
+                          : 'bg-white text-slate-600 border border-slate-200'
+                      }`}
+                    >
+                      + Inbound Add
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsDeduction(true)}
+                      className={`px-2 py-0.5 rounded-md cursor-pointer ${
+                        isDeduction
+                          ? 'bg-rose-600 text-white shadow-2xs'
+                          : 'bg-white text-slate-600 border border-slate-200'
+                      }`}
+                    >
+                      − Outbound Deduct
+                    </button>
+                  </div>
+                </div>
 
-                <input
-                  id="edit-item-threshold"
-                  type="number"
-                  min="0"
-                  required
-                  value={threshold}
-                  onChange={(e) => setThreshold(e.target.value)}
-                  className="w-full min-w-0 px-2 py-2 min-h-[40px] text-base font-mono text-center font-bold bg-white border border-amber-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500 text-slate-900"
-                />
-
-                <button
-                  type="button"
-                  onClick={() => handleStepThreshold(1)}
-                  className="min-h-[40px] min-w-[40px] rounded-xl bg-amber-100 hover:bg-amber-200 active:bg-amber-300 text-amber-900 flex items-center justify-center font-bold border border-amber-300 transition-transform active:scale-95 cursor-pointer shadow-2xs shrink-0"
-                  title="Increase alert threshold"
-                  aria-label="Increase threshold"
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Quick Presets */}
-              <div className="flex items-center gap-1 pt-0.5 flex-wrap">
-                <span className="text-[10px] text-amber-800 font-semibold mr-0.5">
-                  Presets:
-                </span>
-                {presets.map((p) => (
+                <div className="flex items-center gap-2">
                   <button
-                    key={p}
                     type="button"
-                    onClick={() => setThreshold(p.toString())}
-                    className={`min-h-[26px] px-2 py-0.5 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
-                      threshold === p.toString()
-                        ? 'bg-amber-200 border-amber-400 text-amber-950 font-bold'
-                        : 'bg-white border-amber-200/90 text-amber-800 hover:bg-amber-100'
-                    }`}
+                    onClick={() => handleStepAdjust(-1)}
+                    className="min-h-[40px] min-w-[40px] rounded-xl bg-white hover:bg-slate-100 text-slate-700 flex items-center justify-center font-bold border border-slate-300 transition-transform active:scale-95 cursor-pointer shrink-0"
+                    title="Decrease adjustment"
                   >
-                    ≤{p}
+                    <Minus className="w-4 h-4" />
                   </button>
-                ))}
+
+                  <div className="relative flex-1 min-w-0">
+                    <input
+                      id="edit-item-adjust-input"
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={adjustAmount}
+                      onChange={(e) => setAdjustAmount(e.target.value)}
+                      className="w-full px-3 py-2 min-h-[40px] text-base font-mono text-center font-bold bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 text-slate-900"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400 pointer-events-none">
+                      {unit || item.unit}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleStepAdjust(1)}
+                    className="min-h-[40px] min-w-[40px] rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold border border-emerald-300 transition-transform active:scale-95 cursor-pointer shrink-0"
+                    title="Increase adjustment"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[1, 5, 10, 25, 50].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setAdjustAmount(preset.toString())}
+                      className="text-xs px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-slate-700 font-bold cursor-pointer"
+                    >
+                      +{preset}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Calculation Breakdown */}
+                <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl flex items-center justify-between text-xs">
+                  <span className="text-emerald-950 font-medium">
+                    {baselineQuantity} {isDeduction ? '−' : '+'} {parseFloat(adjustAmount) || 0} =
+                  </span>
+                  <span className="font-bold text-emerald-900 font-mono text-sm">
+                    Updated Total: {calculatedQuantity} {item.unit}
+                  </span>
+                </div>
               </div>
-            </div>
+            ) : (
+              /* Sub-Panel: Direct Recount Override (Cycle count audit) */
+              <div className="space-y-2 pt-1">
+                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
+                  <span className="font-bold block">⚠️ Direct Physical Recount</span>
+                  Use this only when performing an official physical stocktake recount.
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="edit-item-recount-input"
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={overrideQuantity}
+                    onChange={(e) => setOverrideQuantity(e.target.value)}
+                    className="w-full px-3 py-2 min-h-[40px] text-base font-mono text-center font-bold bg-white border border-amber-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500 text-slate-900"
+                  />
+                  <span className="text-xs font-bold text-slate-600 shrink-0">
+                    {item.unit}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* 5. Production Date */}
-          <div className="p-3.5 bg-slate-50/80 border border-slate-200 rounded-2xl space-y-1.5">
+          {/* 4. Individual Low Stock Alert Level */}
+          <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-2xl space-y-2 min-w-0">
             <div className="flex items-center justify-between">
               <label
+                htmlFor="edit-item-threshold"
+                className="text-xs font-bold uppercase tracking-wider text-amber-900 flex items-center gap-1"
+              >
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span>Low Stock Alert Limit</span>
+              </label>
+              <span className="text-[11px] font-semibold text-amber-800">
+                ≤ alert
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => handleStepThreshold(-1)}
+                className="min-h-[40px] min-w-[40px] rounded-xl bg-white hover:bg-amber-100 text-slate-700 flex items-center justify-center font-bold border border-amber-300 transition-transform active:scale-95 cursor-pointer shadow-2xs shrink-0"
+                title="Decrease alert limit"
+              >
+                <Minus className="w-4 h-4" />
+              </button>
+
+              <input
+                id="edit-item-threshold"
+                type="number"
+                min="0"
+                required
+                value={threshold}
+                onChange={(e) => setThreshold(e.target.value)}
+                className="w-full min-w-0 px-2 py-2 min-h-[40px] text-base font-mono text-center font-bold bg-white border border-amber-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500 text-slate-900"
+              />
+
+              <button
+                type="button"
+                onClick={() => handleStepThreshold(1)}
+                className="min-h-[40px] min-w-[40px] rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 flex items-center justify-center font-bold border border-amber-400 transition-transform active:scale-95 cursor-pointer shadow-2xs shrink-0"
+                title="Increase alert limit"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-[10px] text-amber-700">
+              Triggers a low stock warning when inventory drops to or below this amount
+            </p>
+          </div>
+
+          {/* 5. Production / Batch Date */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label
                 htmlFor="edit-item-production-date"
-                className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5"
+                className="block text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1"
               >
                 <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Production Date</span>
-                <span className="text-[10px] font-normal text-slate-400 capitalize">
-                  (Optional)
-                </span>
+                <span>Production Date / Batch (Optional)</span>
               </label>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={handleSetTodayProductionDate}
-                  className="min-h-[26px] px-2 py-0.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg cursor-pointer flex items-center gap-1"
-                >
-                  <Clock className="w-3 h-3" />
-                  <span>Today</span>
-                </button>
-                {productionDate && (
-                  <button
-                    type="button"
-                    onClick={() => setProductionDate('')}
-                    className="min-h-[26px] px-2 py-0.5 text-xs text-slate-500 hover:text-slate-700 bg-white border border-slate-200 rounded-lg cursor-pointer"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
+              <button
+                type="button"
+                onClick={handleSetTodayProductionDate}
+                className="min-h-[30px] px-2 py-0.5 text-xs text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-md font-semibold cursor-pointer transition-colors"
+              >
+                + Today
+              </button>
             </div>
             <input
               id="edit-item-production-date"
               type="date"
               value={productionDate}
               onChange={(e) => setProductionDate(e.target.value)}
-              className="w-full px-3.5 py-2 min-h-[42px] text-sm bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 text-slate-900 cursor-pointer"
+              className="w-full px-3.5 py-2.5 min-h-[44px] text-sm bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 text-slate-900"
             />
-            <p className="text-[11px] text-slate-500">
-              Manufacturing date or production harvest date.
-            </p>
           </div>
 
           {/* 6. Product Labels & Tags */}
-          <div className="p-3.5 bg-slate-50/80 border border-slate-200 rounded-2xl">
+          <div>
             <TagInput
               tags={tags}
               onChange={setTags}
               availableTags={availableTags}
-              placeholder="e.g. Office, Stationery, Food, Fragile..."
+              placeholder="Add labels / tags..."
             />
           </div>
 
-          {/* 7. Notes / Remarks */}
-          <div className="p-3.5 bg-slate-50/80 border border-slate-200 rounded-2xl space-y-1.5">
+          {/* 7. Notes */}
+          <div>
             <label
               htmlFor="edit-item-notes"
-              className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5"
+              className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1"
             >
-              <FileText className="w-3.5 h-3.5 text-slate-500" />
-              <span>Notes & Remarks</span>
-              <span className="text-[10px] font-normal text-slate-400 capitalize">
-                (Optional)
-              </span>
+              Notes, Remarks & Shelf Location
             </label>
             <textarea
               id="edit-item-notes"
               rows={2}
-              placeholder="e.g., Supplier info, rack location, batch number..."
+              placeholder="e.g., Shelf C-4, Supplier contact, Batch notes..."
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="w-full px-3.5 py-2 text-sm bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 text-slate-900 placeholder:text-slate-400 resize-none"
+              className="w-full px-3.5 py-2 text-sm bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 text-slate-900 placeholder:text-slate-400"
             />
           </div>
-        </form>
 
-        {/* Footer - Fixed */}
-        <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5 sm:gap-3 shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-h-[44px] px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-100 active:bg-slate-200 transition-colors cursor-pointer"
-          >
-            Cancel
-          </button>
-          <button
-            id="btn-submit-edit-item"
-            type="submit"
-            form="edit-item-form"
-            className="min-h-[44px] inline-flex items-center justify-center gap-2 px-5 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl shadow-xs transition-colors cursor-pointer"
-          >
-            <Check className="w-4 h-4" />
-            <span>Save Changes</span>
-          </button>
-        </div>
+          {/* Footer Buttons */}
+          <div className="pt-2 flex items-center justify-end gap-2.5">
+            <button
+              type="button"
+              onClick={onClose}
+              className="min-h-[44px] px-4 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              id="save-edit-item-btn"
+              className="min-h-[44px] px-6 text-sm font-bold text-white bg-slate-900 hover:bg-slate-800 active:bg-slate-950 rounded-xl shadow-sm flex items-center gap-2 cursor-pointer transition-all"
+            >
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <span>Save & Update ({calculatedQuantity} {unit || item.unit})</span>
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

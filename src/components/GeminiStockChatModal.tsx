@@ -12,12 +12,31 @@ import {
   User,
   AlertTriangle,
   RotateCcw,
-  ExternalLink,
-  Tag,
+  CheckCircle2,
+  TrendingUp,
+  ArrowRight,
+  Undo2,
   Package,
-  Layers,
+  Plus,
+  Sliders,
+  Filter,
 } from 'lucide-react';
-import { StockItem, StockFilter } from '../types';
+import { StockItem, StockFilter, GeminiAgentAction } from '../types';
+
+export interface ExecutedActionRecord {
+  id: string;
+  type: string;
+  itemName?: string;
+  delta?: number;
+  previousQuantity?: number;
+  newQuantity?: number;
+  unit?: string;
+  reason?: string;
+  timestamp: string;
+  undo?: () => void;
+  isUndone?: boolean;
+  summary: string;
+}
 
 interface Message {
   id: string;
@@ -25,14 +44,23 @@ interface Message {
   text: string;
   timestamp: Date;
   suggestions?: string[];
+  executedActions?: ExecutedActionRecord[];
 }
 
-interface GeminiStockChatModalProps {
+export interface GeminiStockChatModalProps {
   isOpen: boolean;
   onClose: () => void;
   items: StockItem[];
   onApplyFilter?: (filter: StockFilter) => void;
   onSearchItem?: (query: string) => void;
+  onQuickQuantityChange?: (item: StockItem, delta: number) => void;
+  onExecuteAgentAction?: (action: GeminiAgentAction) => {
+    success: boolean;
+    message: string;
+    undo?: () => void;
+    previousQuantity?: number;
+    newQuantity?: number;
+  };
 }
 
 export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
@@ -41,6 +69,8 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
   items = [],
   onApplyFilter,
   onSearchItem,
+  onQuickQuantityChange,
+  onExecuteAgentAction,
 }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -68,7 +98,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
     }
   }, []);
 
-  // Set initial welcoming message when opened with inventory stats
+  // Set initial welcoming message when opened with inventory stats & actionable prompts
   useEffect(() => {
     if (isOpen && messages.length === 0) {
       const totalCount = items.length;
@@ -78,11 +108,17 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       }).length;
       const outCount = items.filter((i) => (i.quantity || 0) <= 0).length;
 
-      let welcome = `Hello! I'm your **Gemini AI Stock Assistant**, connected directly to your real-time inventory of **${totalCount} items**.`;
+      const sampleItem = items.length > 0 ? items[0].itemName : 'Widget A';
+
+      let welcome = `👋 Hello! I'm your **Active Gemini AI Inventory Agent**, connected in real time to your **${totalCount} products**.`;
+      welcome += `\n\n⚡ **Direct Control Enabled**: You can operate your stock directly with natural language!\n`;
+      welcome += `• *"Hey, ${sampleItem} increased by 10 today"*\n`;
+      welcome += `• *"We used 5 ${sampleItem}"*\n`;
+      welcome += `• *"What items are running low?"*`;
+
       if (outCount > 0 || lowCount > 0) {
-        welcome += `\n\n⚠️ **Quick Notice**: You currently have **${lowCount} items low on stock** and **${outCount} out of stock**.`;
+        welcome += `\n\n⚠️ **Notice**: You currently have **${lowCount} low stock** and **${outCount} out of stock** items.`;
       }
-      welcome += `\n\nAsk me anything about your stock quantities, reorder needs, production dates, or product categories!`;
 
       setMessages([
         {
@@ -91,10 +127,10 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           text: welcome,
           timestamp: new Date(),
           suggestions: [
-            "What items are running low on stock?",
-            "Give me a complete inventory summary",
-            "Which items need immediate reordering?",
-            "What items are out of stock?",
+            items.length > 0 ? `Hey, ${items[0].itemName} increased by 10 today` : 'What items are low on stock?',
+            items.length > 1 ? `Deduct 5 from ${items[1].itemName}` : 'Give me a complete inventory summary',
+            'What items need immediate reordering?',
+            'Show items that are out of stock',
           ],
         },
       ]);
@@ -156,8 +192,8 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
 
       recognitionRef.current = recognition;
       recognition.start();
-    } catch (err) {
-      console.error('Failed to start speech recognition:', err);
+    } catch (e) {
+      console.warn('Could not start speech recognition:', e);
       setIsListening(false);
     }
   };
@@ -188,6 +224,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
     // Strip markdown formatting for cleaner speech output
     const cleanText = text
       .replace(/\[SUGGESTIONS\][\s\S]*$/gi, '')
+      .replace(/\[ACTIONS\][\s\S]*?(\n\n|$)/gi, '')
       .replace(/[*_~`#>-]/g, '')
       .replace(/\[(.*?)\]\(.*?\)/g, '$1')
       .trim();
@@ -205,7 +242,10 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
 
   // Parse suggested follow-ups from Gemini response
   const parseSuggestions = (rawText: string): { cleanText: string; suggestions: string[] } => {
-    const parts = rawText.split(/\[SUGGESTIONS\]/i);
+    // Strip [ACTIONS] block if rawText still contains it
+    let workingText = rawText.replace(/\[ACTIONS\][\s\S]*?(\n\n|$)/gi, '').trim();
+
+    const parts = workingText.split(/\[SUGGESTIONS\]/i);
     const cleanText = parts[0].trim();
     const suggestions: string[] = [];
 
@@ -259,10 +299,47 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
         }),
       });
 
-      const data = await res.json();
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        // response was not JSON
+      }
 
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to talk with Gemini AI.');
+        throw new Error(data?.error || `Server responded with HTTP ${res.status}`);
+      }
+
+      // Execute returned Agent Actions
+      const executedActionsList: ExecutedActionRecord[] = [];
+      if (data.actions && Array.isArray(data.actions) && data.actions.length > 0 && onExecuteAgentAction) {
+        for (const act of data.actions) {
+          try {
+            const execResult = onExecuteAgentAction(act);
+            executedActionsList.push({
+              id: `act-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+              type: act.type,
+              itemName: act.itemName,
+              delta: act.delta,
+              previousQuantity: execResult.previousQuantity ?? act.previousQuantity,
+              newQuantity:
+                execResult.newQuantity ??
+                (act.newQuantity !== undefined
+                  ? act.newQuantity
+                  : execResult.previousQuantity !== undefined && act.delta !== undefined
+                  ? execResult.previousQuantity + act.delta
+                  : undefined),
+              unit: act.unit,
+              reason: act.reason,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              undo: execResult.undo,
+              isUndone: false,
+              summary: execResult.message || `${act.type} executed successfully`,
+            });
+          } catch (e: any) {
+            console.error('Failed to execute AI agent action:', act, e);
+          }
+        }
       }
 
       const { cleanText, suggestions } = parseSuggestions(data.reply || '');
@@ -274,6 +351,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
         text: cleanText,
         timestamp: new Date(),
         suggestions: suggestions.length > 0 ? suggestions : undefined,
+        executedActions: executedActionsList.length > 0 ? executedActionsList : undefined,
       };
 
       setMessages((prev) => [...prev, modelMessage]);
@@ -283,15 +361,41 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       }
     } catch (err: any) {
       console.error('Error communicating with Gemini:', err);
+      const isFetchFailed = err?.message?.toLowerCase().includes('failed to fetch');
+      const errorDetail = isFetchFailed
+        ? 'Could not connect to the inventory AI service. Please check your network connection or try again in a moment.'
+        : (err.message || 'Please ensure your GEMINI_API_KEY is configured in Settings > Secrets.');
+
       const errorMessage: Message = {
         id: `err-${Date.now()}`,
         role: 'model',
-        text: `⚠️ **Unable to fetch response**: ${err.message || 'Please ensure your GEMINI_API_KEY is configured in Settings > Secrets.'}`,
+        text: `⚠️ **Unable to connect to AI**: ${errorDetail}`,
         timestamp: new Date(),
+        suggestions: ["Try asking again", "Give me a complete inventory summary"],
       };
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Handle Undo of an executed action
+  const handleUndoAction = (actionRecord: ExecutedActionRecord, messageId: string) => {
+    if (actionRecord.undo) {
+      actionRecord.undo();
+      actionRecord.isUndone = true;
+
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (msg.id !== messageId || !msg.executedActions) return msg;
+          return {
+            ...msg,
+            executedActions: msg.executedActions.map((a) =>
+              a.id === actionRecord.id ? { ...a, isUndone: true } : a
+            ),
+          };
+        })
+      );
     }
   };
 
@@ -317,7 +421,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="bg-white w-full max-w-2xl rounded-3xl border border-slate-200 shadow-2xl flex flex-col h-[92vh] sm:h-[640px] max-h-[800px] overflow-hidden animate-in zoom-in-95 duration-150"
+        className="bg-white w-full max-w-2xl rounded-3xl border border-slate-200 shadow-2xl flex flex-col h-[92vh] sm:h-[680px] max-h-[820px] overflow-hidden animate-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
@@ -329,17 +433,17 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-bold tracking-tight text-white truncate">
-                  Talk with Gemini AI
+                  Gemini AI Stock Agent
                 </h2>
                 <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white border border-white/30">
-                  gemini-3.8-flash
+                  Active Agent
                 </span>
               </div>
               <p className="text-xs text-emerald-100/90 truncate flex items-center gap-1.5">
-                <span>Real-time analysis on {items.length} items</span>
+                <span>Direct UI control on {items.length} items</span>
                 <span>•</span>
                 <span className="font-mono text-[11px] text-emerald-200">
-                  {items.reduce((s, i) => s + (i.quantity || 0), 0)} units total
+                  {items.reduce((s, i) => s + (i.quantity || 0), 0)} total stock
                 </span>
               </p>
             </div>
@@ -356,7 +460,11 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                   setSpeakingMessageId(null);
                 }
               }}
-              title={autoSpeechEnabled ? 'Voice readout is ON. Tap to mute' : 'Voice readout is OFF. Tap to hear Gemini speak'}
+              title={
+                autoSpeechEnabled
+                  ? 'Voice readout is ON. Tap to mute'
+                  : 'Voice readout is OFF. Tap to hear Gemini speak'
+              }
               className={`min-h-[38px] min-w-[38px] p-2 rounded-xl border transition-colors cursor-pointer flex items-center justify-center ${
                 autoSpeechEnabled
                   ? 'bg-white text-emerald-800 border-white font-bold'
@@ -400,16 +508,14 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                 className={`flex flex-col ${isModel ? 'items-start' : 'items-end'}`}
               >
                 <div
-                  className={`flex items-start gap-2.5 max-w-[92%] sm:max-w-[85%] ${
+                  className={`flex items-start gap-2.5 max-w-[95%] sm:max-w-[88%] ${
                     isModel ? 'flex-row' : 'flex-row-reverse'
                   }`}
                 >
                   {/* Avatar */}
                   <div
                     className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-2xs ${
-                      isModel
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-slate-800 text-white'
+                      isModel ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-white'
                     }`}
                   >
                     {isModel ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
@@ -419,7 +525,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                   <div
                     className={`rounded-2xl px-4 py-3 text-sm shadow-2xs select-text ${
                       isModel
-                        ? 'bg-white text-slate-800 border border-slate-200/90 rounded-tl-xs leading-relaxed'
+                        ? 'bg-white text-slate-800 border border-slate-200/90 rounded-tl-xs leading-relaxed w-full'
                         : 'bg-emerald-600 text-white font-medium rounded-tr-xs leading-relaxed'
                     }`}
                   >
@@ -434,11 +540,94 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                       })}
                     </div>
 
-                    {/* Bottom toolbar for model message: Speech Readout & Quick Actions */}
+                    {/* Render EXECUTED AGENT ACTIONS (Real UI Operations) */}
+                    {isModel && msg.executedActions && msg.executedActions.length > 0 && (
+                      <div className="mt-3 pt-2.5 border-t border-slate-100 space-y-2">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                          <span>AI Agent Inventory Action Applied</span>
+                        </span>
+
+                        {msg.executedActions.map((actionRecord) => (
+                          <div
+                            key={actionRecord.id}
+                            className={`p-3 rounded-xl border transition-all ${
+                              actionRecord.isUndone
+                                ? 'bg-slate-100/80 border-slate-200 opacity-60'
+                                : 'bg-emerald-50/80 border-emerald-200'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                                  <TrendingUp className="w-3.5 h-3.5" />
+                                </span>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-bold text-slate-900 text-xs sm:text-sm truncate">
+                                      {actionRecord.itemName || 'Stock Item'}
+                                    </span>
+                                    {actionRecord.delta !== undefined && (
+                                      <span
+                                        className={`text-xs font-bold font-mono px-1.5 py-0.2 rounded-md ${
+                                          actionRecord.delta > 0
+                                            ? 'bg-emerald-600 text-white'
+                                            : 'bg-rose-600 text-white'
+                                        }`}
+                                      >
+                                        {actionRecord.delta > 0 ? `+${actionRecord.delta}` : actionRecord.delta}{' '}
+                                        {actionRecord.unit || ''}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-slate-500">
+                                    {actionRecord.summary}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Undo Button */}
+                              {actionRecord.undo && (
+                                <button
+                                  type="button"
+                                  disabled={actionRecord.isUndone}
+                                  onClick={() => handleUndoAction(actionRecord, msg.id)}
+                                  className={`min-h-[28px] px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shrink-0 ${
+                                    actionRecord.isUndone
+                                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                                      : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-300 shadow-2xs'
+                                  }`}
+                                >
+                                  <Undo2 className="w-3 h-3" />
+                                  <span>{actionRecord.isUndone ? 'Reverted' : 'Undo Action'}</span>
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Mathematical Calculation Flow */}
+                            {actionRecord.previousQuantity !== undefined &&
+                              actionRecord.newQuantity !== undefined && (
+                                <div className="mt-2 pt-1.5 border-t border-emerald-200/50 flex items-center justify-between text-[11px] font-mono text-slate-600">
+                                  <span>Previous: {actionRecord.previousQuantity}</span>
+                                  <ArrowRight className="w-3 h-3 text-emerald-600" />
+                                  <span className="font-bold text-emerald-800">
+                                    New Total: {actionRecord.newQuantity} {actionRecord.unit || ''}
+                                  </span>
+                                </div>
+                              )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Bottom toolbar for model message: Speech Readout & Timestamp */}
                     {isModel && (
-                      <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2 text-xs">
+                      <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-xs">
                         <span className="text-[10px] text-slate-400 font-medium">
-                          {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {msg.timestamp.toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
                         </span>
 
                         <div className="flex items-center gap-1.5">
@@ -453,8 +642,14 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                             }`}
                             title={isSpeaking ? 'Stop speaking' : 'Read aloud with voice'}
                           >
-                            <Volume2 className={`w-3.5 h-3.5 ${isSpeaking ? 'animate-pulse text-emerald-600' : ''}`} />
-                            <span className="text-[11px]">{isSpeaking ? 'Stop' : 'Listen'}</span>
+                            <Volume2
+                              className={`w-3.5 h-3.5 ${
+                                isSpeaking ? 'animate-pulse text-emerald-600' : ''
+                              }`}
+                            />
+                            <span className="text-[11px]">
+                              {isSpeaking ? 'Stop' : 'Listen'}
+                            </span>
                           </button>
                         </div>
                       </div>
@@ -464,7 +659,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
 
                 {/* Suggested follow-up prompts from model */}
                 {isModel && msg.suggestions && msg.suggestions.length > 0 && (
-                  <div className="mt-2.5 ml-10 flex flex-wrap gap-1.5 max-w-[85%]">
+                  <div className="mt-2.5 ml-10 flex flex-wrap gap-1.5 max-w-[88%]">
                     {msg.suggestions.map((suggestion, sIdx) => (
                       <button
                         key={sIdx}
@@ -490,7 +685,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
               </div>
               <div className="bg-white border border-slate-200/90 rounded-2xl rounded-tl-xs px-4 py-3 shadow-2xs flex items-center gap-2 text-sm text-slate-600">
                 <Loader2 className="w-4 h-4 animate-spin text-emerald-600 shrink-0" />
-                <span className="animate-pulse">Gemini is analyzing your stock...</span>
+                <span className="animate-pulse">Gemini is processing your request...</span>
               </div>
             </div>
           )}
@@ -498,16 +693,34 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Quick Question Chips Bar */}
+        {/* Quick Action Chips Bar (Direct agent command templates) */}
         <div className="px-4 py-2 border-t border-slate-200 bg-white flex items-center gap-1.5 overflow-x-auto scrollbar-none shrink-0">
           <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wide shrink-0">
-            Quick Ask:
+            Quick Commands:
           </span>
           {[
-            { label: 'Low Stock Alert', query: 'What items are low on stock and need reordering?' },
-            { label: 'Inventory Value', query: 'What is our total stock count and summary?' },
-            { label: 'Out of Stock', query: 'Which items are completely out of stock?' },
-            { label: 'By Tags', query: 'Break down our inventory by product categories and tags' },
+            {
+              label: items.length > 0 ? `+10 to ${items[0].itemName}` : '+10 Stock',
+              query:
+                items.length > 0
+                  ? `Hey, ${items[0].itemName} increased by 10 today`
+                  : 'Add 10 to current stock',
+            },
+            {
+              label: items.length > 0 ? `-5 from ${items[0].itemName}` : '-5 Stock',
+              query:
+                items.length > 0
+                  ? `Deduct 5 from ${items[0].itemName}`
+                  : 'Deduct 5 from stock',
+            },
+            {
+              label: 'Low Stock Alert',
+              query: 'What items are low on stock and need reordering?',
+            },
+            {
+              label: 'Inventory Summary',
+              query: 'Give me a complete inventory summary and stock count',
+            },
           ].map((chip) => (
             <button
               key={chip.label}
@@ -533,10 +746,14 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                     ? 'bg-rose-600 text-white border-rose-700 animate-pulse ring-4 ring-rose-500/20'
                     : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 active:bg-emerald-200'
                 }`}
-                title={isListening ? 'Stop listening' : 'Talk with Gemini via microphone'}
-                aria-label={isListening ? 'Stop listening' : 'Talk with Gemini via microphone'}
+                title={isListening ? 'Stop listening' : 'Speak to Gemini via microphone'}
+                aria-label={isListening ? 'Stop listening' : 'Speak to Gemini via microphone'}
               >
-                {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5 text-emerald-700" />}
+                {isListening ? (
+                  <MicOff className="w-5 h-5" />
+                ) : (
+                  <Mic className="w-5 h-5 text-emerald-700" />
+                )}
               </button>
             )}
 
@@ -545,7 +762,11 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
               <input
                 id="gemini-chat-input"
                 type="text"
-                placeholder={isListening ? 'Listening... speak now' : 'Ask Gemini anything about your stock...'}
+                placeholder={
+                  isListening
+                    ? 'Listening... say "Hey, this item increased by 10 today"'
+                    : 'Ask or say: "Hey, [item] increased by 15 today"...'
+                }
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleKeyDown}
@@ -575,7 +796,9 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           {isListening && (
             <div className="mt-2 text-xs text-rose-600 font-bold flex items-center gap-1.5 animate-pulse">
               <span className="w-2 h-2 rounded-full bg-rose-600" />
-              <span>Listening to your voice... Speak your question and it will be sent automatically.</span>
+              <span>
+                Listening to your voice... say something like "Hey, Widget increased by 5 today".
+              </span>
             </div>
           )}
         </div>
@@ -587,10 +810,10 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
 // Helper to format basic markdown bolding in paragraphs
 function formatTextWithBold(text: string): React.ReactNode {
   const parts = text.split(/(\*\*.*?\*\*)/g);
-  return parts.map((part, i) => {
+  return parts.map((part, index) => {
     if (part.startsWith('**') && part.endsWith('**')) {
       return (
-        <strong key={i} className="font-bold text-slate-900">
+        <strong key={index} className="font-bold text-slate-950">
           {part.slice(2, -2)}
         </strong>
       );
