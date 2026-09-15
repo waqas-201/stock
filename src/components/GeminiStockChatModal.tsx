@@ -89,7 +89,13 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [languageMode, setLanguageMode] = useState<'auto' | 'ur' | 'roman_ur' | 'en'>('auto');
-  const [voiceMode, setVoiceMode] = useState<'gemini_audio' | 'web_speech'>('gemini_audio');
+  const [voiceMode, setVoiceMode] = useState<'web_speech' | 'gemini_audio'>(() => {
+    if (typeof window !== 'undefined') {
+      const hasSpeech = Boolean((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+      if (hasSpeech) return 'web_speech';
+    }
+    return 'gemini_audio';
+  });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -100,24 +106,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
   const recordingTimerRef = useRef<any>(null);
   const shouldBeListeningRef = useRef(false);
   const shouldAutoSendRef = useRef(false);
-
-  // Helper to check if microphone input hardware is available
-  const checkMicrophoneAvailable = async (): Promise<boolean> => {
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) {
-      return true;
-    }
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const audioInputs = devices.filter((d) => d.kind === 'audioinput');
-      // If devices can be enumerated and at least one device exists but zero audio inputs
-      if (devices.length > 0 && audioInputs.length === 0) {
-        return false;
-      }
-      return true;
-    } catch {
-      return true;
-    }
-  };
+  const finalTranscriptRef = useRef<string>('');
 
   // Helper to format recording timer display
   const formatTimer = (secs: number) => {
@@ -137,19 +126,6 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       }
       if ('speechSynthesis' in window) {
         synthRef.current = window.speechSynthesis;
-      }
-
-      // Check for available audio input hardware silently
-      if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
-        navigator.mediaDevices
-          .enumerateDevices()
-          .then((devices) => {
-            const audioInputs = devices.filter((d) => d.kind === 'audioinput');
-            if (devices.length > 0 && audioInputs.length === 0) {
-              setSpeechStatus('No microphone detected. You can type commands in the chat box.');
-            }
-          })
-          .catch(() => {});
       }
     }
   }, []);
@@ -250,7 +226,15 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
 
   // High-accuracy Continuous Gemini Audio Recorder (Does NOT stop automatically on pauses/silence)
   const startGeminiAudioRecording = async () => {
+    const SpeechRecognition =
+      typeof window !== 'undefined' &&
+      ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      if (SpeechRecognition && shouldBeListeningRef.current) {
+        startWebSpeechListening();
+        return;
+      }
       setSpeechError('Microphone recording is not supported in this browser.');
       setIsListening(false);
       shouldBeListeningRef.current = false;
@@ -258,7 +242,23 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (firstErr: any) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+            },
+          });
+        } catch {
+          throw firstErr;
+        }
+      }
+
       streamRef.current = stream;
       audioChunksRef.current = [];
 
@@ -323,8 +323,8 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
         setIsTranscribing(true);
         setSpeechStatus(
           languageMode === 'ur'
-            ? 'آواز کا تجزیہ ہو رہا ہے... (Gemini AI)'
-            : 'Transcribing your voice with Gemini AI...'
+            ? 'آواز کا تجزیہ ہو رہا ہے... (Stock Agent)'
+            : 'Transcribing your voice with Stock Agent...'
         );
 
         try {
@@ -385,7 +385,16 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
         setRecordingSeconds((prev) => prev + 1);
       }, 1000);
     } catch (err: any) {
-      console.warn('Microphone recording unavailable:', err?.name || err?.message || err);
+      console.warn('Microphone getUserMedia unavailable:', err?.name || err?.message || err);
+
+      // If Web Speech API is available in this browser, seamlessly fallback to Live Dictation!
+      if (SpeechRecognition && shouldBeListeningRef.current) {
+        console.log('Falling back to browser Web Speech API for voice dictation...');
+        setVoiceMode('web_speech');
+        startWebSpeechListening();
+        return;
+      }
+
       setIsListening(false);
       shouldBeListeningRef.current = false;
 
@@ -400,10 +409,6 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
         err?.name === 'PermissionDeniedError' ||
         err?.name === 'SecurityError';
 
-      const isBusy =
-        err?.name === 'NotReadableError' ||
-        err?.name === 'TrackStartError';
-
       if (isNotFound) {
         setSpeechError(
           languageMode === 'ur'
@@ -416,20 +421,17 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
             ? 'مائیکروفون کی اجازت بلاک ہے۔ براؤزر کے ایڈریس بار سے اجازت آن کریں۔'
             : 'Microphone permission was blocked. Please allow microphone access in your browser address bar.'
         );
-      } else if (isBusy) {
-        setSpeechError(
-          'Microphone is currently in use by another application. Please close other audio apps and try again.'
-        );
       } else {
         setSpeechError('Could not access microphone hardware. You can type your request directly in the chat.');
       }
     }
   };
 
-  // Live Browser Dictation (Web Speech API with auto-reconnect keep-alive)
+  // Live Browser Dictation (Web Speech API with continuous auto-reconnect keep-alive)
   const startWebSpeechListening = () => {
     const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      typeof window !== 'undefined' &&
+      ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
 
     if (!SpeechRecognition) {
       startGeminiAudioRecording();
@@ -446,7 +448,13 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+
+      // 'ur-PK' natively handles both Urdu script and Roman Urdu phonetically in Google Chrome
       recognition.lang = languageMode === 'en' ? 'en-US' : 'ur-PK';
+
+      // Seed transcript accumulator with any pre-existing input text
+      finalTranscriptRef.current = inputText ? inputText.trim() + ' ' : '';
 
       recognition.onstart = () => {
         setIsListening(true);
@@ -461,19 +469,18 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       };
 
       recognition.onresult = (event: any) => {
-        let finalWords = '';
         let interimWords = '';
 
-        for (let i = 0; i < event.results.length; ++i) {
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
           const res = event.results[i];
           if (res.isFinal) {
-            finalWords += res[0].transcript + ' ';
+            finalTranscriptRef.current += res[0].transcript + ' ';
           } else {
             interimWords += res[0].transcript;
           }
         }
 
-        const combined = (finalWords + interimWords).trim();
+        const combined = (finalTranscriptRef.current + interimWords).trim();
         if (combined) {
           setInputText(combined);
           setSpeechStatus(`Heard: "${combined}"`);
@@ -484,24 +491,23 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
         console.warn('Speech recognition event:', e.error);
         if (e.error === 'not-allowed') {
           setSpeechError(
-            'Microphone access blocked. Click the lock/camera icon in your address bar to enable.'
+            languageMode === 'ur'
+              ? 'مائیکروفون کی اجازت بلاک ہے۔ براؤزر کے ایڈریس بار سے اجازت آن کریں۔'
+              : 'Microphone access blocked. Click the lock/camera icon in your address bar to enable.'
           );
           shouldBeListeningRef.current = false;
           setIsListening(false);
         } else if (e.error === 'audio-capture') {
-          console.warn('No audio capture device found.');
-          setSpeechError(
-            languageMode === 'ur'
-              ? 'مائیکروفون دستیاب نہیں ہے۔ برائے مہربانی مائیکروفون کنیکٹ کریں یا میسج ٹائپ کریں۔'
-              : 'No microphone detected on your device. Please plug in a microphone or headset, or type your message.'
-          );
-          shouldBeListeningRef.current = false;
-          setIsListening(false);
+          console.warn('No audio capture device found on Web Speech, attempting Gemini audio recording...');
+          try {
+            recognition.abort();
+          } catch {}
+          startGeminiAudioRecording();
         } else if (e.error === 'no-speech') {
           // Chrome fires 'no-speech' after 3-4s silence: DO NOT stop! Keep listening!
-          setSpeechStatus('Listening... (speak when ready)');
+          setSpeechStatus('Listening... (speak freely, won’t stop on pauses)');
         } else if (e.error === 'network' || e.error === 'service-not-allowed') {
-          console.warn('Browser speech service unavailable, switching to continuous Gemini audio...');
+          console.warn('Browser speech service unavailable, switching to Gemini continuous audio...');
           try {
             recognition.abort();
           } catch {}
@@ -515,8 +521,15 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           try {
             recognition.start();
           } catch {
-            shouldBeListeningRef.current = false;
-            setIsListening(false);
+            setTimeout(() => {
+              if (shouldBeListeningRef.current) {
+                try {
+                  recognition.start();
+                } catch {
+                  startGeminiAudioRecording();
+                }
+              }
+            }, 100);
           }
         } else {
           setIsListening(false);
@@ -540,25 +553,11 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
     }
   };
 
-  // Primary Voice Toggle handler with pre-flight hardware device check
+  // Primary Voice Toggle handler
   const startListening = async () => {
     try {
       setSpeechError(null);
       shouldAutoSendRef.current = false;
-
-      // Check if an audioinput hardware device is present
-      const micPresent = await checkMicrophoneAvailable();
-      if (!micPresent) {
-        setIsListening(false);
-        shouldBeListeningRef.current = false;
-        setSpeechError(
-          languageMode === 'ur'
-            ? 'اس ڈیوائس پر کوئی مائیکروفون نہیں ملا۔ برائے مہربانی مائیکروفون لگائیں یا نیچے میسج لکھ کر بھیجیں۔'
-            : 'No microphone detected on your device. Please plug in a microphone or headset, or type your message in the chat.'
-        );
-        return;
-      }
-
       shouldBeListeningRef.current = true;
 
       if (voiceMode === 'gemini_audio') {
