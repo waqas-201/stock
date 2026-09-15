@@ -350,13 +350,16 @@ If no action is performed, output:
         return res.status(400).json({ error: 'audioBase64 data is required.' });
       }
 
+      // Ensure mimeType is clean (strip codec parameters like ;codecs=opus)
+      const cleanMimeType = (mimeType || 'audio/webm').split(';')[0].trim();
+
       const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
         model: 'gemini-3.8-flash',
         contents: [
           {
             inlineData: {
-              mimeType: mimeType || 'audio/webm',
+              mimeType: cleanMimeType || 'audio/webm',
               data: audioBase64,
             },
           },

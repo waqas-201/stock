@@ -89,6 +89,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [languageMode, setLanguageMode] = useState<'auto' | 'ur' | 'roman_ur' | 'en'>('auto');
+  const [voiceMode, setVoiceMode] = useState<'gemini_audio' | 'web_speech'>('gemini_audio');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -97,6 +98,15 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const recordingTimerRef = useRef<any>(null);
+  const shouldBeListeningRef = useRef(false);
+  const shouldAutoSendRef = useRef(false);
+
+  // Helper to format recording timer display
+  const formatTimer = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
 
   // Initialize Speech Recognition & Synthesis
   useEffect(() => {
@@ -161,11 +171,58 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
     }
   }, [messages, isLoading, isOpen]);
 
-  // Fallback: Gemini Server-side Audio Recorder (Works everywhere)
+  // Cancel active recording without transcribing
+  const cancelRecording = () => {
+    shouldBeListeningRef.current = false;
+    shouldAutoSendRef.current = false;
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.abort();
+      } catch {}
+    }
+
+    if (mediaRecorderRef.current) {
+      try {
+        audioChunksRef.current = [];
+        if (mediaRecorderRef.current.state === 'recording') {
+          mediaRecorderRef.current.stop();
+        }
+      } catch {}
+    }
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+
+    setIsListening(false);
+    setRecordingSeconds(0);
+    setSpeechStatus('Recording cancelled.');
+  };
+
+  // Cleanup audio/mic resources when modal is closed
+  useEffect(() => {
+    if (!isOpen) {
+      cancelRecording();
+      if (synthRef.current) {
+        synthRef.current.cancel();
+      }
+      setSpeakingMessageId(null);
+    }
+  }, [isOpen]);
+
+  // High-accuracy Continuous Gemini Audio Recorder (Does NOT stop automatically on pauses/silence)
   const startGeminiAudioRecording = async () => {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       setSpeechError('Microphone recording is not supported in this browser.');
       setIsListening(false);
+      shouldBeListeningRef.current = false;
       return;
     }
 
@@ -174,12 +231,23 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       streamRef.current = stream;
       audioChunksRef.current = [];
 
-      const mimeType =
-        typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm')
-          ? 'audio/webm'
-          : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/mp4')
-          ? 'audio/mp4'
-          : '';
+      let mimeType = '';
+      if (typeof MediaRecorder !== 'undefined') {
+        const types = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/mp4',
+          'audio/aac',
+          'audio/ogg;codecs=opus',
+          'audio/ogg',
+        ];
+        for (const t of types) {
+          if (MediaRecorder.isTypeSupported(t)) {
+            mimeType = t;
+            break;
+          }
+        }
+      }
 
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       mediaRecorderRef.current = recorder;
@@ -192,25 +260,41 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
 
       recorder.onstop = async () => {
         setIsListening(false);
+        shouldBeListeningRef.current = false;
+
         if (recordingTimerRef.current) {
           clearInterval(recordingTimerRef.current);
           recordingTimerRef.current = null;
         }
+
         if (streamRef.current) {
           streamRef.current.getTracks().forEach((track) => track.stop());
           streamRef.current = null;
         }
 
+        // If recording was cancelled, audio chunks are cleared
+        if (audioChunksRef.current.length === 0) {
+          return;
+        }
+
+        const effectiveMime = recorder.mimeType || mimeType || 'audio/webm';
+        const cleanMime = effectiveMime.split(';')[0].trim();
         const audioBlob = new Blob(audioChunksRef.current, {
-          type: mimeType || 'audio/webm',
+          type: cleanMime || 'audio/webm',
         });
-        if (audioBlob.size < 200) {
-          setSpeechStatus('No audio detected. Please try again.');
+        audioChunksRef.current = [];
+
+        if (audioBlob.size < 300) {
+          setSpeechStatus('Audio too brief. Please speak clearly and tap Done when finished.');
           return;
         }
 
         setIsTranscribing(true);
-        setSpeechStatus('Transcribing your voice with Gemini AI...');
+        setSpeechStatus(
+          languageMode === 'ur'
+            ? 'آواز کا تجزیہ ہو رہا ہے... (Gemini AI)'
+            : 'Transcribing your voice with Gemini AI...'
+        );
 
         try {
           const reader = new FileReader();
@@ -223,7 +307,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   audioBase64: base64Data,
-                  mimeType: mimeType || 'audio/webm',
+                  mimeType: cleanMime || 'audio/webm',
                 }),
               });
               const data = await res.json();
@@ -231,8 +315,14 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                 const transcribed = data.transcript.trim();
                 setInputText(transcribed);
                 setSpeechStatus(`Transcribed: "${transcribed}"`);
+
+                // If user clicked Send while recording, dispatch immediately
+                if (shouldAutoSendRef.current) {
+                  shouldAutoSendRef.current = false;
+                  handleSendMessage(transcribed);
+                }
               } else {
-                setSpeechStatus('No speech recognized. Please speak closer to the microphone.');
+                setSpeechStatus('No speech recognized. Please speak clearly into the microphone.');
               }
             } catch (netErr: any) {
               console.error('Transcription error:', netErr);
@@ -251,159 +341,169 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       setIsListening(true);
       setRecordingSeconds(0);
       setSpeechError(null);
-      setSpeechStatus('Recording your voice for Gemini AI... Speak now!');
+      setSpeechStatus(
+        languageMode === 'ur'
+          ? 'آواز ریکارڈ ہو رہی ہے... (جتنا چاہیں بولیں، رکنے پر خود بند نہیں ہوگا)'
+          : 'Continuous recording active... Speak freely (won’t stop on pauses)!'
+      );
 
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
       recordingTimerRef.current = setInterval(() => {
         setRecordingSeconds((prev) => prev + 1);
       }, 1000);
     } catch (err: any) {
       console.error('Failed to start audio recording:', err);
       setIsListening(false);
+      shouldBeListeningRef.current = false;
       setSpeechError(
         err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
           ? 'Microphone permission was blocked. Please allow microphone access in your browser.'
-          : 'Could not access microphone.'
+          : 'Could not access microphone hardware.'
       );
     }
   };
 
-  // Handle Speech Recognition with permission verification & live real-time typing
-  const startListening = async () => {
-    setSpeechError(null);
-    setSpeechStatus('Connecting to microphone...');
-
-    // 1. Verify and request microphone permissions via getUserMedia
-    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        // Release dummy stream so recognition or recorder has clean access
-        stream.getTracks().forEach((track) => track.stop());
-      } catch (err: any) {
-        console.warn('Microphone permission request failed:', err);
-        setIsListening(false);
-        setSpeechError(
-          err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
-            ? 'Microphone permission blocked. Please allow microphone access in your browser address bar.'
-            : 'Could not access microphone hardware. Please check your audio settings.'
-        );
-        return;
-      }
-    }
-
+  // Live Browser Dictation (Web Speech API with auto-reconnect keep-alive)
+  const startWebSpeechListening = () => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-    // 2. Primary: Web Speech API with real-time continuous typing
-    if (SpeechRecognition) {
-      try {
-        if (recognitionRef.current) {
-          try {
-            recognitionRef.current.abort();
-          } catch {
-            // ignore
+    if (!SpeechRecognition) {
+      startGeminiAudioRecording();
+      return;
+    }
+
+    try {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {}
+      }
+
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = languageMode === 'en' ? 'en-US' : 'ur-PK';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setSpeechError(null);
+        setSpeechStatus(
+          languageMode === 'ur'
+            ? 'سن رہا ہے... بولیں (اردو)'
+            : languageMode === 'roman_ur'
+            ? 'Listening... Speak in Roman Urdu'
+            : 'Listening live... Speak in Urdu or English'
+        );
+      };
+
+      recognition.onresult = (event: any) => {
+        let finalWords = '';
+        let interimWords = '';
+
+        for (let i = 0; i < event.results.length; ++i) {
+          const res = event.results[i];
+          if (res.isFinal) {
+            finalWords += res[0].transcript + ' ';
+          } else {
+            interimWords += res[0].transcript;
           }
         }
 
-        const recognition = new SpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = languageMode === 'en' ? 'en-US' : 'ur-PK';
+        const combined = (finalWords + interimWords).trim();
+        if (combined) {
+          setInputText(combined);
+          setSpeechStatus(`Heard: "${combined}"`);
+        }
+      };
 
-        recognition.onstart = () => {
-          setIsListening(true);
-          setSpeechError(null);
-          setSpeechStatus(
-            languageMode === 'ur'
-              ? 'سن رہا ہے... بولیں (اردو)'
-              : languageMode === 'roman_ur'
-              ? 'Listening... Speak in Roman Urdu'
-              : 'Listening live... Speak in Urdu or English'
+      recognition.onerror = (e: any) => {
+        console.warn('Speech recognition event:', e.error);
+        if (e.error === 'not-allowed') {
+          setSpeechError(
+            'Microphone access blocked. Click the lock/camera icon in your address bar to enable.'
           );
-        };
-
-        recognition.onresult = (event: any) => {
-          let finalWords = '';
-          let interimWords = '';
-
-          for (let i = 0; i < event.results.length; ++i) {
-            const res = event.results[i];
-            if (res.isFinal) {
-              finalWords += res[0].transcript + ' ';
-            } else {
-              interimWords += res[0].transcript;
-            }
-          }
-
-          const combined = (finalWords + interimWords).trim();
-          if (combined) {
-            // TYPE DIRECTLY INTO THE INPUT FIELD IN REAL TIME
-            setInputText(combined);
-            setSpeechStatus(`Heard: "${combined}"`);
-          }
-        };
-
-        recognition.onerror = (e: any) => {
-          console.warn('Speech recognition error:', e.error);
-          if (e.error === 'not-allowed') {
-            setSpeechError(
-              'Microphone access blocked. Click the lock/camera icon in your address bar to enable.'
-            );
-            setIsListening(false);
-          } else if (e.error === 'no-speech') {
-            setSpeechStatus('No speech detected. Please speak closer to your microphone.');
-          } else if (e.error === 'network' || e.error === 'service-not-allowed') {
-            console.log('Falling back to Gemini Audio recording due to browser speech service error...');
-            try {
-              recognition.abort();
-            } catch {}
-            startGeminiAudioRecording();
-          } else {
-            setSpeechStatus(`Listening paused (${e.error}). Tap mic to try again.`);
-            setIsListening(false);
-          }
-        };
-
-        recognition.onend = () => {
+          shouldBeListeningRef.current = false;
           setIsListening(false);
-        };
+        } else if (e.error === 'no-speech') {
+          // Chrome fires 'no-speech' after 3-4s silence: DO NOT stop! Keep listening!
+          setSpeechStatus('Listening... (speak when ready)');
+        } else if (e.error === 'network' || e.error === 'service-not-allowed') {
+          console.log('Browser speech service unavailable, switching to continuous Gemini audio...');
+          try {
+            recognition.abort();
+          } catch {}
+          startGeminiAudioRecording();
+        }
+      };
 
-        recognitionRef.current = recognition;
-        recognition.start();
-        return;
-      } catch (e) {
-        console.warn('Web Speech start failed, falling back to Gemini Audio:', e);
+      recognition.onend = () => {
+        // If user didn't explicitly tap stop/cancel, restart recognition seamlessly so it doesn't stop after 3-5 seconds!
+        if (shouldBeListeningRef.current) {
+          try {
+            recognition.start();
+          } catch {
+            startGeminiAudioRecording();
+          }
+        } else {
+          setIsListening(false);
+        }
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+      setIsListening(true);
+      setRecordingSeconds(0);
+
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
       }
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
+    } catch (e) {
+      console.warn('Web Speech start failed, falling back to Gemini continuous audio:', e);
+      startGeminiAudioRecording();
     }
-
-    // 3. Fallback: Gemini Server-side Audio Recorder
-    startGeminiAudioRecording();
   };
 
+  // Primary Voice Toggle handler
+  const startListening = async () => {
+    setSpeechError(null);
+    shouldAutoSendRef.current = false;
+    shouldBeListeningRef.current = true;
+
+    if (voiceMode === 'gemini_audio') {
+      await startGeminiAudioRecording();
+    } else {
+      startWebSpeechListening();
+    }
+  };
+
+  // Explicit stop handler (user tapped Done or Mic button)
   const stopListening = () => {
+    shouldBeListeningRef.current = false;
+
     // Stop Web Speech API if running
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
-      } catch {
-        // ignore
-      }
+      } catch {}
     }
 
-    // Stop MediaRecorder if running
+    // Stop MediaRecorder if running (triggers recorder.onstop and Gemini transcription)
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       try {
         mediaRecorderRef.current.stop();
-      } catch {
-        // ignore
-      }
+      } catch {}
     }
 
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
     }
-
-    setIsListening(false);
   };
 
   // Text-to-Speech Playback
@@ -778,6 +878,33 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
             >
               🇬🇧 English
             </button>
+
+            {/* Voice Engine Mode Toggle */}
+            <div className="h-4 w-px bg-emerald-700/60 mx-1 hidden sm:block" />
+            <button
+              type="button"
+              onClick={() => {
+                const nextMode = voiceMode === 'gemini_audio' ? 'web_speech' : 'gemini_audio';
+                setVoiceMode(nextMode);
+                setSpeechStatus(
+                  nextMode === 'gemini_audio'
+                    ? 'Continuous Audio active: Won’t stop on pauses or silence!'
+                    : 'Live Dictation active: Real-time browser speech typing'
+                );
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer border ${
+                voiceMode === 'gemini_audio'
+                  ? 'bg-emerald-800 text-emerald-100 border-emerald-600 font-bold shadow-2xs'
+                  : 'bg-emerald-900/60 text-emerald-300 border-emerald-700 hover:bg-emerald-800'
+              }`}
+              title={
+                voiceMode === 'gemini_audio'
+                  ? 'Continuous Voice (Gemini AI): Won’t stop after a few seconds. Keeps recording until you tap Done.'
+                  : 'Live Browser Dictation: Real-time typing as you speak.'
+              }
+            >
+              {voiceMode === 'gemini_audio' ? '🎙️ Continuous Voice' : '⚡ Live Dictation'}
+            </button>
           </div>
         </div>
 
@@ -1099,12 +1226,12 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           </div>
         )}
 
-        {/* Live Speech Recognition Waveform & Action Banner */}
+        {/* Live Continuous Recording / Speech Recognition Banner */}
         {(isListening || isTranscribing) && (
-          <div className="mx-3 sm:mx-4 mb-2 p-2.5 rounded-xl bg-gradient-to-r from-rose-50 via-pink-50 to-rose-50 border border-rose-200 text-rose-900 text-xs flex flex-wrap items-center justify-between gap-2 shadow-2xs">
+          <div className="mx-3 sm:mx-4 mb-2 p-2.5 rounded-xl bg-gradient-to-r from-rose-50 via-red-50 to-pink-50 border border-rose-200 text-rose-900 text-xs flex flex-wrap items-center justify-between gap-2 shadow-2xs">
             <div className="flex items-center gap-2.5 min-w-0">
               {/* Animated Sound Wave Bars */}
-              <div className="flex items-center gap-0.5 h-4 px-1 shrink-0">
+              <div className="flex items-center gap-0.5 h-4 px-1.5 py-1 bg-white/80 rounded-md border border-rose-200/80 shrink-0">
                 <span className="w-1 h-3 bg-rose-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                 <span className="w-1 h-4 bg-rose-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                 <span className="w-1 h-2.5 bg-rose-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
@@ -1112,15 +1239,23 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
               </div>
 
               <div className="min-w-0">
-                <p className="font-bold text-rose-900 truncate">
-                  {isTranscribing
-                    ? 'Transcribing audio with Gemini AI...'
-                    : recordingSeconds > 0
-                    ? `Recording voice (${recordingSeconds}s)... Speak now!`
-                    : 'Listening live... Speak your stock update'}
-                </p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-600 text-white tracking-wider uppercase shadow-2xs">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                    REC {formatTimer(recordingSeconds)}
+                  </span>
+                  <p className="font-bold text-rose-950 truncate">
+                    {isTranscribing
+                      ? 'Transcribing audio with Gemini AI...'
+                      : languageMode === 'ur'
+                      ? 'ریکارڈنگ جاری ہے... (جتنا چاہیں بولیں، خود بند نہیں ہوگا)'
+                      : voiceMode === 'gemini_audio'
+                      ? 'Continuous voice active • Won’t stop on pauses!'
+                      : 'Live dictation active • Speak now!'}
+                  </p>
+                </div>
                 {inputText && (
-                  <p className="text-[11px] text-rose-700 truncate font-mono">
+                  <p className="text-[11px] text-rose-800 truncate font-mono mt-0.5">
                     "{inputText}"
                   </p>
                 )}
@@ -1131,23 +1266,40 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
               <button
                 type="button"
                 onClick={stopListening}
-                className="px-2.5 py-1 text-xs font-semibold bg-white text-slate-700 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                disabled={isTranscribing}
+                className="px-3 py-1.5 text-xs font-bold bg-white text-slate-800 hover:bg-slate-50 border border-slate-300 rounded-lg transition-colors cursor-pointer shadow-2xs flex items-center gap-1"
+                title="Finish recording and transcribe audio"
               >
-                Done
+                <span>⏹ Done</span>
               </button>
-              {inputText.trim() && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    stopListening();
+
+              <button
+                type="button"
+                onClick={() => {
+                  shouldAutoSendRef.current = true;
+                  stopListening();
+                  if (inputText.trim() && !isTranscribing) {
                     handleSendMessage();
-                  }}
-                  className="px-2.5 py-1 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-colors cursor-pointer shadow-2xs flex items-center gap-1"
-                >
-                  <span>Send</span>
-                  <Send className="w-3 h-3" />
-                </button>
-              )}
+                  }
+                }}
+                disabled={isTranscribing}
+                className="px-3 py-1.5 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-colors cursor-pointer shadow-2xs flex items-center gap-1"
+                title="Finish recording and immediately send command to agent"
+              >
+                <span>Send</span>
+                <Send className="w-3 h-3" />
+              </button>
+
+              <button
+                type="button"
+                onClick={cancelRecording}
+                disabled={isTranscribing}
+                className="p-1.5 text-xs text-slate-500 hover:text-slate-800 hover:bg-white/80 rounded-lg transition-colors cursor-pointer"
+                title="Cancel recording"
+                aria-label="Cancel recording"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
           </div>
         )}
@@ -1170,12 +1322,12 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                 }`}
                 title={
                   isListening
-                    ? 'Click to stop listening'
+                    ? 'Recording in progress... Click to stop and transcribe'
                     : isTranscribing
-                    ? 'Transcribing...'
-                    : 'Speak to Gemini: real-time voice typing'
+                    ? 'Transcribing audio with Gemini AI...'
+                    : 'Record voice: Continuous, never cuts off on pauses (Urdu & English)'
                 }
-                aria-label={isListening ? 'Stop listening' : 'Speak to Gemini via microphone'}
+                aria-label={isListening ? 'Stop recording' : 'Speak to Gemini via microphone'}
               >
                 {isTranscribing ? (
                   <Loader2 className="w-5 h-5 animate-spin text-amber-700" />
@@ -1196,10 +1348,10 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                 placeholder={
                   isListening
                     ? languageMode === 'ur'
-                      ? 'سن رہا ہے... بولیں "اسٹاک میں 10 شامل کرو"'
+                      ? 'سن رہا ہے... جتنا چاہیں بولیں، ختم ہونے پر Done دبائیں'
                       : languageMode === 'roman_ur'
-                      ? 'Listening... say "Widget mein 10 add kardo"'
-                      : 'Listening live... speak in Urdu or English'
+                      ? 'Listening continuously... speak freely, tap Done when finished'
+                      : 'Listening continuously... speak freely, tap Done when finished'
                     : languageMode === 'ur'
                     ? 'لکھیں یا بولیں: "ویجٹ کے 10 شامل کرو" یا "اسٹاک کتنا بچا ہے؟"...'
                     : languageMode === 'roman_ur'
