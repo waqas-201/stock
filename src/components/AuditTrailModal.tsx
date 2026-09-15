@@ -22,6 +22,7 @@ interface AuditTrailModalProps {
   onClose: () => void;
   logs: GlobalAuditRecord[];
   onClearLogs?: () => void;
+  onSelectItem?: (itemId: string) => void;
 }
 
 export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
@@ -29,6 +30,7 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
   onClose,
   logs = [],
   onClearLogs,
+  onSelectItem,
 }) => {
   const safeLogs = Array.isArray(logs) ? logs : [];
   const [searchTerm, setSearchTerm] = useState('');
@@ -259,9 +261,26 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
 
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs sm:text-sm font-bold text-slate-900">
-                            {log.itemName}
-                          </span>
+                          {onSelectItem && log.itemId ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onClose();
+                                onSelectItem(log.itemId);
+                              }}
+                              className="text-xs sm:text-sm font-bold text-emerald-800 hover:text-emerald-900 hover:underline cursor-pointer text-left flex items-center gap-1"
+                              title={`View comprehensive trail for "${log.itemName}"`}
+                            >
+                              <span>{log.itemName}</span>
+                              <span className="text-[10px] text-emerald-600 font-semibold">
+                                (View Trail ↗)
+                              </span>
+                            </button>
+                          ) : (
+                            <span className="text-xs sm:text-sm font-bold text-slate-900">
+                              {log.itemName}
+                            </span>
+                          )}
                           <span
                             className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md ${
                               isDel

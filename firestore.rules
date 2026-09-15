@@ -78,6 +78,20 @@ service cloud.firestore {
         && (!('userId' in data) || data.userId == null || (data.userId is string && data.userId.size() <= 128));
     }
 
+    // Validation for Stock Label & Tag
+    function isValidStockTag(data) {
+      return data.id is string && isValidId(data.id)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 60
+        && (!('color' in data) || data.color == null || (data.color is string && data.color.size() <= 50))
+        && (!('description' in data) || data.description == null || (data.description is string && data.description.size() <= 200))
+        && (!('isDefault' in data) || data.isDefault is bool)
+        && (!('userId' in data) || data.userId == null || (data.userId is string && data.userId.size() <= 128));
+    }
+
+    function isValidStockLabel(data) {
+      return isValidStockTag(data);
+    }
+
     // Validation for Audit Log with performer attribution
     function isValidAuditLog(data) {
       return data.id is string && isValidId(data.id)
@@ -161,6 +175,42 @@ service cloud.firestore {
 
       allow delete: if isSignedIn()
         && isValidId(unitId);
+    }
+
+    // 2b. Shared Stock Tags collection: Collaborative tags styling & organization
+    match /stock_tags/{tagId} {
+      allow get, list: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && isValidId(tagId)
+        && incoming().id == tagId
+        && isValidStockTag(incoming());
+
+      allow update: if isSignedIn()
+        && isValidId(tagId)
+        && incoming().id == existing().id
+        && isValidStockTag(incoming());
+
+      allow delete: if isSignedIn()
+        && isValidId(tagId);
+    }
+
+    // Legacy stock_labels collection support
+    match /stock_labels/{labelId} {
+      allow get, list: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && isValidId(labelId)
+        && incoming().id == labelId
+        && isValidStockLabel(incoming());
+
+      allow update: if isSignedIn()
+        && isValidId(labelId)
+        && incoming().id == existing().id
+        && isValidStockLabel(incoming());
+
+      allow delete: if isSignedIn()
+        && isValidId(labelId);
     }
 
     // 3. Shared Tamper-Proof Audit Logs collection: append-only

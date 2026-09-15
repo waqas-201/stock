@@ -1,6 +1,16 @@
+export type AuditActionType =
+  | 'created'
+  | 'quantity_changed'
+  | 'edited'
+  | 'deleted'
+  | 'restored'
+  | 'audit_note'
+  | 'restocked'
+  | string;
+
 export interface ItemAuditEntry {
   id: string;
-  action: 'created' | 'quantity_changed' | 'edited' | 'deleted' | 'restored';
+  action: AuditActionType;
   timestamp: string;
   summary: string;
   details?: string;
@@ -11,6 +21,9 @@ export interface ItemAuditEntry {
   userEmail?: string;
   userPhotoURL?: string;
   userId?: string;
+  balanceAfter?: number; // Stock level immediately after this event
+  category?: 'movement' | 'edit' | 'audit' | 'lifecycle';
+  noteType?: 'count_verification' | 'quality_check' | 'location_audit' | 'general';
 }
 
 export interface StockItem {
@@ -41,6 +54,32 @@ export interface StockUnit {
   isDefault?: boolean;
   userId?: string;
 }
+
+export type StockTagColor =
+  | 'emerald'
+  | 'sky'
+  | 'violet'
+  | 'amber'
+  | 'rose'
+  | 'indigo'
+  | 'teal'
+  | 'orange'
+  | 'cyan'
+  | 'slate'
+  | string;
+
+export interface StockTag {
+  id: string;
+  name: string;
+  color?: StockTagColor;
+  description?: string;
+  isDefault?: boolean;
+  userId?: string;
+}
+
+// Aliases for compatibility
+export type StockLabelColor = StockTagColor;
+export type StockLabel = StockTag;
 
 export interface OperatorProfile {
   name: string;

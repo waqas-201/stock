@@ -1,4 +1,5 @@
-import { StockItem } from '../types';
+import { StockItem, StockTag } from '../types';
+import { getTagColorOption } from './tagStorage';
 
 export interface TagStyle {
   bg: string;
@@ -75,10 +76,26 @@ const TAG_COLOR_PALETTES: TagStyle[] = [
 ];
 
 /**
- * Returns a stable color style for a given tag string
+ * Returns a stable color style for a given tag string, with priority given to managed tags
  */
-export function getTagStyle(tagName: string): TagStyle {
+export function getTagStyle(tagName: string, managedTags?: StockTag[]): TagStyle {
   if (!tagName) return TAG_COLOR_PALETTES[0];
+
+  if (managedTags && managedTags.length > 0) {
+    const cleanLower = tagName.trim().toLowerCase();
+    const matched = managedTags.find((l) => l.name.trim().toLowerCase() === cleanLower);
+    if (matched && matched.color) {
+      const opt = getTagColorOption(matched.color);
+      return {
+        bg: opt.bg,
+        text: opt.text,
+        border: opt.border,
+        hover: opt.hover,
+        activeBg: opt.activeBg,
+      };
+    }
+  }
+
   let hash = 0;
   for (let i = 0; i < tagName.length; i++) {
     hash = (hash << 5) - hash + tagName.charCodeAt(i);

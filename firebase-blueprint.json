@@ -44,6 +44,20 @@
       },
       "required": ["id", "name"]
     },
+    "StockTag": {
+      "title": "Stock Tag",
+      "description": "Custom category tag with color styling preset for organizing stock inventory",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 60 },
+        "color": { "type": "string", "maxLength": 50 },
+        "description": { "type": "string", "maxLength": 200 },
+        "isDefault": { "type": "boolean" },
+        "userId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "name"]
+    },
     "AuditLog": {
       "title": "Audit Log",
       "description": "Activity log entry for stock changes with actor attribution",
@@ -124,6 +138,10 @@
     "/stock_units/{unitId}": {
       "schema": { "$ref": "#/entities/StockUnit" },
       "description": "Shared measurement units collection"
+    },
+    "/stock_tags/{tagId}": {
+      "schema": { "$ref": "#/entities/StockTag" },
+      "description": "Shared stock tags and categories collection with color styling"
     },
     "/audit_logs/{logId}": {
       "schema": { "$ref": "#/entities/AuditLog" },

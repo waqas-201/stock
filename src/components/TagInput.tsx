@@ -1,11 +1,14 @@
 import React, { useState, KeyboardEvent } from 'react';
 import { Tag as TagIcon, X, Plus, Hash } from 'lucide-react';
 import { getTagStyle, POPULAR_TAG_SUGGESTIONS } from '../lib/tagUtils';
+import { StockTag, StockLabel } from '../types';
 
 interface TagInputProps {
   tags: string[];
   onChange: (tags: string[]) => void;
   availableTags?: string[];
+  managedTags?: StockTag[];
+  managedLabels?: StockLabel[];
   placeholder?: string;
   maxTags?: number;
 }
@@ -14,9 +17,12 @@ export const TagInput: React.FC<TagInputProps> = ({
   tags,
   onChange,
   availableTags = [],
+  managedTags,
+  managedLabels = [],
   placeholder = 'Add a tag (e.g. Office, Food, Fragile)...',
   maxTags = 12,
 }) => {
+  const effectiveTags: StockTag[] = managedTags || (managedLabels as unknown as StockTag[]) || [];
   const [inputValue, setInputValue] = useState('');
   const [isFocused, setIsFocused] = useState(false);
 
@@ -46,12 +52,13 @@ export const TagInput: React.FC<TagInputProps> = ({
     }
   };
 
-  // Compile recommended suggestions from available inventory tags + popular presets
+  // Compile recommended suggestions from managed tags, available inventory tags + popular presets
+  const managedNames = effectiveTags.map((l) => l.name);
   const combinedSuggestions = Array.from(
-    new Set([...availableTags, ...POPULAR_TAG_SUGGESTIONS])
+    new Set([...managedNames, ...availableTags, ...POPULAR_TAG_SUGGESTIONS])
   ).filter(
     (suggested) => !tags.some((t) => t.toLowerCase() === suggested.toLowerCase())
-  ).slice(0, 8);
+  ).slice(0, 10);
 
   return (
     <div className="space-y-2">
@@ -62,7 +69,7 @@ export const TagInput: React.FC<TagInputProps> = ({
           className="text-xs sm:text-sm font-semibold text-slate-700 flex items-center gap-1.5"
         >
           <TagIcon className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Product Labels & Tags</span>
+          <span>Product Tags</span>
           <span className="text-xs font-normal text-slate-400">(Optional)</span>
         </label>
         <span className="text-[11px] text-slate-400 font-medium">
@@ -83,7 +90,7 @@ export const TagInput: React.FC<TagInputProps> = ({
         }}
       >
         {tags.map((tag, index) => {
-          const style = getTagStyle(tag);
+          const style = getTagStyle(tag, effectiveTags);
           return (
             <span
               key={`${tag}-${index}`}

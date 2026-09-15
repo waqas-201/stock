@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { StockItem, StockUnit, StockFilter, OperatorProfile, GeminiAgentAction } from './types';
+import { StockItem, StockUnit, StockFilter, OperatorProfile, GeminiAgentAction, StockTag, StockTagColor } from './types';
 import {
   loadStoredStock,
   saveStoredStock,
@@ -20,6 +20,11 @@ import {
   DEFAULT_UNITS,
 } from './lib/unitStorage';
 import {
+  loadManagedTags,
+  saveManagedTags,
+  DEFAULT_TAGS,
+} from './lib/tagStorage';
+import {
   exportToExcel,
   exportToCsv,
   parseExcelOrCsvFile,
@@ -39,13 +44,15 @@ import {
   subscribeStockUnits,
   saveStockUnitToFirestore,
   deleteStockUnitFromFirestore,
+  subscribeStockTags,
+  saveStockTagToFirestore,
+  deleteStockTagFromFirestore,
   subscribeAuditLogs,
   saveAuditLogToFirestore,
   subscribeUserSettings,
   saveUserSettingsToFirestore,
   migrateLocalDataToCloud,
 } from './lib/firestoreService';
-import { VoiceCommandResult } from './lib/voiceNlp';
 
 // Components
 import { Navbar } from './components/Navbar';
@@ -56,8 +63,8 @@ import { EditItemModal } from './components/EditItemModal';
 import { ItemDetailsModal } from './components/ItemDetailsModal';
 import { AuditTrailModal } from './components/AuditTrailModal';
 import { UnitManagementModal } from './components/UnitManagementModal';
+import { TagManagementModal } from './components/TagManagementModal';
 import { OperatorModal } from './components/OperatorModal';
-import { VoiceAssistantModal } from './components/VoiceAssistantModal';
 import { GeminiStockChatModal } from './components/GeminiStockChatModal';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { UnauthorizedDomainModal } from './components/UnauthorizedDomainModal';
@@ -76,7 +83,6 @@ import {
   UserCheck,
   ShieldCheck,
   Users,
-  Mic,
 } from 'lucide-react';
 
 export function App() {
@@ -89,13 +95,17 @@ export function App() {
   // App states
   const [items, setItems] = useState<StockItem[]>(() => loadStoredStock());
   const [units, setUnits] = useState<StockUnit[]>(() => loadManagedUnits());
+  const [tags, setTags] = useState<StockTag[]>(() => loadManagedTags());
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<StockFilter>('all');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
-  // Available unique tags across inventory for autocomplete and suggestion pills
+  // Available unique tags across inventory & managed tag catalog for autocomplete and suggestion pills
   const availableTags = useMemo(() => {
     const set = new Set<string>();
+    tags.forEach((tag) => {
+      if (tag.name && tag.name.trim()) set.add(tag.name.trim());
+    });
     items.forEach((item) => {
       if (Array.isArray(item.tags)) {
         item.tags.forEach((t) => {
@@ -104,7 +114,7 @@ export function App() {
       }
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [items]);
+  }, [items, tags]);
 
   const [globalLogs, setGlobalLogs] = useState<GlobalAuditRecord[]>(() =>
     loadGlobalAuditLog()
@@ -115,7 +125,6 @@ export function App() {
     loadOperatorProfile()
   );
   const [isOperatorModalOpen, setIsOperatorModalOpen] = useState(false);
-  const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
   const [isGeminiChatOpen, setIsGeminiChatOpen] = useState(false);
 
   // User choice: whether to show confirmation dialog before deleting items
@@ -133,6 +142,7 @@ export function App() {
   const [itemToDelete, setItemToDelete] = useState<StockItem | null>(null);
   const [dontAskAgainInDialog, setDontAskAgainInDialog] = useState(false);
   const [isUnitModalOpen, setIsUnitModalOpen] = useState(false);
+  const [isTagModalOpen, setIsTagModalOpen] = useState(false);
   const [isDomainModalOpen, setIsDomainModalOpen] = useState(false);
   const [currentDomain, setCurrentDomain] = useState('');
 
@@ -198,13 +208,15 @@ export function App() {
             setIsMigrating(true);
             try {
               const localUnits = loadManagedUnits();
+              const localTags = loadManagedTags();
               const localLogs = loadGlobalAuditLog();
               const { migratedItems } = await migrateLocalDataToCloud(
                 localItems,
                 localUnits,
                 localLogs,
                 operator,
-                currentUser.uid
+                currentUser.uid,
+                localTags
               );
               if (migratedItems > 0) {
                 showToast(
@@ -238,6 +250,18 @@ export function App() {
       if (firestoreUnits.length > 0) {
         setUnits(firestoreUnits);
         saveManagedUnits(firestoreUnits);
+      }
+    });
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  // Real-time Firestore synchronizer for tags
+  useEffect(() => {
+    if (!currentUser) return;
+    const unsubscribe = subscribeStockTags((firestoreTags) => {
+      if (firestoreTags.length > 0) {
+        setTags(firestoreTags);
+        saveManagedTags(firestoreTags);
       }
     });
     return () => unsubscribe();
@@ -279,10 +303,16 @@ export function App() {
     saveManagedUnits(newUnits);
   };
 
+  // Persist tags locally and to Cloud DB
+  const updateTags = (newTags: StockTag[]) => {
+    setTags(newTags);
+    saveManagedTags(newTags);
+  };
+
   // Google Sign-In handler with automatic fallback & domain guidance
   const handleSignInWithGoogle = async () => {
     try {
-      showToast('Signing in with Google...', 'info');
+      showToast('Opening Google sign-in...', 'info');
       const user = await signInWithGoogle();
       if (user) {
         showToast(`Connected as ${user.displayName || user.email}! Cloud DB active.`, 'success');
@@ -292,6 +322,16 @@ export function App() {
       const isUnauthorizedDomain =
         err?.code === 'auth/unauthorized-domain' ||
         (typeof err?.message === 'string' && err.message.includes('unauthorized-domain'));
+
+      const isNetworkOrIframeError =
+        err?.code === 'auth/network-request-failed' ||
+        err?.code === 'auth/popup-blocked' ||
+        err?.code === 'auth/cancelled-popup-request' ||
+        err?.code === 'auth/internal-error' ||
+        (typeof err?.message === 'string' &&
+          (err.message.includes('network-request-failed') ||
+            err.message.includes('popup-blocked') ||
+            err.message.includes('Cross-Origin')));
 
       if (isUnauthorizedDomain) {
         // Attempt quick anonymous team connection so Cloud DB connects immediately!
@@ -311,6 +351,30 @@ export function App() {
         setCurrentDomain(host);
         setIsDomainModalOpen(true);
         showToast('Domain authorization required in Firebase Console for Google login.', 'error');
+      } else if (isNetworkOrIframeError) {
+        // Iframe or network restriction on Google popup - fall back to Quick Team Pass
+        try {
+          showToast('Popup restricted in iframe. Connecting via Quick Team Session...', 'info');
+          const anonUser = await signInQuickAccess();
+          if (anonUser) {
+            showToast(
+              'Connected to Cloud DB via Quick Team Pass! Real-time sync active.',
+              'success'
+            );
+            return;
+          }
+        } catch (anonErr) {
+          console.warn('Quick access fallback after network failure failed:', anonErr);
+        }
+
+        showToast(
+          'Google popup was restricted in iframe. Click to connect directly:',
+          'error',
+          {
+            label: 'Quick Connect',
+            onClick: handleQuickConnect,
+          }
+        );
       } else {
         showToast(err.message || 'Could not sign in with Google', 'error');
       }
@@ -427,6 +491,113 @@ export function App() {
       });
     }
     showToast('Reset units to default list', 'info');
+  };
+
+  // Tag Management handlers
+  const handleCreateTag = (name: string, color: StockTagColor, description?: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (tags.some((t) => t.name.toLowerCase() === trimmed.toLowerCase())) {
+      showToast(`Tag "${trimmed}" already exists.`, 'error');
+      return;
+    }
+    const newTag: StockTag = {
+      id: 'tag_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      name: trimmed,
+      color,
+      description: description?.trim() || undefined,
+      isDefault: false,
+      userId: currentUser?.uid,
+    };
+    const next = [...tags, newTag];
+    updateTags(next);
+    if (currentUser) {
+      saveStockTagToFirestore(newTag, currentUser.uid).catch(console.error);
+    }
+    showToast(`Created tag "${trimmed}"`, 'success');
+  };
+
+  const handleUpdateTag = (
+    id: string,
+    name: string,
+    color: StockTagColor,
+    description?: string
+  ) => {
+    const trimmed = name.trim();
+    const target = tags.find((t) => t.id === id);
+    if (!target) return;
+    const oldName = target.name;
+
+    const updated: StockTag = {
+      ...target,
+      name: trimmed,
+      color,
+      description: description?.trim() || undefined,
+      userId: currentUser?.uid,
+    };
+    const next = tags.map((t) => (t.id === id ? updated : t));
+    updateTags(next);
+
+    // If tag name changed, update corresponding tags on existing inventory items
+    if (oldName !== trimmed) {
+      const updatedItems = items.map((itm) => {
+        if (Array.isArray(itm.tags) && itm.tags.includes(oldName)) {
+          const newTags = itm.tags.map((t) => (t === oldName ? trimmed : t));
+          const updatedItem = { ...itm, tags: newTags };
+          if (currentUser) {
+            saveStockItemToFirestore(updatedItem, operator, currentUser.uid).catch(console.error);
+          }
+          return updatedItem;
+        }
+        return itm;
+      });
+      updateItems(updatedItems);
+    }
+
+    if (currentUser) {
+      saveStockTagToFirestore(updated, currentUser.uid).catch(console.error);
+    }
+    showToast(`Updated tag "${trimmed}"`, 'success');
+  };
+
+  const handleDeleteTag = (id: string, removeTagFromItems?: boolean) => {
+    const target = tags.find((t) => t.id === id);
+    if (!target) return;
+
+    const next = tags.filter((t) => t.id !== id);
+    updateTags(next);
+
+    if (removeTagFromItems) {
+      const updatedItems = items.map((itm) => {
+        if (Array.isArray(itm.tags) && itm.tags.includes(target.name)) {
+          const newTags = itm.tags.filter((t) => t !== target.name);
+          const updatedItem = { ...itm, tags: newTags };
+          if (currentUser) {
+            saveStockItemToFirestore(updatedItem, operator, currentUser.uid).catch(console.error);
+          }
+          return updatedItem;
+        }
+        return itm;
+      });
+      updateItems(updatedItems);
+    }
+
+    if (currentUser) {
+      deleteStockTagFromFirestore(id).catch(console.error);
+    }
+    showToast(`Tag "${target.name}" removed`, 'info');
+  };
+
+  const handleResetTags = () => {
+    updateTags(DEFAULT_TAGS);
+    if (currentUser) {
+      DEFAULT_TAGS.forEach((tag) => {
+        saveStockTagToFirestore({ ...tag, userId: currentUser.uid }, currentUser.uid).catch(
+          console.error
+        );
+      });
+    }
+    showToast('Reset tags to default palette', 'info');
   };
 
   // Stock items actions with production date, notes, tags, and complete audit trail
@@ -844,6 +1015,76 @@ export function App() {
     return { previousQuantity, newQuantity: newQty, undo };
   };
 
+  const handleAddAuditNote = (
+    item: StockItem,
+    note: string,
+    noteType: 'count_verification' | 'quality_check' | 'location_audit' | 'general' = 'general',
+    verifiedCount?: number
+  ) => {
+    const isCountUpdate = verifiedCount !== undefined && verifiedCount !== item.quantity;
+    const previousQty = item.quantity;
+    const newQty = isCountUpdate ? Math.max(0, verifiedCount) : item.quantity;
+
+    let summary = 'Staff Audit Note';
+    if (noteType === 'count_verification') {
+      summary = isCountUpdate
+        ? `Physical Count Audit: Adjusted from ${previousQty} to ${newQty} ${item.unit}`
+        : `Physical Count Audit: Verified ${newQty} ${item.unit}`;
+    } else if (noteType === 'quality_check') {
+      summary = 'Quality & Condition Inspection Logged';
+    } else if (noteType === 'location_audit') {
+      summary = 'Storage Rack & Location Check Logged';
+    }
+
+    const auditEntry = createAuditEntry(
+      'audit_note',
+      summary,
+      note.trim() || undefined,
+      previousQty,
+      newQty,
+      operator.name,
+      operator.email,
+      {
+        category: 'audit',
+        noteType,
+        balanceAfter: newQty,
+      }
+    );
+
+    const updatedTrail = [auditEntry, ...(item.auditTrail || [])];
+
+    const updatedItem: StockItem = {
+      ...item,
+      quantity: newQty,
+      updatedAt: new Date().toISOString(),
+      userId: currentUser?.uid || item.userId,
+      lastModifiedByName: operator.name,
+      lastModifiedByEmail: operator.email,
+      auditTrail: updatedTrail,
+    };
+
+    const next = items.map((i) => (i.id === item.id ? updatedItem : i));
+    updateItems(next);
+
+    const globalEntry = appendGlobalAuditLog({
+      ...auditEntry,
+      itemId: item.id,
+      itemName: item.itemName,
+      unit: item.unit,
+      performedBy: operator.name,
+      userEmail: operator.email,
+    });
+    setGlobalLogs((prev) => [globalEntry, ...prev]);
+
+    if (currentUser) {
+      saveStockItemToFirestore(updatedItem, operator, currentUser.uid).catch(console.error);
+      saveAuditLogToFirestore(globalEntry, currentUser.uid).catch(console.error);
+    }
+
+    setSelectedItemForDetails(updatedItem);
+    showToast('Audit observation recorded to product trail', 'success');
+  };
+
   // Gemini AI Agent Action Dispatcher (Executes natural language commands directly on the UI)
   const handleExecuteGeminiAction = (
     action: GeminiAgentAction
@@ -871,11 +1112,15 @@ export function App() {
         };
       }
 
-      const delta = action.delta !== undefined ? action.delta : 0;
+      let delta = action.delta !== undefined ? action.delta : 0;
+      if (action.newQuantity !== undefined && action.delta === undefined) {
+        delta = action.newQuantity - matchedItem.quantity;
+      }
+
       if (delta === 0) {
         return {
           success: true,
-          message: `No quantity change specified for "${matchedItem.itemName}".`,
+          message: `Stock for "${matchedItem.itemName}" is already ${matchedItem.quantity} ${matchedItem.unit}.`,
           previousQuantity: matchedItem.quantity,
           newQuantity: matchedItem.quantity,
         };
@@ -942,80 +1187,6 @@ export function App() {
       success: false,
       message: `Unsupported action type: ${action.type}`,
     };
-  };
-
-  // Voice Assistant NLP Action Handler (Supports Search, Filter, Create, Read, Update, Delete)
-  const handleVoiceCommand = (cmd: VoiceCommandResult) => {
-    switch (cmd.action) {
-      case 'search': {
-        setSearchQuery(cmd.searchQuery || '');
-        if (cmd.searchQuery) {
-          showToast(`Voice Search: "${cmd.searchQuery}"`, 'info');
-        }
-        break;
-      }
-      case 'filter': {
-        if (cmd.filterType) {
-          setActiveFilter(cmd.filterType);
-        }
-        if (cmd.tagFilter !== undefined) {
-          setSelectedTag(cmd.tagFilter);
-        }
-        if (cmd.searchQuery !== undefined) {
-          setSearchQuery(cmd.searchQuery);
-        }
-        showToast(cmd.feedback, 'info');
-        break;
-      }
-      case 'create': {
-        if (cmd.createdItem) {
-          handleAddItem(
-            cmd.createdItem.itemName,
-            cmd.createdItem.unit,
-            cmd.createdItem.quantity,
-            cmd.createdItem.lowStockThreshold,
-            undefined,
-            cmd.createdItem.notes
-          );
-        }
-        break;
-      }
-      case 'read': {
-        if (cmd.targetItem) {
-          setSelectedItemForDetails(cmd.targetItem);
-          showToast(cmd.feedback, 'info');
-        }
-        break;
-      }
-      case 'update': {
-        if (cmd.targetItem) {
-          if (cmd.newQuantity !== undefined) {
-            handleSaveEditItem(
-              cmd.targetItem.id,
-              cmd.targetItem.itemName,
-              cmd.targetItem.unit,
-              cmd.newQuantity,
-              cmd.targetItem.lowStockThreshold ?? 5,
-              cmd.targetItem.productionDate,
-              cmd.targetItem.notes
-            );
-          } else if (cmd.quantityDelta !== undefined) {
-            handleQuickQuantityChange(cmd.targetItem, cmd.quantityDelta);
-          }
-        }
-        break;
-      }
-      case 'delete': {
-        if (cmd.targetItem) {
-          executeDelete(cmd.targetItem);
-        }
-        break;
-      }
-      default: {
-        showToast(cmd.feedback, 'info');
-        break;
-      }
-    }
   };
 
   // File export & import
@@ -1182,6 +1353,7 @@ export function App() {
         onExportCsv={handleExportCsv}
         onImportFile={handleImportFile}
         onOpenUnitModal={() => setIsUnitModalOpen(true)}
+        onOpenTagModal={() => setIsTagModalOpen(true)}
         onAddNewItem={() => setIsAddModalOpen(true)}
         onOpenAuditTrail={() => setIsAuditTrailModalOpen(true)}
         onOpenGeminiChat={() => setIsGeminiChatOpen(true)}
@@ -1314,12 +1486,13 @@ export function App() {
           onExportExcel={handleExportExcel}
           onViewItemDetails={(item) => setSelectedItemForDetails(item)}
           onOpenAuditTrail={() => setIsAuditTrailModalOpen(true)}
-          onOpenVoiceAssistant={() => setIsVoiceModalOpen(true)}
           onOpenGeminiChat={() => setIsGeminiChatOpen(true)}
           searchQuery={searchQuery}
           onSearchQueryChange={setSearchQuery}
           selectedTag={selectedTag}
           onSelectTag={setSelectedTag}
+          managedTags={tags}
+          onOpenTagModal={() => setIsTagModalOpen(true)}
         />
       </main>
 
@@ -1358,6 +1531,7 @@ export function App() {
         items={items}
         preSelectedItem={restockTargetItem}
         availableTags={availableTags}
+        managedTags={tags}
         onClose={() => {
           setIsAddModalOpen(false);
           setRestockTargetItem(null);
@@ -1373,6 +1547,7 @@ export function App() {
         item={editingItem}
         units={units}
         availableTags={availableTags}
+        managedTags={tags}
         onClose={() => setEditingItem(null)}
         onSave={handleSaveEditItem}
         onOpenUnitModal={() => setIsUnitModalOpen(true)}
@@ -1382,6 +1557,8 @@ export function App() {
       <ItemDetailsModal
         isOpen={!!selectedItemForDetails}
         item={selectedItemForDetails}
+        managedTags={tags}
+        globalLogs={globalLogs}
         onClose={() => setSelectedItemForDetails(null)}
         onEdit={(item) => {
           setSelectedItemForDetails(null);
@@ -1394,6 +1571,7 @@ export function App() {
           setIsAddModalOpen(true);
         }}
         onSelectTag={(tag) => setSelectedTag(tag)}
+        onAddAuditNote={handleAddAuditNote}
       />
 
       {/* 4. Global Inventory Audit Trail & Activity Log Modal */}
@@ -1402,6 +1580,12 @@ export function App() {
         onClose={() => setIsAuditTrailModalOpen(false)}
         logs={globalLogs}
         onClearLogs={handleClearGlobalLogs}
+        onSelectItem={(itemId) => {
+          const itm = items.find((i) => i.id === itemId);
+          if (itm) {
+            setSelectedItemForDetails(itm);
+          }
+        }}
       />
 
       {/* 5. Units Manager Modal */}
@@ -1413,6 +1597,23 @@ export function App() {
         onUpdateUnit={handleUpdateUnit}
         onDeleteUnit={handleDeleteUnit}
         onResetUnits={handleResetUnits}
+      />
+
+      {/* 5b. Tags Manager Modal */}
+      <TagManagementModal
+        isOpen={isTagModalOpen}
+        tags={tags}
+        items={items}
+        onClose={() => setIsTagModalOpen(false)}
+        onAddTag={handleCreateTag}
+        onCreateTag={handleCreateTag}
+        onUpdateTag={handleUpdateTag}
+        onDeleteTag={handleDeleteTag}
+        onResetTags={handleResetTags}
+        onSelectTagToFilter={(tag) => {
+          setSelectedTag(tag);
+          setIsTagModalOpen(false);
+        }}
       />
 
       {/* 6. Confirmation Dialog with "Don't ask again" choice */}
@@ -1456,16 +1657,7 @@ export function App() {
         onQuickConnect={handleQuickConnect}
       />
 
-      {/* 9. Voice Assistant Natural Language Modal */}
-      <VoiceAssistantModal
-        isOpen={isVoiceModalOpen}
-        onClose={() => setIsVoiceModalOpen(false)}
-        items={items}
-        units={units}
-        onExecuteCommand={handleVoiceCommand}
-      />
-
-      {/* 10. Gemini AI Interactive Stock Chat Modal */}
+      {/* 9. Gemini AI Interactive Stock Chat Modal */}
       <GeminiStockChatModal
         isOpen={isGeminiChatOpen}
         onClose={() => setIsGeminiChatOpen(false)}

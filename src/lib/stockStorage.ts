@@ -1,4 +1,4 @@
-import { StockItem, ItemAuditEntry, OperatorProfile } from '../types';
+import { StockItem, ItemAuditEntry, OperatorProfile, AuditActionType } from '../types';
 
 const STORAGE_KEY = 'in_app_stock_items_en_v5';
 const GLOBAL_LOG_KEY = 'stock_inventory_global_audit_trail_v1';
@@ -13,13 +13,18 @@ export interface GlobalAuditRecord extends ItemAuditEntry {
 }
 
 export function createAuditEntry(
-  action: 'created' | 'quantity_changed' | 'edited' | 'deleted' | 'restored',
+  action: AuditActionType,
   summary: string,
   details?: string,
   previousQuantity?: number,
   newQuantity?: number,
   operatorOrName?: OperatorProfile | string | null,
-  operatorEmail?: string
+  operatorEmail?: string,
+  extra?: {
+    category?: 'movement' | 'edit' | 'audit' | 'lifecycle';
+    noteType?: 'count_verification' | 'quality_check' | 'location_audit' | 'general';
+    balanceAfter?: number;
+  }
 ): ItemAuditEntry {
   const delta =
     previousQuantity !== undefined && newQuantity !== undefined
@@ -48,6 +53,9 @@ export function createAuditEntry(
     previousQuantity,
     newQuantity,
     delta,
+    balanceAfter: extra?.balanceAfter !== undefined ? extra.balanceAfter : newQuantity,
+    category: extra?.category,
+    noteType: extra?.noteType,
     performedBy: actorName,
     userEmail: email,
     userPhotoURL: photoURL,

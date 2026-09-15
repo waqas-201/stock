@@ -20,8 +20,13 @@ import {
   Plus,
   Sliders,
   Filter,
+  Languages,
 } from 'lucide-react';
 import { StockItem, StockFilter, GeminiAgentAction } from '../types';
+
+export function isUrduText(text: string): boolean {
+  return /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(text);
+}
 
 export interface ExecutedActionRecord {
   id: string;
@@ -79,17 +84,27 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
   const [speechSupported, setSpeechSupported] = useState(true);
   const [autoSpeechEnabled, setAutoSpeechEnabled] = useState(false);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const [speechError, setSpeechError] = useState<string | null>(null);
+  const [speechStatus, setSpeechStatus] = useState<string>('');
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [languageMode, setLanguageMode] = useState<'auto' | 'ur' | 'roman_ur' | 'en'>('auto');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+  const recordingTimerRef = useRef<any>(null);
 
   // Initialize Speech Recognition & Synthesis
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const SpeechRecognition =
         (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (!SpeechRecognition) {
+      const hasMedia = Boolean(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+      if (!SpeechRecognition && !hasMedia) {
         setSpeechSupported(false);
       }
       if ('speechSynthesis' in window) {
@@ -111,13 +126,14 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       const sampleItem = items.length > 0 ? items[0].itemName : 'Widget A';
 
       let welcome = `👋 Hello! I'm your **Active Gemini AI Inventory Agent**, connected in real time to your **${totalCount} products**.`;
-      welcome += `\n\n⚡ **Direct Control Enabled**: You can operate your stock directly with natural language!\n`;
-      welcome += `• *"Hey, ${sampleItem} increased by 10 today"*\n`;
-      welcome += `• *"We used 5 ${sampleItem}"*\n`;
-      welcome += `• *"What items are running low?"*`;
+      welcome += `\n\n🇵🇰 **Pakistani Urdu & Roman Urdu Supported!**\nآپ مجھ سے باآسانی **اردو (Urdu)**، **رومن اردو (Roman Urdu)** یا **انگریزی (English)** میں بات کر سکتے ہیں اور وائس یا میسج کے ذریعے اسٹاک کنٹرول کر سکتے ہیں۔`;
+      welcome += `\n\n⚡ **Direct Operational Commands / مثالیں:**\n`;
+      welcome += `• *"Hey, ${sampleItem} increased by 10 today"* / *"${sampleItem} mein 10 add kardo"*\n`;
+      welcome += `• *"${sampleItem} کے 5 ڈبے فروخت ہو گئے"* (Deduct 5 from stock)\n`;
+      welcome += `• *"اسٹاک کتنا بچا ہے؟"* / *"Kam stock wali cheezein dikhao"*`;
 
       if (outCount > 0 || lowCount > 0) {
-        welcome += `\n\n⚠️ **Notice**: You currently have **${lowCount} low stock** and **${outCount} out of stock** items.`;
+        welcome += `\n\n⚠️ **Stock Alert**: You currently have **${lowCount} low stock** and **${outCount} out of stock** items. (${lowCount} کم اسٹاک، ${outCount} ختم شدہ)`;
       }
 
       setMessages([
@@ -127,10 +143,11 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           text: welcome,
           timestamp: new Date(),
           suggestions: [
-            items.length > 0 ? `Hey, ${items[0].itemName} increased by 10 today` : 'What items are low on stock?',
-            items.length > 1 ? `Deduct 5 from ${items[1].itemName}` : 'Give me a complete inventory summary',
-            'What items need immediate reordering?',
-            'Show items that are out of stock',
+            items.length > 0 ? `${items[0].itemName} mein 10 add kardo` : 'اسٹاک کی صورتحال بتاؤ',
+            'اسٹاک کتنا بچا ہے؟ (Total Stock Report)',
+            'کم اسٹاک والی اشیاء دکھاؤ (Low Stock Items)',
+            items.length > 1 ? `${items[1].itemName} ke 5 bech diye` : 'Show out of stock items',
+            'Out of stock items check karo',
           ],
         },
       ]);
@@ -144,61 +161,226 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
     }
   }, [messages, isLoading, isOpen]);
 
-  // Handle Speech Recognition
-  const startListening = () => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      setSpeechSupported(false);
+  // Fallback: Gemini Server-side Audio Recorder (Works everywhere)
+  const startGeminiAudioRecording = async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setSpeechError('Microphone recording is not supported in this browser.');
+      setIsListening(false);
       return;
     }
 
     try {
-      if (recognitionRef.current) {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      audioChunksRef.current = [];
+
+      const mimeType =
+        typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/mp4')
+          ? 'audio/mp4'
+          : '';
+
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        setIsListening(false);
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
+        }
+
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: mimeType || 'audio/webm',
+        });
+        if (audioBlob.size < 200) {
+          setSpeechStatus('No audio detected. Please try again.');
+          return;
+        }
+
+        setIsTranscribing(true);
+        setSpeechStatus('Transcribing your voice with Gemini AI...');
+
         try {
-          recognitionRef.current.abort();
-        } catch {
-          // ignore
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+          reader.onloadend = async () => {
+            const base64Data = (reader.result as string).split(',')[1];
+            try {
+              const res = await fetch('/api/gemini/transcribe-audio', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  audioBase64: base64Data,
+                  mimeType: mimeType || 'audio/webm',
+                }),
+              });
+              const data = await res.json();
+              if (data.transcript && data.transcript.trim()) {
+                const transcribed = data.transcript.trim();
+                setInputText(transcribed);
+                setSpeechStatus(`Transcribed: "${transcribed}"`);
+              } else {
+                setSpeechStatus('No speech recognized. Please speak closer to the microphone.');
+              }
+            } catch (netErr: any) {
+              console.error('Transcription error:', netErr);
+              setSpeechError('Could not transcribe audio. Please check network connection.');
+            } finally {
+              setIsTranscribing(false);
+            }
+          };
+        } catch (readErr) {
+          console.error('Blob reading error:', readErr);
+          setIsTranscribing(false);
         }
-      }
-
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.lang = 'en-US';
-
-      recognition.onstart = () => {
-        setIsListening(true);
       };
 
-      recognition.onresult = (event: any) => {
-        const transcript = event.results?.[0]?.[0]?.transcript || '';
-        if (transcript.trim()) {
-          setInputText(transcript);
-          // Send immediately when user finishes speaking
-          handleSendMessage(transcript);
-        }
-      };
+      recorder.start(250);
+      setIsListening(true);
+      setRecordingSeconds(0);
+      setSpeechError(null);
+      setSpeechStatus('Recording your voice for Gemini AI... Speak now!');
 
-      recognition.onerror = (e: any) => {
-        console.warn('Speech recognition error:', e);
-        setIsListening(false);
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
-    } catch (e) {
-      console.warn('Could not start speech recognition:', e);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
+    } catch (err: any) {
+      console.error('Failed to start audio recording:', err);
       setIsListening(false);
+      setSpeechError(
+        err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
+          ? 'Microphone permission was blocked. Please allow microphone access in your browser.'
+          : 'Could not access microphone.'
+      );
     }
   };
 
+  // Handle Speech Recognition with permission verification & live real-time typing
+  const startListening = async () => {
+    setSpeechError(null);
+    setSpeechStatus('Connecting to microphone...');
+
+    // 1. Verify and request microphone permissions via getUserMedia
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Release dummy stream so recognition or recorder has clean access
+        stream.getTracks().forEach((track) => track.stop());
+      } catch (err: any) {
+        console.warn('Microphone permission request failed:', err);
+        setIsListening(false);
+        setSpeechError(
+          err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
+            ? 'Microphone permission blocked. Please allow microphone access in your browser address bar.'
+            : 'Could not access microphone hardware. Please check your audio settings.'
+        );
+        return;
+      }
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    // 2. Primary: Web Speech API with real-time continuous typing
+    if (SpeechRecognition) {
+      try {
+        if (recognitionRef.current) {
+          try {
+            recognitionRef.current.abort();
+          } catch {
+            // ignore
+          }
+        }
+
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = languageMode === 'en' ? 'en-US' : 'ur-PK';
+
+        recognition.onstart = () => {
+          setIsListening(true);
+          setSpeechError(null);
+          setSpeechStatus(
+            languageMode === 'ur'
+              ? 'سن رہا ہے... بولیں (اردو)'
+              : languageMode === 'roman_ur'
+              ? 'Listening... Speak in Roman Urdu'
+              : 'Listening live... Speak in Urdu or English'
+          );
+        };
+
+        recognition.onresult = (event: any) => {
+          let finalWords = '';
+          let interimWords = '';
+
+          for (let i = 0; i < event.results.length; ++i) {
+            const res = event.results[i];
+            if (res.isFinal) {
+              finalWords += res[0].transcript + ' ';
+            } else {
+              interimWords += res[0].transcript;
+            }
+          }
+
+          const combined = (finalWords + interimWords).trim();
+          if (combined) {
+            // TYPE DIRECTLY INTO THE INPUT FIELD IN REAL TIME
+            setInputText(combined);
+            setSpeechStatus(`Heard: "${combined}"`);
+          }
+        };
+
+        recognition.onerror = (e: any) => {
+          console.warn('Speech recognition error:', e.error);
+          if (e.error === 'not-allowed') {
+            setSpeechError(
+              'Microphone access blocked. Click the lock/camera icon in your address bar to enable.'
+            );
+            setIsListening(false);
+          } else if (e.error === 'no-speech') {
+            setSpeechStatus('No speech detected. Please speak closer to your microphone.');
+          } else if (e.error === 'network' || e.error === 'service-not-allowed') {
+            console.log('Falling back to Gemini Audio recording due to browser speech service error...');
+            try {
+              recognition.abort();
+            } catch {}
+            startGeminiAudioRecording();
+          } else {
+            setSpeechStatus(`Listening paused (${e.error}). Tap mic to try again.`);
+            setIsListening(false);
+          }
+        };
+
+        recognition.onend = () => {
+          setIsListening(false);
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
+        return;
+      } catch (e) {
+        console.warn('Web Speech start failed, falling back to Gemini Audio:', e);
+      }
+    }
+
+    // 3. Fallback: Gemini Server-side Audio Recorder
+    startGeminiAudioRecording();
+  };
+
   const stopListening = () => {
+    // Stop Web Speech API if running
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -206,6 +388,21 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
         // ignore
       }
     }
+
+    // Stop MediaRecorder if running
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch {
+        // ignore
+      }
+    }
+
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+
     setIsListening(false);
   };
 
@@ -232,6 +429,22 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
     const utterance = new SpeechSynthesisUtterance(cleanText);
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
+
+    const hasUrdu = isUrduText(cleanText);
+    if (hasUrdu || languageMode === 'ur') {
+      utterance.lang = 'ur-PK';
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        const voices = window.speechSynthesis.getVoices?.() || [];
+        const urduVoice = voices.find(
+          (v) => v.lang.startsWith('ur') || v.lang.startsWith('hi')
+        );
+        if (urduVoice) {
+          utterance.voice = urduVoice;
+        }
+      }
+    } else {
+      utterance.lang = 'en-US';
+    }
 
     utterance.onend = () => setSpeakingMessageId(null);
     utterance.onerror = () => setSpeakingMessageId(null);
@@ -296,6 +509,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           message: query,
           history: historyPayload,
           stockItems: items,
+          languageMode,
         }),
       });
 
@@ -496,6 +710,77 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           </div>
         </div>
 
+        {/* Pakistani Urdu & Multilingual Mode Selector Bar */}
+        <div className="bg-emerald-950/90 text-white px-3 sm:px-5 py-2 flex items-center justify-between gap-2 flex-wrap text-xs border-b border-emerald-800 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Languages className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="font-bold text-[11px] text-emerald-100">Language / زبان:</span>
+          </div>
+
+          <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 no-scrollbar">
+            <button
+              type="button"
+              onClick={() => {
+                setLanguageMode('auto');
+                setSpeechStatus('Auto: Speaks & understands English, Urdu, or Roman Urdu');
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                languageMode === 'auto'
+                  ? 'bg-white text-emerald-950 font-bold shadow-2xs ring-2 ring-emerald-400/40'
+                  : 'bg-emerald-900 text-emerald-200 hover:bg-emerald-800'
+              }`}
+              title="Auto-detect English, Pakistani Urdu (اردو), and Roman Urdu"
+            >
+              🌐 Auto (Urdu & EN)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLanguageMode('ur');
+                setSpeechStatus('اردو موڈ فعال: آواز یا لکھائی میں بات کریں');
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                languageMode === 'ur'
+                  ? 'bg-white text-emerald-950 font-bold shadow-2xs ring-2 ring-emerald-400/40'
+                  : 'bg-emerald-900 text-emerald-200 hover:bg-emerald-800'
+              }`}
+              title="Pakistani Urdu in Perso-Arabic script (اردو)"
+            >
+              🇵🇰 اردو (Urdu)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLanguageMode('roman_ur');
+                setSpeechStatus('Roman Urdu mode: e.g. "Widget A mein 10 add kardo"');
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                languageMode === 'roman_ur'
+                  ? 'bg-white text-emerald-950 font-bold shadow-2xs ring-2 ring-emerald-400/40'
+                  : 'bg-emerald-900 text-emerald-200 hover:bg-emerald-800'
+              }`}
+              title="Roman Urdu (Urdu typed in English alphabet)"
+            >
+              💬 Roman Urdu
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLanguageMode('en');
+                setSpeechStatus('English mode active');
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                languageMode === 'en'
+                  ? 'bg-white text-emerald-950 font-bold shadow-2xs ring-2 ring-emerald-400/40'
+                  : 'bg-emerald-900 text-emerald-200 hover:bg-emerald-800'
+              }`}
+              title="Standard English"
+            >
+              🇬🇧 English
+            </button>
+          </div>
+        </div>
+
         {/* Chat Messages Feed */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 bg-slate-50/70">
           {messages.map((msg) => {
@@ -529,11 +814,20 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                         : 'bg-emerald-600 text-white font-medium rounded-tr-xs leading-relaxed'
                     }`}
                   >
-                    {/* Render message body with formatted markdown elements */}
+                    {/* Render message body with formatted markdown elements & RTL Urdu handling */}
                     <div className="space-y-2 whitespace-pre-wrap break-words">
                       {msg.text.split('\n\n').map((paragraph, idx) => {
+                        const isUrdu = isUrduText(paragraph);
                         return (
-                          <p key={idx} className="leading-relaxed">
+                          <p
+                            key={idx}
+                            dir={isUrdu ? 'rtl' : 'ltr'}
+                            className={`leading-relaxed ${
+                              isUrdu
+                                ? 'text-right font-sans text-base sm:text-[15px] font-normal tracking-wide'
+                                : ''
+                            }`}
+                          >
                             {formatTextWithBold(paragraph)}
                           </p>
                         );
@@ -693,35 +987,80 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Quick Action Chips Bar (Direct agent command templates) */}
+        {/* Quick Action Chips Bar (Direct agent command templates with Urdu support) */}
         <div className="px-4 py-2 border-t border-slate-200 bg-white flex items-center gap-1.5 overflow-x-auto scrollbar-none shrink-0">
           <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wide shrink-0">
-            Quick Commands:
+            {languageMode === 'ur' ? 'فوری احکامات:' : languageMode === 'roman_ur' ? 'Quick Cmds:' : 'Quick Commands:'}
           </span>
-          {[
-            {
-              label: items.length > 0 ? `+10 to ${items[0].itemName}` : '+10 Stock',
-              query:
-                items.length > 0
-                  ? `Hey, ${items[0].itemName} increased by 10 today`
-                  : 'Add 10 to current stock',
-            },
-            {
-              label: items.length > 0 ? `-5 from ${items[0].itemName}` : '-5 Stock',
-              query:
-                items.length > 0
-                  ? `Deduct 5 from ${items[0].itemName}`
-                  : 'Deduct 5 from stock',
-            },
-            {
-              label: 'Low Stock Alert',
-              query: 'What items are low on stock and need reordering?',
-            },
-            {
-              label: 'Inventory Summary',
-              query: 'Give me a complete inventory summary and stock count',
-            },
-          ].map((chip) => (
+          {(languageMode === 'ur'
+            ? [
+                {
+                  label: items.length > 0 ? `${items[0].itemName} میں 10 شامل کرو` : '10 شامل کرو',
+                  query: items.length > 0 ? `${items[0].itemName} میں 10 شامل کرو` : 'اسٹاک میں 10 کا اضافہ کرو',
+                },
+                {
+                  label: items.length > 0 ? `${items[0].itemName} سے 5 نکالیں` : '5 فروخت ہوئے',
+                  query: items.length > 0 ? `${items[0].itemName} سے 5 فروخت ہو گئے` : 'اسٹاک سے 5 کم کرو',
+                },
+                {
+                  label: 'کم اسٹاک والی اشیاء',
+                  query: 'کم اسٹاک والی کونسی اشیاء ہیں جنہیں دوبارہ منگوانا ہے؟',
+                },
+                {
+                  label: 'کل اسٹاک رپورٹ',
+                  query: 'تمام اسٹاک کی مکمل رپورٹ اور تعداد بتاؤ',
+                },
+                {
+                  label: 'ختم شدہ مال',
+                  query: 'وہ تمام اشیاء دکھاؤ جو اسٹاک میں ختم ہو چکی ہیں',
+                },
+              ]
+            : languageMode === 'roman_ur'
+            ? [
+                {
+                  label: items.length > 0 ? `${items[0].itemName} mein 10 add kardo` : '+10 Add karo',
+                  query: items.length > 0 ? `${items[0].itemName} mein 10 add kardo` : 'Stock mein 10 add kardo',
+                },
+                {
+                  label: items.length > 0 ? `${items[0].itemName} ke 5 bech diye` : '-5 Nikalo',
+                  query: items.length > 0 ? `${items[0].itemName} ke 5 bech diye` : 'Stock se 5 deduct kardo',
+                },
+                {
+                  label: 'Kam stock wali items',
+                  query: 'Konsi items kam stock par hain jinhein reorder karna hai?',
+                },
+                {
+                  label: 'Total stock report',
+                  query: 'Mujhe complete inventory summary aur stock report do',
+                },
+                {
+                  label: 'Out of stock check',
+                  query: 'Konsi items bilkul khatam ho gayi hain out of stock?',
+                },
+              ]
+            : [
+                {
+                  label: items.length > 0 ? `+10 to ${items[0].itemName} (شامل کرو)` : '+10 to Stock',
+                  query: items.length > 0 ? `Hey, ${items[0].itemName} increased by 10 today` : 'Add 10 to current stock',
+                },
+                {
+                  label: items.length > 0 ? `-5 from ${items[0].itemName} (فروخت)` : '-5 from Stock',
+                  query: items.length > 0 ? `Deduct 5 from ${items[0].itemName}` : 'Deduct 5 from stock',
+                },
+                {
+                  label: 'کم اسٹاک (Low Stock)',
+                  query: 'What items are low on stock and need reordering?',
+                },
+                {
+                  label: 'اسٹاک رپورٹ (Summary)',
+                  query: 'Give me a complete inventory summary and stock count',
+                },
+                {
+                  label: 'Out of Stock',
+                  query: 'Show items that are completely out of stock',
+                },
+              ]
+          ).map((chip) => (
             <button
               key={chip.label}
               type="button"
@@ -733,6 +1072,86 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           ))}
         </div>
 
+        {/* Speech Error Banner if microphone was blocked */}
+        {speechError && (
+          <div className="mx-3 sm:mx-4 mb-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span className="truncate">{speechError}</span>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={startListening}
+                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition-colors cursor-pointer text-[11px]"
+              >
+                Try Again
+              </button>
+              <button
+                type="button"
+                onClick={() => setSpeechError(null)}
+                className="p-1 text-amber-700 hover:bg-amber-100 rounded-md transition-colors cursor-pointer"
+                title="Dismiss"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Live Speech Recognition Waveform & Action Banner */}
+        {(isListening || isTranscribing) && (
+          <div className="mx-3 sm:mx-4 mb-2 p-2.5 rounded-xl bg-gradient-to-r from-rose-50 via-pink-50 to-rose-50 border border-rose-200 text-rose-900 text-xs flex flex-wrap items-center justify-between gap-2 shadow-2xs">
+            <div className="flex items-center gap-2.5 min-w-0">
+              {/* Animated Sound Wave Bars */}
+              <div className="flex items-center gap-0.5 h-4 px-1 shrink-0">
+                <span className="w-1 h-3 bg-rose-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-1 h-4 bg-rose-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-1 h-2.5 bg-rose-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                <span className="w-1 h-4 bg-rose-600 rounded-full animate-bounce" style={{ animationDelay: '450ms' }} />
+              </div>
+
+              <div className="min-w-0">
+                <p className="font-bold text-rose-900 truncate">
+                  {isTranscribing
+                    ? 'Transcribing audio with Gemini AI...'
+                    : recordingSeconds > 0
+                    ? `Recording voice (${recordingSeconds}s)... Speak now!`
+                    : 'Listening live... Speak your stock update'}
+                </p>
+                {inputText && (
+                  <p className="text-[11px] text-rose-700 truncate font-mono">
+                    "{inputText}"
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={stopListening}
+                className="px-2.5 py-1 text-xs font-semibold bg-white text-slate-700 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer shadow-2xs"
+              >
+                Done
+              </button>
+              {inputText.trim() && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopListening();
+                    handleSendMessage();
+                  }}
+                  className="px-2.5 py-1 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-colors cursor-pointer shadow-2xs flex items-center gap-1"
+                >
+                  <span>Send</span>
+                  <Send className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Input Bar with Voice Recognition and Text */}
         <div className="p-3 sm:p-4 bg-white border-t border-slate-200 shrink-0">
           <div className="flex items-center gap-2">
@@ -741,15 +1160,26 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
               <button
                 type="button"
                 onClick={isListening ? stopListening : startListening}
+                disabled={isTranscribing}
                 className={`min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center transition-all cursor-pointer border ${
                   isListening
                     ? 'bg-rose-600 text-white border-rose-700 animate-pulse ring-4 ring-rose-500/20'
+                    : isTranscribing
+                    ? 'bg-amber-100 text-amber-800 border-amber-300 cursor-wait'
                     : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 active:bg-emerald-200'
                 }`}
-                title={isListening ? 'Stop listening' : 'Speak to Gemini via microphone'}
+                title={
+                  isListening
+                    ? 'Click to stop listening'
+                    : isTranscribing
+                    ? 'Transcribing...'
+                    : 'Speak to Gemini: real-time voice typing'
+                }
                 aria-label={isListening ? 'Stop listening' : 'Speak to Gemini via microphone'}
               >
-                {isListening ? (
+                {isTranscribing ? (
+                  <Loader2 className="w-5 h-5 animate-spin text-amber-700" />
+                ) : isListening ? (
                   <MicOff className="w-5 h-5" />
                 ) : (
                   <Mic className="w-5 h-5 text-emerald-700" />
@@ -762,18 +1192,27 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
               <input
                 id="gemini-chat-input"
                 type="text"
+                dir={isUrduText(inputText) ? 'rtl' : 'ltr'}
                 placeholder={
                   isListening
-                    ? 'Listening... say "Hey, this item increased by 10 today"'
-                    : 'Ask or say: "Hey, [item] increased by 15 today"...'
+                    ? languageMode === 'ur'
+                      ? 'سن رہا ہے... بولیں "اسٹاک میں 10 شامل کرو"'
+                      : languageMode === 'roman_ur'
+                      ? 'Listening... say "Widget mein 10 add kardo"'
+                      : 'Listening live... speak in Urdu or English'
+                    : languageMode === 'ur'
+                    ? 'لکھیں یا بولیں: "ویجٹ کے 10 شامل کرو" یا "اسٹاک کتنا بچا ہے؟"...'
+                    : languageMode === 'roman_ur'
+                    ? 'Type or speak: "Widget mein 10 add kardo", "Kitna bacha hai?"...'
+                    : 'Ask or say: "Widget mein 10 add kardo" / "Hey, [item] increased by 10"...'
                 }
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleKeyDown}
-                disabled={isLoading}
+                disabled={isLoading || isTranscribing}
                 className={`w-full min-h-[44px] px-4 py-2.5 text-base sm:text-sm text-slate-900 bg-slate-50 border rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:bg-white placeholder:text-slate-400 transition-all ${
                   isListening ? 'border-rose-400 bg-rose-50/30' : 'border-slate-300'
-                }`}
+                } ${isUrduText(inputText) ? 'text-right' : 'text-left'}`}
               />
             </div>
 
@@ -781,7 +1220,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
             <button
               type="button"
               onClick={() => handleSendMessage()}
-              disabled={!inputText.trim() || isLoading}
+              disabled={!inputText.trim() || isLoading || isTranscribing}
               className="min-h-[44px] min-w-[44px] px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-40 disabled:cursor-not-allowed text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
               aria-label="Send message"
             >
@@ -793,12 +1232,10 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
             </button>
           </div>
 
-          {isListening && (
-            <div className="mt-2 text-xs text-rose-600 font-bold flex items-center gap-1.5 animate-pulse">
-              <span className="w-2 h-2 rounded-full bg-rose-600" />
-              <span>
-                Listening to your voice... say something like "Hey, Widget increased by 5 today".
-              </span>
+          {speechStatus && !isListening && !isTranscribing && (
+            <div className="mt-1.5 text-[11px] text-slate-500 flex items-center gap-1 truncate">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+              <span className="truncate">{speechStatus}</span>
             </div>
           )}
         </div>

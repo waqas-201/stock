@@ -14,7 +14,7 @@ import {
   RefreshCw,
   Sliders,
 } from 'lucide-react';
-import { StockItem, StockUnit } from '../types';
+import { StockItem, StockUnit, StockTag, StockLabel } from '../types';
 import { TagInput } from './TagInput';
 
 interface EditItemModalProps {
@@ -22,6 +22,8 @@ interface EditItemModalProps {
   item: StockItem | null;
   units: StockUnit[];
   availableTags?: string[];
+  managedTags?: StockTag[];
+  managedLabels?: StockLabel[];
   onClose: () => void;
   onSave: (
     id: string,
@@ -41,10 +43,13 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
   item,
   units,
   availableTags = [],
+  managedTags,
+  managedLabels = [],
   onClose,
   onSave,
   onOpenUnitModal,
 }) => {
+  const effectiveTags: StockTag[] = managedTags || (managedLabels as unknown as StockTag[]) || [];
   const [itemName, setItemName] = useState('');
   const [unit, setUnit] = useState('');
   const [threshold, setThreshold] = useState('5');
@@ -521,13 +526,14 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
             />
           </div>
 
-          {/* 6. Product Labels & Tags */}
+          {/* 6. Product Tags */}
           <div>
             <TagInput
               tags={tags}
               onChange={setTags}
               availableTags={availableTags}
-              placeholder="Add labels / tags..."
+              managedTags={effectiveTags}
+              placeholder="Add tags (e.g. Office, Food, Fragile)..."
             />
           </div>
 

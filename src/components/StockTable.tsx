@@ -19,12 +19,11 @@ import {
   Eye,
   History,
   User,
-  Mic,
   Sparkles,
   Tag as TagIcon,
   Hash,
 } from 'lucide-react';
-import { StockItem, StockFilter, SortField, SortOrder } from '../types';
+import { StockItem, StockFilter, SortField, SortOrder, StockTag, StockLabel } from '../types';
 import { getTagStyle, getUniqueTagsWithCounts } from '../lib/tagUtils';
 
 interface StockTableProps {
@@ -41,12 +40,15 @@ interface StockTableProps {
   onExportExcel: () => void;
   onViewItemDetails: (item: StockItem) => void;
   onOpenAuditTrail: () => void;
-  onOpenVoiceAssistant?: () => void;
   searchQuery?: string;
   onSearchQueryChange?: (query: string) => void;
   selectedTag?: string | null;
   onSelectTag?: (tag: string | null) => void;
   onOpenGeminiChat?: () => void;
+  managedTags?: StockTag[];
+  onOpenTagModal?: () => void;
+  managedLabels?: StockLabel[];
+  onOpenLabelModal?: () => void;
 }
 
 export const StockTable: React.FC<StockTableProps> = ({
@@ -62,13 +64,19 @@ export const StockTable: React.FC<StockTableProps> = ({
   onReceiveStock,
   onViewItemDetails,
   onOpenAuditTrail,
-  onOpenVoiceAssistant,
   searchQuery: externalSearchQuery,
   onSearchQueryChange,
   selectedTag: externalSelectedTag,
   onSelectTag,
   onOpenGeminiChat,
+  managedTags,
+  onOpenTagModal,
+  managedLabels = [],
+  onOpenLabelModal,
 }) => {
+  const effectiveTags: StockTag[] = managedTags || (managedLabels as unknown as StockTag[]) || [];
+  const handleOpenTagsModal = onOpenTagModal || onOpenLabelModal;
+
   const [internalSearchQuery, setInternalSearchQuery] = useState('');
   const searchQuery = externalSearchQuery !== undefined ? externalSearchQuery : internalSearchQuery;
   const setSearchQuery = (val: string) => {
@@ -238,17 +246,6 @@ export const StockTable: React.FC<StockTableProps> = ({
                   <X className="w-4 h-4" />
                 </button>
               )}
-              {onOpenVoiceAssistant && (
-                <button
-                  type="button"
-                  onClick={onOpenVoiceAssistant}
-                  className="min-w-[32px] min-h-[32px] flex items-center justify-center text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
-                  title="Voice search & instructions (Add, Check, Update, Delete)"
-                  aria-label="Voice Search"
-                >
-                  <Mic className="w-4 h-4" />
-                </button>
-              )}
             </div>
           </div>
 
@@ -264,21 +261,6 @@ export const StockTable: React.FC<StockTableProps> = ({
               <Sparkles className="w-4 h-4 text-amber-300 shrink-0 animate-pulse" />
               <span className="hidden sm:inline">Talk to AI</span>
               <span className="sm:hidden">AI</span>
-            </button>
-          )}
-
-          {/* Voice Search & Instruction Assistant button */}
-          {onOpenVoiceAssistant && (
-            <button
-              id="btn-voice-assistant"
-              type="button"
-              onClick={onOpenVoiceAssistant}
-              className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3 sm:px-3.5 py-2 text-xs sm:text-sm font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100/80 active:bg-emerald-200/70 border border-emerald-300 rounded-xl shadow-2xs transition-all cursor-pointer shrink-0"
-              title="Speak voice instructions to Search, Create, Read, Update, or Delete stock"
-            >
-              <Mic className="w-4 h-4 text-emerald-600 shrink-0 animate-pulse" />
-              <span className="hidden sm:inline">Voice Assistant</span>
-              <span className="sm:hidden">Voice</span>
             </button>
           )}
 
@@ -486,7 +468,7 @@ export const StockTable: React.FC<StockTableProps> = ({
             {/* Individual Tag Pills */}
             {uniqueTags.map(({ name, count }) => {
               const isSelected = selectedTag === name;
-              const style = getTagStyle(name);
+              const style = getTagStyle(name, effectiveTags);
               return (
                 <button
                   key={name}
@@ -516,6 +498,20 @@ export const StockTable: React.FC<StockTableProps> = ({
                 </button>
               );
             })}
+
+            {/* Manage Tags shortcut */}
+            {handleOpenTagsModal && (
+              <button
+                id="btn-filterbar-manage-tags"
+                type="button"
+                onClick={handleOpenTagsModal}
+                className="min-h-[30px] px-2.5 py-1 text-xs font-semibold text-slate-600 hover:text-emerald-800 bg-white hover:bg-emerald-50 border border-dashed border-slate-300 hover:border-emerald-300 rounded-lg transition-colors cursor-pointer shrink-0 flex items-center gap-1.5"
+                title="Manage custom tags & color codes"
+              >
+                <TagIcon className="w-3 h-3 text-emerald-600" />
+                <span>Manage Tags</span>
+              </button>
+            )}
 
             {/* Reset active tag filter */}
             {selectedTag && (
@@ -651,7 +647,7 @@ export const StockTable: React.FC<StockTableProps> = ({
                     {item.tags && item.tags.length > 0 && (
                       <div className="flex items-center gap-1">
                         {item.tags.slice(0, 2).map((tag) => {
-                          const style = getTagStyle(tag);
+                          const style = getTagStyle(tag, effectiveTags);
                           return (
                             <span
                               key={tag}
@@ -843,7 +839,7 @@ export const StockTable: React.FC<StockTableProps> = ({
                   {Array.isArray(item.tags) && item.tags.length > 0 && (
                     <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
                       {item.tags.map((tag) => {
-                        const style = getTagStyle(tag);
+                        const style = getTagStyle(tag, effectiveTags);
                         const isSelected = selectedTag === tag;
                         return (
                           <button
@@ -1200,7 +1196,7 @@ export const StockTable: React.FC<StockTableProps> = ({
                       {Array.isArray(item.tags) && item.tags.length > 0 ? (
                         <div className="flex items-center gap-1 flex-wrap max-w-[200px]">
                           {item.tags.map((tag) => {
-                            const style = getTagStyle(tag);
+                            const style = getTagStyle(tag, effectiveTags);
                             const isSelected = selectedTag === tag;
                             return (
                               <button

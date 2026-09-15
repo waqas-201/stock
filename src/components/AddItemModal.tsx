@@ -14,7 +14,7 @@ import {
   TrendingUp,
   Search,
 } from 'lucide-react';
-import { StockItem, StockUnit } from '../types';
+import { StockItem, StockUnit, StockTag, StockLabel } from '../types';
 import { TagInput } from './TagInput';
 
 export interface AddItemModalProps {
@@ -23,6 +23,8 @@ export interface AddItemModalProps {
   items?: StockItem[];
   preSelectedItem?: StockItem | null;
   availableTags?: string[];
+  managedTags?: StockTag[];
+  managedLabels?: StockLabel[];
   onClose: () => void;
   onAdd: (
     itemName: string,
@@ -47,11 +49,14 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
   items = [],
   preSelectedItem = null,
   availableTags = [],
+  managedTags,
+  managedLabels = [],
   onClose,
   onAdd,
   onAddMoreStock,
   onOpenUnitModal,
 }) => {
+  const effectiveTags: StockTag[] = managedTags || (managedLabels as unknown as StockTag[]) || [];
   // Mode: 'restock' (add more to existing) vs 'new_item' (register new SKU)
   const [activeTab, setActiveTab] = useState<'restock' | 'new_item'>('restock');
 
@@ -841,12 +846,13 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
               />
             </div>
 
-            {/* 6. Product Labels & Tags */}
+            {/* 6. Product Tags */}
             <div>
               <TagInput
                 tags={tags}
                 onChange={setTags}
                 availableTags={availableTags}
+                managedTags={effectiveTags}
                 placeholder="Add tags (e.g., Office, Warehouse, Perishable)..."
               />
             </div>

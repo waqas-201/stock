@@ -8,7 +8,7 @@ import {
   limit,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
-import { StockItem, StockUnit, UserSetting, OperatorProfile } from '../types';
+import { StockItem, StockUnit, StockTag, StockLabel, UserSetting, OperatorProfile } from '../types';
 import { GlobalAuditRecord } from './stockStorage';
 
 // ==========================================
@@ -189,6 +189,90 @@ export async function deleteStockUnitFromFirestore(
 }
 
 // ==========================================
+// 2b. Stock Tags Services (Collaborative & Shared)
+// ==========================================
+
+export function subscribeStockTags(
+  onTags: (tags: StockTag[]) => void,
+  onError?: (error: unknown) => void
+): () => void {
+  const collectionPath = 'stock_tags';
+  try {
+    const q = query(
+      collection(db, collectionPath),
+      limit(200)
+    );
+
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const tags: StockTag[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          tags.push({
+            id: data.id,
+            name: data.name,
+            color: data.color || 'slate',
+            description: data.description || undefined,
+            isDefault: !!data.isDefault,
+            userId: data.userId || undefined,
+          });
+        });
+        if (tags.length > 0) {
+          tags.sort((a, b) => a.name.localeCompare(b.name));
+          onTags(tags);
+        }
+      },
+      (error) => {
+        if (onError) onError(error);
+        handleFirestoreError(error, OperationType.GET, collectionPath);
+      }
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, collectionPath);
+    return () => {};
+  }
+}
+
+export async function saveStockTagToFirestore(
+  tag: StockTag,
+  userId?: string
+): Promise<void> {
+  const docPath = `stock_tags/${tag.id}`;
+  try {
+    const docRef = doc(db, 'stock_tags', tag.id);
+    const payload = {
+      id: tag.id,
+      name: tag.name,
+      color: tag.color || 'slate',
+      description: tag.description || null,
+      isDefault: !!tag.isDefault,
+      userId: userId || tag.userId || null,
+    };
+    await setDoc(docRef, payload, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, docPath);
+  }
+}
+
+export async function deleteStockTagFromFirestore(
+  tagId: string
+): Promise<void> {
+  const docPath = `stock_tags/${tagId}`;
+  try {
+    const docRef = doc(db, 'stock_tags', tagId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, docPath);
+  }
+}
+
+// Aliases for compatibility
+export const subscribeStockLabels = subscribeStockTags;
+export const saveStockLabelToFirestore = saveStockTagToFirestore;
+export const deleteStockLabelFromFirestore = deleteStockTagFromFirestore;
+
+// ==========================================
 // 3. Shared Audit Logs Services with Attribution
 // ==========================================
 
@@ -343,7 +427,8 @@ export async function migrateLocalDataToCloud(
   localUnits: StockUnit[],
   localLogs: GlobalAuditRecord[],
   operator: OperatorProfile,
-  userId?: string
+  userId?: string,
+  localTags?: StockTag[]
 ): Promise<{ migratedItems: number; migratedLogs: number }> {
   let migratedItems = 0;
   let migratedLogs = 0;
@@ -355,6 +440,12 @@ export async function migrateLocalDataToCloud(
 
   for (const unit of localUnits) {
     await saveStockUnitToFirestore(unit, userId);
+  }
+
+  if (Array.isArray(localTags)) {
+    for (const tag of localTags) {
+      await saveStockTagToFirestore(tag, userId);
+    }
   }
 
   for (const log of localLogs.slice(0, 50)) {
