@@ -1498,16 +1498,16 @@ export function App() {
 
       {/* Mobile Floating Action Buttons (FAB): Quick AI Chat + Add Item */}
       <div className="sm:hidden fixed bottom-5 left-3 right-3 z-40 flex items-center justify-between pointer-events-none">
-        {/* Mobile FAB: Talk to Gemini AI */}
+        {/* Mobile FAB: Talk to Stock Agent */}
         <button
           id="btn-mobile-fab-gemini"
           type="button"
           onClick={() => setIsGeminiChatOpen(true)}
           className="pointer-events-auto min-h-[48px] px-3.5 py-2.5 rounded-full bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-bold shadow-lg shadow-slate-950/25 flex items-center justify-center gap-1.5 transition-transform active:scale-95 cursor-pointer border border-slate-700 backdrop-blur-xs"
-          aria-label="Talk to Gemini AI"
+          aria-label="Talk to Stock Agent"
         >
           <Sparkles className="w-4 h-4 text-amber-300 animate-pulse shrink-0" />
-          <span className="text-xs font-bold">Talk to AI</span>
+          <span className="text-xs font-bold">Stock Agent</span>
         </button>
 
         {/* Mobile FAB: 1-Tap Add Item */}

@@ -1,6 +1,6 @@
 {
   "name": "Stock Management",
-  "description": "Clean mobile and desktop stock inventory management app with persistent Google Cloud Firestore database, Gemini AI stock assistant, low-stock thresholds, audit trails, and Excel export.",
+  "description": "Clean mobile and desktop stock inventory management app with persistent Google Cloud Firestore database, Stock Agent assistant, low-stock thresholds, audit trails, and Excel export.",
   "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

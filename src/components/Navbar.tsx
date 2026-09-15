@@ -295,17 +295,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span>Export Excel</span>
               </button>
 
-              {/* Talk to Gemini AI Desktop Button */}
+              {/* Talk to Stock Agent Desktop Button */}
               {onOpenGeminiChat && (
                 <button
                   id="btn-navbar-gemini-chat"
                   type="button"
                   onClick={onOpenGeminiChat}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 rounded-xl shadow-xs transition-all cursor-pointer ring-1 ring-emerald-500/30"
-                  title="Talk with Gemini AI about your stock"
+                  title="Talk with Stock Agent about your stock"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
-                  <span>Talk to AI</span>
+                  <span>Stock Agent</span>
                 </button>
               )}
 
@@ -324,18 +324,18 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {/* Mobile Actions Header (Touch-optimized, Guaranteed Zero-Overflow) */}
             <div className="flex md:hidden items-center gap-1.5 shrink-0">
-              {/* Talk to Gemini AI on mobile */}
+              {/* Talk to Stock Agent on mobile */}
               {onOpenGeminiChat && (
                 <button
                   id="btn-mobile-gemini-chat"
                   type="button"
                   onClick={onOpenGeminiChat}
                   className="min-h-[38px] px-2.5 py-1.5 inline-flex items-center justify-center gap-1 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-700 rounded-xl shadow-xs cursor-pointer active:scale-95 transition-transform"
-                  title="Talk with Gemini AI about your stock"
-                  aria-label="Talk with Gemini AI"
+                  title="Talk with Stock Agent about your stock"
+                  aria-label="Talk with Stock Agent"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
-                  <span>Ask AI</span>
+                  <span>Agent</span>
                 </button>
               )}
 
@@ -412,7 +412,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             </div>
 
-            {/* Talk with Gemini AI shortcut inside mobile drawer */}
+            {/* Talk with Stock Agent shortcut inside mobile drawer */}
             {onOpenGeminiChat && (
               <button
                 type="button"
@@ -428,7 +428,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                   <div className="min-w-0">
                     <span className="text-sm font-bold block text-white">
-                      Talk with Gemini AI
+                      Talk with Stock Agent
                     </span>
                     <span className="text-xs text-emerald-100 block">
                       Ask about stock, low items, or reorders
@@ -436,7 +436,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                 </div>
                 <span className="text-xs font-bold px-2.5 py-1 bg-white/20 rounded-lg text-white shrink-0">
-                  Open AI
+                  Open Agent
                 </span>
               </button>
             )}

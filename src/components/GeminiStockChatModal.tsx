@@ -101,6 +101,24 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
   const shouldBeListeningRef = useRef(false);
   const shouldAutoSendRef = useRef(false);
 
+  // Helper to check if microphone input hardware is available
+  const checkMicrophoneAvailable = async (): Promise<boolean> => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) {
+      return true;
+    }
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter((d) => d.kind === 'audioinput');
+      // If devices can be enumerated and at least one device exists but zero audio inputs
+      if (devices.length > 0 && audioInputs.length === 0) {
+        return false;
+      }
+      return true;
+    } catch {
+      return true;
+    }
+  };
+
   // Helper to format recording timer display
   const formatTimer = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -120,6 +138,19 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       if ('speechSynthesis' in window) {
         synthRef.current = window.speechSynthesis;
       }
+
+      // Check for available audio input hardware silently
+      if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+        navigator.mediaDevices
+          .enumerateDevices()
+          .then((devices) => {
+            const audioInputs = devices.filter((d) => d.kind === 'audioinput');
+            if (devices.length > 0 && audioInputs.length === 0) {
+              setSpeechStatus('No microphone detected. You can type commands in the chat box.');
+            }
+          })
+          .catch(() => {});
+      }
     }
   }, []);
 
@@ -135,7 +166,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
 
       const sampleItem = items.length > 0 ? items[0].itemName : 'Widget A';
 
-      let welcome = `👋 Hello! I'm your **Active Gemini AI Inventory Agent**, connected in real time to your **${totalCount} products**.`;
+      let welcome = `👋 Hello! I'm your **Active Stock Agent**, connected in real time to your **${totalCount} products**.`;
       welcome += `\n\n🇵🇰 **Pakistani Urdu & Roman Urdu Supported!**\nآپ مجھ سے باآسانی **اردو (Urdu)**، **رومن اردو (Roman Urdu)** یا **انگریزی (English)** میں بات کر سکتے ہیں اور وائس یا میسج کے ذریعے اسٹاک کنٹرول کر سکتے ہیں۔`;
       welcome += `\n\n⚡ **Direct Operational Commands / مثالیں:**\n`;
       welcome += `• *"Hey, ${sampleItem} increased by 10 today"* / *"${sampleItem} mein 10 add kardo"*\n`;
@@ -354,14 +385,44 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
         setRecordingSeconds((prev) => prev + 1);
       }, 1000);
     } catch (err: any) {
-      console.error('Failed to start audio recording:', err);
+      console.warn('Microphone recording unavailable:', err?.name || err?.message || err);
       setIsListening(false);
       shouldBeListeningRef.current = false;
-      setSpeechError(
-        err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
-          ? 'Microphone permission was blocked. Please allow microphone access in your browser.'
-          : 'Could not access microphone hardware.'
-      );
+
+      const isNotFound =
+        err?.name === 'NotFoundError' ||
+        err?.name === 'DevicesNotFoundError' ||
+        String(err?.message || '').toLowerCase().includes('device not found') ||
+        String(err?.message || '').toLowerCase().includes('requested device not found');
+
+      const isBlocked =
+        err?.name === 'NotAllowedError' ||
+        err?.name === 'PermissionDeniedError' ||
+        err?.name === 'SecurityError';
+
+      const isBusy =
+        err?.name === 'NotReadableError' ||
+        err?.name === 'TrackStartError';
+
+      if (isNotFound) {
+        setSpeechError(
+          languageMode === 'ur'
+            ? 'اس ڈیوائس پر کوئی مائیکروفون نہیں ملا۔ برائے مہربانی مائیکروفون یا ہینڈز فری لگائیں، یا نیچے میسج لکھ کر بھیجیں۔'
+            : 'No microphone detected on your device. Please plug in a microphone or headset, or type your message in the chat.'
+        );
+      } else if (isBlocked) {
+        setSpeechError(
+          languageMode === 'ur'
+            ? 'مائیکروفون کی اجازت بلاک ہے۔ براؤزر کے ایڈریس بار سے اجازت آن کریں۔'
+            : 'Microphone permission was blocked. Please allow microphone access in your browser address bar.'
+        );
+      } else if (isBusy) {
+        setSpeechError(
+          'Microphone is currently in use by another application. Please close other audio apps and try again.'
+        );
+      } else {
+        setSpeechError('Could not access microphone hardware. You can type your request directly in the chat.');
+      }
     }
   };
 
@@ -427,11 +488,20 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           );
           shouldBeListeningRef.current = false;
           setIsListening(false);
+        } else if (e.error === 'audio-capture') {
+          console.warn('No audio capture device found.');
+          setSpeechError(
+            languageMode === 'ur'
+              ? 'مائیکروفون دستیاب نہیں ہے۔ برائے مہربانی مائیکروفون کنیکٹ کریں یا میسج ٹائپ کریں۔'
+              : 'No microphone detected on your device. Please plug in a microphone or headset, or type your message.'
+          );
+          shouldBeListeningRef.current = false;
+          setIsListening(false);
         } else if (e.error === 'no-speech') {
           // Chrome fires 'no-speech' after 3-4s silence: DO NOT stop! Keep listening!
           setSpeechStatus('Listening... (speak when ready)');
         } else if (e.error === 'network' || e.error === 'service-not-allowed') {
-          console.log('Browser speech service unavailable, switching to continuous Gemini audio...');
+          console.warn('Browser speech service unavailable, switching to continuous Gemini audio...');
           try {
             recognition.abort();
           } catch {}
@@ -445,7 +515,8 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           try {
             recognition.start();
           } catch {
-            startGeminiAudioRecording();
+            shouldBeListeningRef.current = false;
+            setIsListening(false);
           }
         } else {
           setIsListening(false);
@@ -464,21 +535,42 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
         setRecordingSeconds((prev) => prev + 1);
       }, 1000);
     } catch (e) {
-      console.warn('Web Speech start failed, falling back to Gemini continuous audio:', e);
+      console.warn('Web Speech start failed, attempting Gemini continuous audio:', e);
       startGeminiAudioRecording();
     }
   };
 
-  // Primary Voice Toggle handler
+  // Primary Voice Toggle handler with pre-flight hardware device check
   const startListening = async () => {
-    setSpeechError(null);
-    shouldAutoSendRef.current = false;
-    shouldBeListeningRef.current = true;
+    try {
+      setSpeechError(null);
+      shouldAutoSendRef.current = false;
 
-    if (voiceMode === 'gemini_audio') {
-      await startGeminiAudioRecording();
-    } else {
-      startWebSpeechListening();
+      // Check if an audioinput hardware device is present
+      const micPresent = await checkMicrophoneAvailable();
+      if (!micPresent) {
+        setIsListening(false);
+        shouldBeListeningRef.current = false;
+        setSpeechError(
+          languageMode === 'ur'
+            ? 'اس ڈیوائس پر کوئی مائیکروفون نہیں ملا۔ برائے مہربانی مائیکروفون لگائیں یا نیچے میسج لکھ کر بھیجیں۔'
+            : 'No microphone detected on your device. Please plug in a microphone or headset, or type your message in the chat.'
+        );
+        return;
+      }
+
+      shouldBeListeningRef.current = true;
+
+      if (voiceMode === 'gemini_audio') {
+        await startGeminiAudioRecording();
+      } else {
+        startWebSpeechListening();
+      }
+    } catch (err: any) {
+      console.warn('Could not start voice listening:', err);
+      setIsListening(false);
+      shouldBeListeningRef.current = false;
+      setSpeechError('Microphone could not be started. You can type your request directly in the chat.');
     }
   };
 
@@ -747,7 +839,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-bold tracking-tight text-white truncate">
-                  Gemini AI Stock Agent
+                  Stock Agent
                 </h2>
                 <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white border border-white/30">
                   Active Agent
@@ -777,7 +869,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
               title={
                 autoSpeechEnabled
                   ? 'Voice readout is ON. Tap to mute'
-                  : 'Voice readout is OFF. Tap to hear Gemini speak'
+                  : 'Voice readout is OFF. Tap to hear Stock Agent speak'
               }
               className={`min-h-[38px] min-w-[38px] p-2 rounded-xl border transition-colors cursor-pointer flex items-center justify-center ${
                 autoSpeechEnabled
@@ -803,7 +895,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
               type="button"
               onClick={onClose}
               className="min-h-[38px] min-w-[38px] p-2 text-white/80 hover:text-white bg-white/10 hover:bg-white/20 rounded-xl transition-colors cursor-pointer flex items-center justify-center ml-1"
-              aria-label="Close Gemini stock chat"
+              aria-label="Close Stock Agent chat"
             >
               <X className="w-5 h-5" />
             </button>
@@ -1106,7 +1198,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
               </div>
               <div className="bg-white border border-slate-200/90 rounded-2xl rounded-tl-xs px-4 py-3 shadow-2xs flex items-center gap-2 text-sm text-slate-600">
                 <Loader2 className="w-4 h-4 animate-spin text-emerald-600 shrink-0" />
-                <span className="animate-pulse">Gemini is processing your request...</span>
+                <span className="animate-pulse">Stock Agent is processing your request...</span>
               </div>
             </div>
           )}
@@ -1199,20 +1291,28 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           ))}
         </div>
 
-        {/* Speech Error Banner if microphone was blocked */}
+        {/* Speech Error Banner if microphone was unavailable or blocked */}
         {speechError && (
-          <div className="mx-3 sm:mx-4 mb-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-              <span className="truncate">{speechError}</span>
+          <div className="mx-3 sm:mx-4 mb-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start justify-between gap-3 shadow-2xs">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="font-semibold text-amber-950 break-words leading-relaxed">{speechError}</p>
+                <p className="text-[11px] text-amber-700 mt-0.5">
+                  Tip: You can always type your inventory requests directly in the input box below.
+                </p>
+              </div>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
-                onClick={startListening}
+                onClick={() => {
+                  setSpeechError(null);
+                  startListening();
+                }}
                 className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition-colors cursor-pointer text-[11px]"
               >
-                Try Again
+                Retry
               </button>
               <button
                 type="button"
@@ -1327,7 +1427,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                     ? 'Transcribing audio with Gemini AI...'
                     : 'Record voice: Continuous, never cuts off on pauses (Urdu & English)'
                 }
-                aria-label={isListening ? 'Stop recording' : 'Speak to Gemini via microphone'}
+                aria-label={isListening ? 'Stop recording' : 'Speak to Stock Agent via microphone'}
               >
                 {isTranscribing ? (
                   <Loader2 className="w-5 h-5 animate-spin text-amber-700" />
