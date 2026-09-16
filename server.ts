@@ -345,45 +345,48 @@ If no action is performed, output:
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
         return res.status(400).json({
-          error: 'GEMINI_API_KEY is not configured.',
+          error: 'GEMINI_API_KEY is not configured in Settings.',
         });
       }
 
       const { audioBase64, mimeType = 'audio/webm' } = req.body;
       if (!audioBase64) {
-        return res.status(400).json({ error: 'audioBase64 data is required.' });
+        return res.status(400).json({ error: 'Audio data is missing or empty.' });
       }
 
       // Ensure mimeType is clean (strip codec parameters like ;codecs=opus)
       const cleanMimeType = (mimeType || 'audio/webm').split(';')[0].trim();
-      const promptInstruction = 'Listen to this spoken audio carefully. The speaker may be speaking Pakistani Urdu (اردو), Roman Urdu, English, or a natural bilingual mix of Urdu and English as commonly spoken in stores, shops, and businesses (e.g., "Widget A mein 10 add kardo", "Doodh ke 5 dabbe sale ho gaye", "Stock kitna bacha hai?", "Kam stock wali cheezein dikhao", "نیا آئٹم شامل کرو", "What items are running low?"). Transcribe verbatim, accurately, and cleanly what the speaker said. Do NOT repeat words or stutter. Return ONLY the transcribed text. Do not add quotes, timestamps, or conversational commentary. If silence or no speech is heard, return empty string.';
+      const promptInstruction =
+        'Listen to this spoken audio carefully. The speaker may be speaking Pakistani Urdu (اردو), Roman Urdu, English, or a natural bilingual mix of Urdu and English as commonly spoken in stores, shops, and businesses (e.g., "Widget A mein 10 add kardo", "Doodh ke 5 dabbe sale ho gaye", "Stock kitna bacha hai?", "Kam stock wali cheezein dikhao", "نیا آئٹم شامل کرو", "What items are running low?"). Transcribe verbatim, accurately, and cleanly what the speaker said. Do NOT repeat words or stutter. Return ONLY the transcribed text. Do not add quotes, timestamps, or conversational commentary. If silence or no speech is heard, return empty string.';
 
       let transcript = '';
 
-      // Primary Attempt via SDK with gemini-2.5-flash
-      try {
-        const ai = new GoogleGenAI({
-          apiKey,
-          httpOptions: {
-            headers: {
-              'User-Agent': 'aistudio-build',
-            },
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
           },
-        });
+        },
+      });
 
+      // 1. Primary Attempt: gemini-3.5-transcribe
+      try {
         const sdkPromise = ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: [
-            {
-              inlineData: {
-                mimeType: cleanMimeType || 'audio/webm',
-                data: audioBase64,
+          model: 'gemini-3.5-transcribe',
+          contents: {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: cleanMimeType || 'audio/webm',
+                  data: audioBase64,
+                },
               },
-            },
-            {
-              text: promptInstruction,
-            },
-          ],
+              {
+                text: promptInstruction,
+              },
+            ],
+          },
         });
 
         const timeoutPromise = new Promise<never>((_, reject) =>
@@ -392,17 +395,16 @@ If no action is performed, output:
 
         const response: any = await Promise.race([sdkPromise, timeoutPromise]);
         transcript = response.text ? response.text.trim() : '';
-      } catch (sdkErr) {
-        console.warn('Primary audio SDK transcription had issue, trying REST fallback:', sdkErr);
+      } catch (transcribeErr: any) {
+        console.warn('gemini-3.5-transcribe error, trying multimodal flash fallback:', transcribeErr?.message);
 
-        // Fallback: Direct Google GenAI REST API
-        const restUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-        const restResponse = await fetch(restUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        // 2. Secondary Attempt: gemini-3.1-flash-lite
+        try {
+          const fallbackRes = await ai.models.generateContent({
+            model: 'gemini-3.1-flash-lite',
             contents: [
               {
+                role: 'user',
                 parts: [
                   {
                     inlineData: {
@@ -416,15 +418,11 @@ If no action is performed, output:
                 ],
               },
             ],
-            generationConfig: { temperature: 0.2 },
-          }),
-        });
-
-        if (restResponse.ok) {
-          const restData: any = await restResponse.json();
-          transcript = restData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-        } else {
-          throw sdkErr;
+          });
+          transcript = fallbackRes.text ? fallbackRes.text.trim() : '';
+        } catch (flashErr: any) {
+          console.error('Flash fallback also had issue:', flashErr?.message);
+          throw new Error(transcribeErr?.message || flashErr?.message || 'Audio transcription failed on server.');
         }
       }
 
@@ -432,7 +430,7 @@ If no action is performed, output:
     } catch (error: any) {
       console.error('Error in /api/gemini/transcribe-audio:', error);
       return res.status(500).json({
-        error: error?.message || 'Failed to transcribe audio.',
+        error: error?.message || 'Failed to transcribe audio on the server.',
       });
     }
   });

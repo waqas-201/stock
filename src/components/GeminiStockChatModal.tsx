@@ -114,6 +114,8 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const liveTranscriptRef = useRef<string>('');
   const shouldAutoSubmitRef = useRef(false);
 
   // Helper to format recording timer display (e.g. 00:05)
@@ -288,23 +290,32 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       streamRef.current = null;
     }
 
-    // 4. Stop audio visualizer
+    // 4. Stop speech recognition
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+      recognitionRef.current = null;
+    }
+    liveTranscriptRef.current = '';
+
+    // 5. Stop audio visualizer
     stopAudioVisualization();
 
-    // 5. Cancel any speech
+    // 6. Cancel any speech
     if (synthRef.current) {
       try {
         synthRef.current.cancel();
       } catch {}
     }
 
-    // 6. Reset states
+    // 7. Reset states
     setIsListening(false);
     setIsTranscribing(false);
     setSpeakingMessageId(null);
     setSpeechError(null);
 
-    // 7. Exit back to inventory table
+    // 8. Exit back to inventory table
     onClose();
   }, [onClose, stopAudioVisualization]);
 
@@ -461,6 +472,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
 
     setSpeechError(null);
     setLatestTranscript('');
+    liveTranscriptRef.current = '';
 
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       setSpeechError('Microphone recording is not supported on this browser.');
@@ -468,6 +480,55 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
     }
 
     try {
+      // 1. Concurrently start Web Speech API if supported for zero-latency live transcription
+      const SpeechRec =
+        typeof window !== 'undefined'
+          ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+          : null;
+
+      if (SpeechRec) {
+        try {
+          const recognition = new SpeechRec();
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          // Set language based on selected mode
+          recognition.lang =
+            languageMode === 'ur'
+              ? 'ur-PK'
+              : languageMode === 'en'
+              ? 'en-US'
+              : 'ur-PK';
+
+          recognition.onresult = (event: any) => {
+            let interim = '';
+            let final = '';
+            for (let i = 0; i < event.results.length; ++i) {
+              if (event.results[i].isFinal) {
+                final += event.results[i][0].transcript + ' ';
+              } else {
+                interim += event.results[i][0].transcript;
+              }
+            }
+            const recognized = (final + interim).trim();
+            if (recognized) {
+              liveTranscriptRef.current = recognized;
+              setLatestTranscript(recognized);
+              setAgentStatusText(`Listening: "${recognized}"`);
+            }
+          };
+
+          recognition.onerror = (e: any) => {
+            console.warn('Browser SpeechRecognition note:', e?.error);
+            // Non-fatal because MediaRecorder will send audio to Gemini transcribe
+          };
+
+          recognition.start();
+          recognitionRef.current = recognition;
+        } catch (recErr) {
+          console.warn('SpeechRecognition initialization note:', recErr);
+        }
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -552,6 +613,25 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           streamRef.current = null;
         }
 
+        // Stop browser speech recognition if still active
+        if (recognitionRef.current) {
+          try {
+            recognitionRef.current.stop();
+          } catch {}
+          recognitionRef.current = null;
+        }
+
+        // 1. Check if browser SpeechRecognition already captured live transcript accurately
+        const liveText = liveTranscriptRef.current.trim();
+        if (liveText && liveText.length > 1) {
+          setLatestTranscript(liveText);
+          setInputText(liveText);
+          setAgentStatusText(`Heard: "${liveText}"`);
+          // Automatically execute the voice command
+          await handleSendMessage(liveText, true);
+          return;
+        }
+
         // If recording was cancelled, audio chunks are empty
         if (audioChunksRef.current.length === 0) {
           setAgentStatusText('Recording cancelled');
@@ -587,7 +667,15 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                 }),
               });
 
-              const data = await res.json();
+              let data: any = {};
+              try {
+                data = await res.json();
+              } catch {}
+
+              if (!res.ok) {
+                throw new Error(data?.error || `Server returned error status ${res.status}`);
+              }
+
               const transcript = data?.transcript ? data.transcript.trim() : '';
 
               if (transcript) {
@@ -597,19 +685,24 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                 // Automatically execute the voice command
                 await handleSendMessage(transcript, true);
               } else {
-                setSpeechError('Could not detect clear speech. Please tap to speak again.');
+                setSpeechError('Could not detect clear speech in the audio. Please tap to speak again.');
                 setAgentStatusText('Ready to listen');
               }
             } catch (err: any) {
               console.error('Transcription error:', err);
-              setSpeechError('Could not transcribe audio. Please check network connection.');
+              const isFetchFailed = err?.message?.toLowerCase().includes('failed to fetch');
+              const message = isFetchFailed
+                ? 'Could not connect to the inventory service. Please check your network connection.'
+                : (err?.message || 'Could not transcribe audio. Please tap to speak again.');
+              setSpeechError(message);
               setAgentStatusText('Ready to listen');
             } finally {
               setIsTranscribing(false);
             }
           };
-        } catch (readErr) {
+        } catch (readErr: any) {
           console.error('Blob reading error:', readErr);
+          setSpeechError(readErr?.message || 'Failed to read recorded audio file.');
           setIsTranscribing(false);
           setAgentStatusText('Ready to listen');
         }
@@ -647,6 +740,11 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
 
   // Mark Done: Immediately stops recording, releases mic, and triggers transcription
   const markDoneAndSubmit = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+    }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       try {
         mediaRecorderRef.current.stop();
@@ -659,6 +757,13 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
   // Cancel Recording: Discards audio chunks, stops tracks, leaves without submitting
   const cancelRecording = () => {
     audioChunksRef.current = [];
+    liveTranscriptRef.current = '';
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+      recognitionRef.current = null;
+    }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       try {
         mediaRecorderRef.current.stop();
