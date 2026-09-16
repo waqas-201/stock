@@ -28,7 +28,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { StockItem, StockFilter, GeminiAgentAction } from '../types';
-import { processStockChat, processAudioTranscription } from '../lib/geminiLogic';
+import { processStockChat, processAudioTranscription, cleanSpokenTranscript } from '../lib/geminiLogic';
 
 export function isUrduText(text: string): boolean {
   return /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(text);
@@ -98,7 +98,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
   const [autoSpeechEnabled, setAutoSpeechEnabled] = useState(true);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [speechError, setSpeechError] = useState<string | null>(null);
-  const [languageMode, setLanguageMode] = useState<'auto' | 'ur' | 'roman_ur' | 'en'>('auto');
+  const [languageMode, setLanguageMode] = useState<'en' | 'auto' | 'roman_ur' | 'ur'>('en');
 
   // Real-time audio frequency visualizer state
   const [audioLevel, setAudioLevel] = useState<number>(0); // 0 to 1
@@ -118,6 +118,11 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
   const recognitionRef = useRef<any>(null);
   const liveTranscriptRef = useRef<string>('');
   const shouldAutoSubmitRef = useRef(false);
+  const isListeningRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    isListeningRef.current = isListening;
+  }, [isListening]);
 
   // Helper to format recording timer display (e.g. 00:05)
   const formatTimer = (secs: number) => {
@@ -151,10 +156,11 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       const sampleItem = items.length > 0 ? items[0].itemName : 'Widget A';
 
       let welcome = `👋 Hello! I'm your **Stock Voice Agent**, connected to **${totalCount} products**.`;
-      welcome += `\n\n🇵🇰 **Speak calmly in Urdu, Roman Urdu, or English:**\n`;
-      welcome += `• *"Hey, ${sampleItem} increased by 10 today"* / *"${sampleItem} mein 10 add kardo"*\n`;
-      welcome += `• *"${sampleItem} کے 5 ڈبے فروخت ہو گئے"* (Deduct 5)\n`;
-      welcome += `• *"اسٹاک کتنا بچا ہے؟"* / *"What items are low on stock?"*`;
+      welcome += `\n\n🎙️ **Speak your inventory command in native English:**\n`;
+      welcome += `• *"Add 10 units to ${sampleItem}"*\n`;
+      welcome += `• *"Deduct 5 boxes from ${sampleItem}"*\n`;
+      welcome += `• *"What items are running low on stock?"*\n`;
+      welcome += `• *"What is our total inventory count?"*`;
 
       if (outCount > 0 || lowCount > 0) {
         welcome += `\n\n⚠️ **Stock Status**: **${lowCount} low stock** and **${outCount} out of stock** items.`;
@@ -167,10 +173,10 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           text: welcome,
           timestamp: new Date(),
           suggestions: [
-            items.length > 0 ? `${items[0].itemName} mein 10 add kardo` : 'اسٹاک کی صورتحال بتاؤ',
-            'اسٹاک کتنا بچا ہے؟ (Total Stock Report)',
-            'کم اسٹاک والی اشیاء دکھاؤ (Low Stock Items)',
-            'Show out of stock items',
+            items.length > 0 ? `Add 10 to ${items[0].itemName}` : 'Check total inventory',
+            'What items are low on stock?',
+            items.length > 0 ? `Deduct 5 from ${items[0].itemName}` : 'Show out of stock items',
+            'Give me a stock summary',
           ],
         },
       ]);
@@ -244,6 +250,15 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           }
         } else {
           utterance.lang = 'en-US';
+          if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+            const voices = window.speechSynthesis.getVoices?.() || [];
+            const englishVoice = voices.find(
+              (v) => v.lang === 'en-US' || v.lang.startsWith('en')
+            );
+            if (englishVoice) {
+              utterance.voice = englishVoice;
+            }
+          }
         }
 
         utterance.onstart = () => {
@@ -329,11 +344,13 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
 
   // Send message to Gemini server-side endpoint
   const handleSendMessage = async (textToSend?: string, isVoice: boolean = false) => {
-    const query = (textToSend !== undefined ? textToSend : inputText).trim();
+    const rawQuery = (textToSend !== undefined ? textToSend : inputText).trim();
+    const query = isVoice ? cleanSpokenTranscript(rawQuery) : rawQuery;
     if (!query || isLoading) return;
 
     setInputText('');
     setSpeechError(null);
+    setLatestTranscript(query);
 
     const userMessage: Message = {
       id: `user-${Date.now()}`,
@@ -524,26 +541,31 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
     if (SpeechRec) {
       try {
         const recognition = new SpeechRec();
-        recognition.continuous = true;
+        // Use continuous = false on voice assistant so Android Chrome processes the command cleanly
+        // without accumulating duplicate partial revisions into event.results
+        recognition.continuous = false;
         recognition.interimResults = true;
-        recognition.lang =
-          languageMode === 'ur'
-            ? 'ur-PK'
-            : languageMode === 'en'
-            ? 'en-US'
-            : 'ur-PK';
+        recognition.lang = languageMode === 'ur' ? 'ur-PK' : 'en-US';
 
         recognition.onresult = (event: any) => {
-          let interim = '';
-          let final = '';
-          for (let i = 0; i < event.results.length; ++i) {
-            if (event.results[i].isFinal) {
-              final += event.results[i][0].transcript + ' ';
-            } else {
-              interim += event.results[i][0].transcript;
+          let latestChunk = '';
+          if (event.results && event.results.length > 0) {
+            const lastResult = event.results[event.results.length - 1];
+            if (lastResult && lastResult[0] && lastResult[0].transcript) {
+              latestChunk = lastResult[0].transcript;
             }
           }
-          const recognized = (final + interim).trim();
+
+          if (!latestChunk) {
+            const chunks: string[] = [];
+            for (let i = 0; i < event.results.length; ++i) {
+              const text = event.results[i]?.[0]?.transcript?.trim();
+              if (text) chunks.push(text);
+            }
+            latestChunk = chunks.join(' ');
+          }
+
+          const recognized = cleanSpokenTranscript(latestChunk);
           if (recognized) {
             liveTranscriptRef.current = recognized;
             setLatestTranscript(recognized);
@@ -557,12 +579,22 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           if (e?.error === 'not-allowed') {
             setSpeechError('Microphone access was denied. Please allow microphone permission.');
             setIsListening(false);
+            isListeningRef.current = false;
+          }
+        };
+
+        recognition.onend = () => {
+          // When user pauses speaking in continuous = false mode, finalize and submit cleanly
+          const finalCommand = cleanSpokenTranscript(liveTranscriptRef.current);
+          if (isListeningRef.current && finalCommand.length > 1) {
+            markDoneAndSubmit();
           }
         };
 
         recognition.start();
         recognitionRef.current = recognition;
         setIsListening(true);
+        isListeningRef.current = true;
         setRecordingSeconds(0);
         setAgentStatusText('Listening... Speak your command in Urdu or English');
 
@@ -679,7 +711,8 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
         }
 
         // 1. Check if browser SpeechRecognition already captured live transcript accurately
-        const liveText = liveTranscriptRef.current.trim();
+        const rawLive = liveTranscriptRef.current.trim();
+        const liveText = cleanSpokenTranscript(rawLive);
         if (liveText && liveText.length > 1) {
           setLatestTranscript(liveText);
           setInputText(liveText);
@@ -773,7 +806,8 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                 }
               }
 
-              const transcript = data?.transcript ? data.transcript.trim() : '';
+              const rawTranscript = data?.transcript ? data.transcript.trim() : '';
+              const transcript = cleanSpokenTranscript(rawTranscript);
 
               if (transcript) {
                 setLatestTranscript(transcript);
@@ -862,7 +896,8 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       recognitionRef.current = null;
     }
 
-    const liveText = liveTranscriptRef.current.trim();
+    const rawText = liveTranscriptRef.current.trim();
+    const liveText = cleanSpokenTranscript(rawText);
     if (liveText && liveText.length > 0) {
       setLatestTranscript(liveText);
       setInputText(liveText);
@@ -876,6 +911,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
 
   // Cancel Recording: Discards audio chunks, stops tracks, leaves without submitting
   const cancelRecording = () => {
+    isListeningRef.current = false;
     audioChunksRef.current = [];
     liveTranscriptRef.current = '';
     if (recognitionRef.current) {
@@ -1045,16 +1081,16 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
         <div className="bg-slate-950/80 px-4 py-2 flex items-center justify-between gap-2 border-b border-slate-800/80 text-xs shrink-0">
           <div className="flex items-center gap-1.5 text-slate-400 font-medium text-[11px]">
             <Languages className="w-3.5 h-3.5 text-teal-400" />
-            <span>Language / زبان:</span>
+            <span>Voice Language:</span>
           </div>
 
           <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
             {(
               [
-                { id: 'auto', label: 'Auto (اردو / Roman / EN)' },
-                { id: 'ur', label: 'اردو (Urdu)' },
+                { id: 'en', label: 'English (Native)' },
+                { id: 'auto', label: 'Auto Detect' },
                 { id: 'roman_ur', label: 'Roman Urdu' },
-                { id: 'en', label: 'English' },
+                { id: 'ur', label: 'اردو' },
               ] as const
             ).map((lang) => (
               <button

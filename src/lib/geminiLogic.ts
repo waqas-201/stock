@@ -280,7 +280,7 @@ export async function processAudioTranscription(params: {
 
   const cleanMimeType = (mimeType || 'audio/webm').split(';')[0].trim();
   const promptInstruction =
-    'Listen to this spoken audio carefully. The speaker may be speaking Pakistani Urdu (اردو), Roman Urdu, English, or a natural bilingual mix of Urdu and English as commonly spoken in stores, shops, and businesses (e.g., "Widget A mein 10 add kardo", "Doodh ke 5 dabbe sale ho gaye", "Stock kitna bacha hai?", "Kam stock wali cheezein dikhao", "نیا آئٹم شامل کرو", "What items are running low?"). Transcribe verbatim, accurately, and cleanly what the speaker said. Do NOT repeat words or stutter. Return ONLY the transcribed text. Do not add quotes, timestamps, or conversational commentary. If silence or no speech is heard, return empty string.';
+    'Listen to this spoken voice audio carefully. Transcribe verbatim, accurately, and cleanly what the speaker said in standard English (or Roman Urdu/Urdu if spoken). Prioritize standard English inventory commands and queries (e.g. "Add 10 units to Milk", "What items are low on stock?", "Deduct 5 boxes from Widget A", "What is our total inventory?"). Do NOT repeat words or stutter. Return ONLY the transcribed sentence without quotes, timestamps, or conversational commentary. If silence or inaudible noise, return an empty string.';
 
   const ai = new GoogleGenAI({
     apiKey,
@@ -317,7 +317,7 @@ export async function processAudioTranscription(params: {
       response?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
       '';
 
-    return { transcript };
+    return { transcript: cleanSpokenTranscript(transcript) };
   } catch (err: any) {
     console.warn('gemini-2.5-flash transcription notice, trying gemini-3.1-flash-lite fallback:', err?.message);
 
@@ -346,6 +346,62 @@ export async function processAudioTranscription(params: {
       fallbackRes?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
       '';
 
-    return { transcript };
+    return { transcript: cleanSpokenTranscript(transcript) };
   }
 }
+
+/**
+ * Strips stuttering, repeated words, and progressive speech recognition artifacts
+ * Handles Urdu (اردو), Roman Urdu, and English cleanly without breaking legitimate phrases.
+ */
+export function cleanSpokenTranscript(raw: string): string {
+  if (!raw || typeof raw !== 'string') return '';
+  let text = raw.trim();
+
+  // Remove quotation marks that Gemini or speech APIs occasionally wrap around text
+  text = text.replace(/^["'«»“”„]+|["'«»“”„]+$/g, '').trim();
+
+  // 1. Detect and collapse progressive speech building
+  // Example from Android Chrome:
+  // "سٹاک سٹاک میں سٹاک میں کیا سٹاک میں کیا کیا پڑا ہے"
+  // When an engine appends cumulative updates, the last trailing clause is the complete sentence.
+  const words = text.split(/\s+/);
+  if (words.length > 3) {
+    for (let phraseLen = Math.floor(words.length / 2); phraseLen >= 2; phraseLen--) {
+      const trailingClause = words.slice(-phraseLen).join(' ');
+      const preceding = words.slice(0, -phraseLen).join(' ');
+      if (preceding.includes(trailingClause)) {
+        text = trailingClause;
+        break;
+      }
+    }
+  }
+
+  // 2. Remove 3+ consecutive duplicate words (e.g., "سٹاک سٹاک سٹاک" -> "سٹاک", "milk milk milk" -> "milk")
+  // Allows natural 2-word idioms like "کیا کیا" in Urdu, but collapses 3 or more:
+  text = text.replace(/(\b\S+\b)(?:\s+\1){2,}/gi, '$1');
+
+  // 3. Remove multi-word repeated phrases (e.g., "سٹاک میں کیا پڑا ہے سٹاک میں کیا پڑا ہے" -> "سٹاک میں کیا پڑا ہے")
+  let currentWords = text.trim().split(/\s+/);
+  let changed = true;
+  let iterations = 0;
+  while (changed && iterations < 10) {
+    changed = false;
+    iterations++;
+    for (let phraseLen = Math.floor(currentWords.length / 2); phraseLen >= 2; phraseLen--) {
+      for (let i = 0; i <= currentWords.length - phraseLen * 2; i++) {
+        const p1 = currentWords.slice(i, i + phraseLen).join(' ').toLowerCase();
+        const p2 = currentWords.slice(i + phraseLen, i + phraseLen * 2).join(' ').toLowerCase();
+        if (p1 === p2) {
+          currentWords.splice(i + phraseLen, phraseLen);
+          changed = true;
+          break;
+        }
+      }
+      if (changed) break;
+    }
+  }
+
+  return currentWords.join(' ').trim();
+}
+
