@@ -21,6 +21,7 @@ import {
   Users,
   Sparkles,
   Tag,
+  Mic,
 } from 'lucide-react';
 import type { User as FirebaseUser } from '../lib/firebase';
 import { OperatorProfile, StockItem } from '../types';
@@ -295,17 +296,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span>Export Excel</span>
               </button>
 
-              {/* Talk to Stock Agent Desktop Button */}
+              {/* Talk to Voice Stock Agent Desktop Button */}
               {onOpenGeminiChat && (
                 <button
                   id="btn-navbar-gemini-chat"
                   type="button"
                   onClick={onOpenGeminiChat}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 rounded-xl shadow-xs transition-all cursor-pointer ring-1 ring-emerald-500/30"
-                  title="Talk with Stock Agent about your stock"
+                  title="Talk with Voice Stock Agent"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
-                  <span>Stock Agent</span>
+                  <Mic className="w-3.5 h-3.5 text-emerald-200" />
+                  <span>Voice Agent</span>
                 </button>
               )}
 
@@ -331,11 +332,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                   type="button"
                   onClick={onOpenGeminiChat}
                   className="min-h-[38px] px-2.5 py-1.5 inline-flex items-center justify-center gap-1 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-700 rounded-xl shadow-xs cursor-pointer active:scale-95 transition-transform"
-                  title="Talk with Stock Agent about your stock"
-                  aria-label="Talk with Stock Agent"
+                  title="Talk with Voice Stock Agent"
+                  aria-label="Talk with Voice Stock Agent"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
-                  <span>Agent</span>
+                  <Mic className="w-3.5 h-3.5 text-emerald-200" />
+                  <span>Voice</span>
                 </button>
               )}
 

@@ -97,8 +97,8 @@ service cloud.firestore {
       return data.id is string && isValidId(data.id)
         && data.timestamp is string && data.timestamp.size() <= 50
         && data.action is string && data.action.size() >= 1 && data.action.size() <= 50
-        && data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 200
-        && (!('details' in data) || data.details == null || (data.details is string && data.details.size() <= 2000))
+        && data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 500
+        && (!('details' in data) || data.details == null || (data.details is string && data.details.size() <= 3000))
         && data.itemId is string && isValidId(data.itemId)
         && data.itemName is string && data.itemName.size() >= 1 && data.itemName.size() <= 200
         && data.unit is string && data.unit.size() >= 1 && data.unit.size() <= 50
@@ -107,7 +107,7 @@ service cloud.firestore {
         && (!('delta' in data) || data.delta == null || data.delta is number)
         && data.performedBy is string && data.performedBy.size() >= 1 && data.performedBy.size() <= 100
         && (!('userEmail' in data) || data.userEmail == null || (data.userEmail is string && data.userEmail.size() <= 100))
-        && (!('userPhotoURL' in data) || data.userPhotoURL == null || (data.userPhotoURL is string && data.userPhotoURL.size() <= 500))
+        && (!('userPhotoURL' in data) || data.userPhotoURL == null || (data.userPhotoURL is string && data.userPhotoURL.size() <= 1000))
         && (!('companyId' in data) || data.companyId == null || (data.companyId is string && data.companyId.size() <= 128))
         && (!('companyName' in data) || data.companyName == null || (data.companyName is string && data.companyName.size() <= 200))
         && (!('userId' in data) || data.userId == null || (data.userId is string && data.userId.size() <= 128));
@@ -213,7 +213,7 @@ service cloud.firestore {
         && isValidId(labelId);
     }
 
-    // 3. Shared Tamper-Proof Audit Logs collection: append-only
+    // 3. Shared Tamper-Proof Audit Logs collection: append-only with idempotent sync
     match /audit_logs/{logId} {
       allow get, list: if isSignedIn();
 
@@ -222,8 +222,17 @@ service cloud.firestore {
         && incoming().id == logId
         && isValidAuditLog(incoming());
 
-      // Audit logs are strictly immutable: no user can erase or tamper with history
-      allow update, delete: if false;
+      // Allow idempotent write/resync if log identity, timestamp, and item are unchanged, keeping history immutable
+      allow update: if isSignedIn()
+        && isValidId(logId)
+        && incoming().id == logId
+        && incoming().id == existing().id
+        && incoming().timestamp == existing().timestamp
+        && incoming().itemId == existing().itemId
+        && isValidAuditLog(incoming());
+
+      // Audit logs are strictly immutable: no user can erase records
+      allow delete: if false;
     }
 
     // 4. User Settings collection

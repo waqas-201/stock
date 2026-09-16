@@ -133,15 +133,19 @@ When the user speaks or commands stock operations (in English, Urdu script, or R
 - "Show low stock items" / "Kam stock wali cheezein dikhao" / "کم اسٹاک والی اشیاء دکھاؤ"
 - "Search for printer" / "Printer dhoondo" / "پرنٹر تلاش کرو"
 
-You MUST execute the action(s) in your [ACTIONS] block and write a polite, confirmation message in your [REPLY] block.
+You MUST execute the action(s) in your [ACTIONS] block and write a polite, concise confirmation message in your [REPLY] block.
 
-If the user asks an informational question (e.g., "What is low in stock?", "Kitna stock bacha hai?", "اسٹاک کی کیا صورتحال ہے؟"), provide a direct answer and output an empty array for [ACTIONS].
+CRITICAL VOICE & CONVERSATION RULES:
+- Listen and speak calmly, naturally, and concisely, like a top-tier voice assistant.
+- NEVER parrot or repeat what the user just said (e.g. do NOT say "You told me to add 10 to Widget A, so I am adding 10 to Widget A").
+- State the outcome directly and smoothly in 1 single, friendly sentence (e.g., "Added 10 units to Widget A; total stock is now 45." or "5 boxes deducted from Milk. Remaining: 12.").
+- If asked an informational question (e.g., "What is low in stock?", "Kitna stock bacha hai?", "اسٹاک کی کیا صورتحال ہے؟"), provide a calm, direct, clear answer in 1-2 sentences without repeating sentences. Output an empty array for [ACTIONS].
 
 STRICT OUTPUT FORMAT:
 You must strictly format your entire response using the following three sections:
 
 [REPLY]
-Your natural conversational reply to the user in their language (English, Urdu, or Roman Urdu). If an action was taken, clearly confirm what was changed with exact numbers.
+Your natural, calm, concise reply to the user in their language (English, Urdu, or Roman Urdu). Keep it to 1-2 direct sentences.
 
 [ACTIONS]
 [
@@ -335,7 +339,7 @@ If no action is performed, output:
     }
   });
 
-  // Gemini AI Audio Transcription Endpoint (Universal microphone fallback)
+  // Gemini AI Audio Transcription Endpoint (Universal WhatsApp/ChatGPT style speech-to-text)
   app.post('/api/gemini/transcribe-audio', async (req, res) => {
     try {
       const apiKey = process.env.GEMINI_API_KEY;
@@ -352,24 +356,78 @@ If no action is performed, output:
 
       // Ensure mimeType is clean (strip codec parameters like ;codecs=opus)
       const cleanMimeType = (mimeType || 'audio/webm').split(';')[0].trim();
+      const promptInstruction = 'Listen to this spoken audio carefully. The speaker may be speaking Pakistani Urdu (اردو), Roman Urdu, English, or a natural bilingual mix of Urdu and English as commonly spoken in stores, shops, and businesses (e.g., "Widget A mein 10 add kardo", "Doodh ke 5 dabbe sale ho gaye", "Stock kitna bacha hai?", "Kam stock wali cheezein dikhao", "نیا آئٹم شامل کرو", "What items are running low?"). Transcribe verbatim, accurately, and cleanly what the speaker said. Do NOT repeat words or stutter. Return ONLY the transcribed text. Do not add quotes, timestamps, or conversational commentary. If silence or no speech is heard, return empty string.';
 
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: [
-          {
-            inlineData: {
-              mimeType: cleanMimeType || 'audio/webm',
-              data: audioBase64,
+      let transcript = '';
+
+      // Primary Attempt via SDK with gemini-2.5-flash
+      try {
+        const ai = new GoogleGenAI({
+          apiKey,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
             },
           },
-          {
-            text: 'Listen to this spoken audio carefully. The speaker may be speaking Pakistani Urdu (اردو), Roman Urdu, English, or a natural bilingual mix of Urdu and English as commonly spoken in Pakistani stores, shops, and warehouses (e.g., "Widget A mein 10 add kardo", "Doodh ke 5 dabbe sale ho gaye", "Stock kitna bacha hai?", "Kam stock wali cheezein dikhao", "نیا آئٹم شامل کرو", "What items are running low?"). Transcribe verbatim and accurately what the speaker said. If the speaker spoke in Urdu, transcribe accurately in Urdu script (اردو) or Roman Urdu matching the clearest phonetic representation. Return ONLY the transcribed text. Do not add conversational commentary, quotation marks, or explanations. If no speech is detected, return an empty string.',
-          },
-        ],
-      });
+        });
 
-      const transcript = response.text ? response.text.trim() : '';
+        const sdkPromise = ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: [
+            {
+              inlineData: {
+                mimeType: cleanMimeType || 'audio/webm',
+                data: audioBase64,
+              },
+            },
+            {
+              text: promptInstruction,
+            },
+          ],
+        });
+
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Audio transcription timed out after 12s')), 12000)
+        );
+
+        const response: any = await Promise.race([sdkPromise, timeoutPromise]);
+        transcript = response.text ? response.text.trim() : '';
+      } catch (sdkErr) {
+        console.warn('Primary audio SDK transcription had issue, trying REST fallback:', sdkErr);
+
+        // Fallback: Direct Google GenAI REST API
+        const restUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+        const restResponse = await fetch(restUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType: cleanMimeType || 'audio/webm',
+                      data: audioBase64,
+                    },
+                  },
+                  {
+                    text: promptInstruction,
+                  },
+                ],
+              },
+            ],
+            generationConfig: { temperature: 0.2 },
+          }),
+        });
+
+        if (restResponse.ok) {
+          const restData: any = await restResponse.json();
+          transcript = restData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+        } else {
+          throw sdkErr;
+        }
+      }
+
       return res.json({ transcript });
     } catch (error: any) {
       console.error('Error in /api/gemini/transcribe-audio:', error);
