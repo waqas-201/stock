@@ -21,21 +21,37 @@ async function startServer() {
     next();
   });
 
-  app.use(express.json({ limit: '10mb' }));
+  app.use(express.json({ limit: '25mb' }));
 
   // Health check
-  app.get('/api/health', (req, res) => {
+  app.get(['/api/health', '/api/ping'], (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
   // Check Gemini configuration status
-  app.get('/api/gemini/status', (req, res) => {
+  app.get(['/api/gemini/status', '/api/status'], (req, res) => {
     const isConfigured = Boolean(process.env.GEMINI_API_KEY);
     res.json({ configured: isConfigured });
   });
 
   // Gemini AI Stock Conversation Endpoint
-  app.post('/api/gemini/stock-chat', async (req, res) => {
+  const stockChatRoutes = [
+    '/api/gemini/stock-chat',
+    '/api/gemini/chat',
+    '/api/stock-chat',
+    '/api/chat',
+  ];
+
+  app.get(stockChatRoutes, (req, res) => {
+    res.json({
+      status: 'ok',
+      endpoint: '/api/gemini/stock-chat',
+      method: 'POST',
+      description: 'AI Stock Conversation Agent with inventory action execution',
+    });
+  });
+
+  app.post(stockChatRoutes, async (req, res) => {
     try {
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
@@ -340,7 +356,23 @@ If no action is performed, output:
   });
 
   // Gemini AI Audio Transcription Endpoint (Universal WhatsApp/ChatGPT style speech-to-text)
-  app.post('/api/gemini/transcribe-audio', async (req, res) => {
+  const transcribeRoutes = [
+    '/api/gemini/transcribe-audio',
+    '/api/gemini/transcribe',
+    '/api/transcribe-audio',
+    '/api/transcribe',
+  ];
+
+  app.get(transcribeRoutes, (req, res) => {
+    res.json({
+      status: 'ok',
+      endpoint: '/api/gemini/transcribe-audio',
+      method: 'POST',
+      description: 'Audio speech-to-text transcription service supporting Urdu and English',
+    });
+  });
+
+  app.post(transcribeRoutes, async (req, res) => {
     try {
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
@@ -370,23 +402,26 @@ If no action is performed, output:
         },
       });
 
-      // 1. Primary Attempt: gemini-3.5-transcribe
+      // 1. Primary Attempt: gemini-2.5-flash (fastest multimodal audio understanding & Urdu recognition)
       try {
         const sdkPromise = ai.models.generateContent({
-          model: 'gemini-3.5-transcribe',
-          contents: {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: cleanMimeType || 'audio/webm',
-                  data: audioBase64,
+          model: 'gemini-2.5-flash',
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: cleanMimeType || 'audio/webm',
+                    data: audioBase64,
+                  },
                 },
-              },
-              {
-                text: promptInstruction,
-              },
-            ],
-          },
+                {
+                  text: promptInstruction,
+                },
+              ],
+            },
+          ],
         });
 
         const timeoutPromise = new Promise<never>((_, reject) =>
@@ -394,13 +429,16 @@ If no action is performed, output:
         );
 
         const response: any = await Promise.race([sdkPromise, timeoutPromise]);
-        transcript = response.text ? response.text.trim() : '';
-      } catch (transcribeErr: any) {
-        console.warn('gemini-3.5-transcribe error, trying multimodal flash fallback:', transcribeErr?.message);
+        transcript =
+          response?.text?.trim() ||
+          response?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+          '';
+      } catch (primaryErr: any) {
+        console.warn('gemini-2.5-flash audio transcription notice:', primaryErr?.message);
 
         // 2. Secondary Attempt: gemini-3.1-flash-lite
         try {
-          const fallbackRes = await ai.models.generateContent({
+          const fallbackRes: any = await ai.models.generateContent({
             model: 'gemini-3.1-flash-lite',
             contents: [
               {
@@ -419,10 +457,39 @@ If no action is performed, output:
               },
             ],
           });
-          transcript = fallbackRes.text ? fallbackRes.text.trim() : '';
+          transcript =
+            fallbackRes?.text?.trim() ||
+            fallbackRes?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+            '';
         } catch (flashErr: any) {
-          console.error('Flash fallback also had issue:', flashErr?.message);
-          throw new Error(transcribeErr?.message || flashErr?.message || 'Audio transcription failed on server.');
+          console.warn('gemini-3.1-flash-lite notice:', flashErr?.message);
+
+          // 3. Third Attempt: gemini-3.5-transcribe
+          try {
+            const transcribeRes: any = await ai.models.generateContent({
+              model: 'gemini-3.5-transcribe',
+              contents: {
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType: cleanMimeType || 'audio/webm',
+                      data: audioBase64,
+                    },
+                  },
+                  {
+                    text: promptInstruction,
+                  },
+                ],
+              },
+            });
+            transcript =
+              transcribeRes?.text?.trim() ||
+              transcribeRes?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+              '';
+          } catch (tErr: any) {
+            console.error('All transcription models failed:', tErr?.message);
+            throw new Error(primaryErr?.message || flashErr?.message || tErr?.message || 'Audio transcription failed on server.');
+          }
         }
       }
 
@@ -433,6 +500,20 @@ If no action is performed, output:
         error: error?.message || 'Failed to transcribe audio on the server.',
       });
     }
+  });
+
+  // Explicit API 404 handler - prevents returning HTML for non-existent API routes
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({
+      error: `API endpoint not found: ${req.method} ${req.path}`,
+      status: 404,
+      availableEndpoints: [
+        'GET  /api/health',
+        'GET  /api/gemini/status',
+        'POST /api/gemini/stock-chat',
+        'POST /api/gemini/transcribe-audio',
+      ],
+    });
   });
 
   // Vite middleware for development

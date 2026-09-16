@@ -353,18 +353,26 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
         parts: [{ text: m.text }],
       }));
 
-      const res = await fetch('/api/gemini/stock-chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: query,
-          history: historyPayload,
-          stockItems: items,
-          languageMode,
-        }),
+      const chatPayload = JSON.stringify({
+        message: query,
+        history: historyPayload,
+        stockItems: items,
+        languageMode,
       });
+
+      let res = await fetch('/api/gemini/stock-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: chatPayload,
+      });
+
+      if (res.status === 404) {
+        res = await fetch('/api/stock-chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: chatPayload,
+        });
+      }
 
       let data: any = {};
       try {
@@ -372,6 +380,9 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       } catch {}
 
       if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error('AI service endpoint not found (404). Please ensure the inventory backend is running.');
+        }
         throw new Error(data?.error || `Server responded with HTTP ${res.status}`);
       }
 
@@ -658,14 +669,25 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           reader.onloadend = async () => {
             const base64Data = (reader.result as string).split(',')[1];
             try {
-              const res = await fetch('/api/gemini/transcribe-audio', {
+              const audioPayload = JSON.stringify({
+                audioBase64: base64Data,
+                mimeType: recorder.mimeType || mimeType,
+              });
+
+              let res = await fetch('/api/gemini/transcribe-audio', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  audioBase64: base64Data,
-                  mimeType: recorder.mimeType || mimeType,
-                }),
+                body: audioPayload,
               });
+
+              // Fallback alias attempt if primary route returned 404
+              if (res.status === 404) {
+                res = await fetch('/api/transcribe-audio', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: audioPayload,
+                });
+              }
 
               let data: any = {};
               try {
@@ -673,6 +695,9 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
               } catch {}
 
               if (!res.ok) {
+                if (res.status === 404) {
+                  throw new Error('Transcription route not found (404). Please ensure the backend server has started.');
+                }
                 throw new Error(data?.error || `Server returned error status ${res.status}`);
               }
 
