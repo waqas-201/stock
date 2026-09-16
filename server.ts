@@ -21,37 +21,21 @@ async function startServer() {
     next();
   });
 
-  app.use(express.json({ limit: '25mb' }));
+  app.use(express.json({ limit: '10mb' }));
 
   // Health check
-  app.get(['/api/health', '/api/ping'], (req, res) => {
+  app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
   // Check Gemini configuration status
-  app.get(['/api/gemini/status', '/api/status'], (req, res) => {
+  app.get('/api/gemini/status', (req, res) => {
     const isConfigured = Boolean(process.env.GEMINI_API_KEY);
     res.json({ configured: isConfigured });
   });
 
   // Gemini AI Stock Conversation Endpoint
-  const stockChatRoutes = [
-    '/api/gemini/stock-chat',
-    '/api/gemini/chat',
-    '/api/stock-chat',
-    '/api/chat',
-  ];
-
-  app.get(stockChatRoutes, (req, res) => {
-    res.json({
-      status: 'ok',
-      endpoint: '/api/gemini/stock-chat',
-      method: 'POST',
-      description: 'AI Stock Conversation Agent with inventory action execution',
-    });
-  });
-
-  app.post(stockChatRoutes, async (req, res) => {
+  app.post('/api/gemini/stock-chat', async (req, res) => {
     try {
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
@@ -60,7 +44,7 @@ async function startServer() {
         });
       }
 
-      const { message, history = [], stockItems = [], languageMode } = req.body;
+      const { message, history = [], stockItems = [] } = req.body;
       if (!message || typeof message !== 'string') {
         return res.status(400).json({ error: 'A user message is required.' });
       }
@@ -95,40 +79,8 @@ async function startServer() {
         notes: item.notes || null,
       }));
 
-      const langPreferenceDirective =
-        languageMode === 'ur'
-          ? '\n\nUSER LANGUAGE PREFERENCE: The user has selected Pakistani Urdu (اردو). Respond in polite, natural Urdu script (اردو) and provide Urdu suggestions.'
-          : languageMode === 'roman_ur'
-          ? '\n\nUSER LANGUAGE PREFERENCE: The user has selected Roman Urdu. Respond in natural Pakistani Roman Urdu and provide Roman Urdu suggestions.'
-          : languageMode === 'en'
-          ? '\n\nUSER LANGUAGE PREFERENCE: The user has selected English. Respond in English.'
-          : '\n\nUSER LANGUAGE PREFERENCE: Auto-detect. If the user writes or speaks in Urdu script (اردو), reply in fluent Pakistani Urdu (اردو). If the user writes or speaks in Roman Urdu (e.g., "Kitna stock bacha hai?", "Widget A mein 10 add kardo"), reply in natural Roman Urdu. If in English, reply in English.';
-
       const systemInstruction = `You are the Active AI Inventory Agent for this warehouse and store inventory system.
 You do NOT just chat—you have DIRECT OPERATIONAL CONTROL to modify inventory records, adjust stock quantities, create new items, update alerts, and filter the UI on behalf of the user.
-
-PAKISTANI URDU LANGUAGE & MULTILINGUAL CAPABILITIES:
-You are fully fluent in Pakistani Urdu and understand:
-1. Urdu Script (اردو): e.g., "سٹاک میں 10 دودھ کے ڈبے شامل کرو", "کتنا مال پڑا ہے؟", "کم اسٹاک والی چیزیں دکھاؤ", "چینی کی مقدار 25 کر دو", "کیا چیزیں ختم ہو چکی ہیں؟", "نیا آئٹم شامل کرو: چائے کی پتی، 50 پیکٹ، الرٹ 10"
-2. Roman Urdu / Urdish (Urdu written in English/Latin alphabet as widely used in Pakistan): e.g., "Stock kitna bacha hai?", "Widget A mein 10 add kardo / shamil karo / daal do", "Milk ke 5 dabbe sale ho gaye / nikal do / bech diye", "Cheeni ka stock 20 kardo", "Konsi cheezein khatam hone wali hain?", "Kam stock wali cheezein dikhao", "Naya item banao: Green Tea, quantity 30, alert 5", "Out of stock items search karo", "Stock ki poori report do", "Yeh item delete kardo"
-3. English: Standard English commands and queries.
-4. Code-switching / Bilingual mix: e.g., "Widget A ka stock update kardo with 10 units", "5 pieces sale ho gaye".
-
-PAKISTANI STORE & INVENTORY VOCABULARY:
-- Inbound / Additions / Restock: "shamil karo", "add kardo", "jama karo", "daal do", "restock karo", "naya maal aya", "barha do", "dakhil karo" -> execute {"type": "update_stock", "itemName": "...", "delta": positive_number, "reason": "Stock increased / Maal shamil hua"}
-- Outbound / Deductions / Sales: "bech diya", "sale ho gaya", "nikal do", "kam kardo", "minus karo", "ghata do", "kharch hua", "zaya ho gaya", "kharab ho gaya" -> execute {"type": "update_stock", "itemName": "...", "delta": negative_number, "reason": "Stock deducted / Sale / Nikala gaya"}
-- Direct Count / Set Quantity: "itna kardo", "set karo", "ginti ki hai ab X hain", "total X kardo" -> execute {"type": "update_stock", "itemName": "...", "newQuantity": number, "reason": "Stock set to verified count"}
-- Stock Inquiries: "kitna bacha hai", "kitna maal hai", "kya hisaab hai", "check karo", "kitne piece hain", "stock batao" -> answer directly with counts
-- Low Stock / Alerts: "kam stock", "khatam hone wala", "short hai", "alert", "khatray mein" -> filter or highlight low stock items
-- Out of Stock: "khatam ho gaya", "muk gaya", "zero ho gaya", "kuch nahi bacha", "khatam shuda" -> filter or highlight out of stock items
-- Common Pakistani Units: "dabba / dabbe / dabbo" (box/carton), "dana / daane / adad / piece / pieces" (pcs), "kilo / kg", "litre / ltr", "darjan" (dozen), "bori" (sack/bag), "packet / pack", "botal / bottle", "gatta" (carton), "meter / m"
-- Flexible Item Matching: If the user names an item in Urdu or Roman Urdu (e.g. "Cheeni" -> "Sugar", "Doodh" -> "Milk", "Chawal" -> "Rice", "Tel" -> "Oil", "A4 Kaghaz" -> "A4 Paper", "Qalam" -> "Pen", or transliterations like "ویجٹ اے" -> "Widget A"), match it flexibly to the corresponding item in the catalog.
-
-RESPONSE RULES:
-- If the user uses Urdu script, reply in clear, polite Pakistani Urdu (اردو) with correct inventory figures.
-- If the user uses Roman Urdu, reply in friendly, conversational Roman Urdu.
-- If the user uses English, reply in English.
-${langPreferenceDirective}
 
 Current Inventory Overview:
 - Total Unique Items: ${totalItems}
@@ -141,27 +93,25 @@ Current Inventory Catalog:
 ${JSON.stringify(inventorySnapshot, null, 2)}
 
 OPERATIONAL AGENT CAPABILITIES:
-When the user speaks or commands stock operations (in English, Urdu script, or Roman Urdu), like:
-- "Hey, this item increased this much today" / "Widget A mein 10 shamil kardo" / "ویجٹ اے میں 10 شامل کرو"
-- "We sold 4 laptops" / "5 dabbe sale ho gaye" / "5 ڈبے فروخت ہو گئے"
-- "Set stock of Widget B to 40" / "Widget B ka stock 40 kardo"
-- "Add a new item called Toner with 30 units and alert 5" / "Naya item add karo Toner"
-- "Show low stock items" / "Kam stock wali cheezein dikhao" / "کم اسٹاک والی اشیاء دکھاؤ"
-- "Search for printer" / "Printer dhoondo" / "پرنٹر تلاش کرو"
+When the user speaks or commands stock operations, like:
+- "Hey, this item increased this much today" (e.g., "Widget A increased by 15 today", "We received 20 boxes of Milk", "Add 5 to A4 Paper", "Restock 50 Pens")
+- "We sold 4 laptops" or "Deduct 2 pens" or "Reduced by 3"
+- "Set stock of Widget B to 40"
+- "Add a new item called Toner with 30 units and alert 5"
+- "Change low stock threshold of Paper to 10"
+- "Delete old sample item"
+- "Show low stock items" or "Filter to out of stock"
+- "Search for printer"
 
-You MUST execute the action(s) in your [ACTIONS] block and write a polite, concise confirmation message in your [REPLY] block.
+You MUST execute the action(s) in your [ACTIONS] block and write a polite, confirmation message in your [REPLY] block.
 
-CRITICAL VOICE & CONVERSATION RULES:
-- Listen and speak calmly, naturally, and concisely, like a top-tier voice assistant.
-- NEVER parrot or repeat what the user just said (e.g. do NOT say "You told me to add 10 to Widget A, so I am adding 10 to Widget A").
-- State the outcome directly and smoothly in 1 single, friendly sentence (e.g., "Added 10 units to Widget A; total stock is now 45." or "5 boxes deducted from Milk. Remaining: 12.").
-- If asked an informational question (e.g., "What is low in stock?", "Kitna stock bacha hai?", "اسٹاک کی کیا صورتحال ہے؟"), provide a calm, direct, clear answer in 1-2 sentences without repeating sentences. Output an empty array for [ACTIONS].
+If the user asks an informational question (e.g., "What is low in stock?", "How much Milk do we have?"), provide a direct answer and output an empty array for [ACTIONS].
 
 STRICT OUTPUT FORMAT:
 You must strictly format your entire response using the following three sections:
 
 [REPLY]
-Your natural, calm, concise reply to the user in their language (English, Urdu, or Roman Urdu). Keep it to 1-2 direct sentences.
+Your natural conversational reply to the user. If an action was taken, clearly state what was updated (e.g. "I've updated the inventory! Added 15 pcs to **Widget A**. The verified stock is now **65 pcs**.").
 
 [ACTIONS]
 [
@@ -355,165 +305,45 @@ If no action is performed, output:
     }
   });
 
-  // Gemini AI Audio Transcription Endpoint (Universal WhatsApp/ChatGPT style speech-to-text)
-  const transcribeRoutes = [
-    '/api/gemini/transcribe-audio',
-    '/api/gemini/transcribe',
-    '/api/transcribe-audio',
-    '/api/transcribe',
-  ];
-
-  app.get(transcribeRoutes, (req, res) => {
-    res.json({
-      status: 'ok',
-      endpoint: '/api/gemini/transcribe-audio',
-      method: 'POST',
-      description: 'Audio speech-to-text transcription service supporting Urdu and English',
-    });
-  });
-
-  app.post(transcribeRoutes, async (req, res) => {
+  // Gemini AI Audio Transcription Endpoint (Universal microphone fallback)
+  app.post('/api/gemini/transcribe-audio', async (req, res) => {
     try {
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
         return res.status(400).json({
-          error: 'GEMINI_API_KEY is not configured in Settings.',
+          error: 'GEMINI_API_KEY is not configured.',
         });
       }
 
       const { audioBase64, mimeType = 'audio/webm' } = req.body;
       if (!audioBase64) {
-        return res.status(400).json({ error: 'Audio data is missing or empty.' });
+        return res.status(400).json({ error: 'audioBase64 data is required.' });
       }
 
-      // Ensure mimeType is clean (strip codec parameters like ;codecs=opus)
-      const cleanMimeType = (mimeType || 'audio/webm').split(';')[0].trim();
-      const promptInstruction =
-        'Listen to this spoken audio carefully. The speaker may be speaking Pakistani Urdu (اردو), Roman Urdu, English, or a natural bilingual mix of Urdu and English as commonly spoken in stores, shops, and businesses (e.g., "Widget A mein 10 add kardo", "Doodh ke 5 dabbe sale ho gaye", "Stock kitna bacha hai?", "Kam stock wali cheezein dikhao", "نیا آئٹم شامل کرو", "What items are running low?"). Transcribe verbatim, accurately, and cleanly what the speaker said. Do NOT repeat words or stutter. Return ONLY the transcribed text. Do not add quotes, timestamps, or conversational commentary. If silence or no speech is heard, return empty string.';
-
-      let transcript = '';
-
-      const ai = new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: [
+          {
+            inlineData: {
+              mimeType: mimeType || 'audio/webm',
+              data: audioBase64,
+            },
           },
-        },
+          {
+            text: 'Listen to this spoken audio carefully. Transcribe exactly what the user said verbatim for an inventory management query or command (for example: "Hey, Widget A increased by 10 today", "Add 5 to stock", "What items are low on stock?", etc.). Return ONLY the transcribed text. Do not add conversational commentary, quotation marks, or explanations. If no speech is detected, return an empty string.',
+          },
+        ],
       });
 
-      // 1. Primary Attempt: gemini-2.5-flash (fastest multimodal audio understanding & Urdu recognition)
-      try {
-        const sdkPromise = ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                {
-                  inlineData: {
-                    mimeType: cleanMimeType || 'audio/webm',
-                    data: audioBase64,
-                  },
-                },
-                {
-                  text: promptInstruction,
-                },
-              ],
-            },
-          ],
-        });
-
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Audio transcription timed out after 12s')), 12000)
-        );
-
-        const response: any = await Promise.race([sdkPromise, timeoutPromise]);
-        transcript =
-          response?.text?.trim() ||
-          response?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
-          '';
-      } catch (primaryErr: any) {
-        console.warn('gemini-2.5-flash audio transcription notice:', primaryErr?.message);
-
-        // 2. Secondary Attempt: gemini-3.1-flash-lite
-        try {
-          const fallbackRes: any = await ai.models.generateContent({
-            model: 'gemini-3.1-flash-lite',
-            contents: [
-              {
-                role: 'user',
-                parts: [
-                  {
-                    inlineData: {
-                      mimeType: cleanMimeType || 'audio/webm',
-                      data: audioBase64,
-                    },
-                  },
-                  {
-                    text: promptInstruction,
-                  },
-                ],
-              },
-            ],
-          });
-          transcript =
-            fallbackRes?.text?.trim() ||
-            fallbackRes?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
-            '';
-        } catch (flashErr: any) {
-          console.warn('gemini-3.1-flash-lite notice:', flashErr?.message);
-
-          // 3. Third Attempt: gemini-3.5-transcribe
-          try {
-            const transcribeRes: any = await ai.models.generateContent({
-              model: 'gemini-3.5-transcribe',
-              contents: {
-                parts: [
-                  {
-                    inlineData: {
-                      mimeType: cleanMimeType || 'audio/webm',
-                      data: audioBase64,
-                    },
-                  },
-                  {
-                    text: promptInstruction,
-                  },
-                ],
-              },
-            });
-            transcript =
-              transcribeRes?.text?.trim() ||
-              transcribeRes?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
-              '';
-          } catch (tErr: any) {
-            console.error('All transcription models failed:', tErr?.message);
-            throw new Error(primaryErr?.message || flashErr?.message || tErr?.message || 'Audio transcription failed on server.');
-          }
-        }
-      }
-
+      const transcript = response.text ? response.text.trim() : '';
       return res.json({ transcript });
     } catch (error: any) {
       console.error('Error in /api/gemini/transcribe-audio:', error);
       return res.status(500).json({
-        error: error?.message || 'Failed to transcribe audio on the server.',
+        error: error?.message || 'Failed to transcribe audio.',
       });
     }
-  });
-
-  // Explicit API 404 handler - prevents returning HTML for non-existent API routes
-  app.all('/api/*', (req, res) => {
-    res.status(404).json({
-      error: `API endpoint not found: ${req.method} ${req.path}`,
-      status: 404,
-      availableEndpoints: [
-        'GET  /api/health',
-        'GET  /api/gemini/status',
-        'POST /api/gemini/stock-chat',
-        'POST /api/gemini/transcribe-audio',
-      ],
-    });
   });
 
   // Vite middleware for development

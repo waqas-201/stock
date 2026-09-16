@@ -83,7 +83,6 @@ import {
   UserCheck,
   ShieldCheck,
   Users,
-  Mic,
 } from 'lucide-react';
 
 export function App() {
@@ -1113,15 +1112,11 @@ export function App() {
         };
       }
 
-      let delta = action.delta !== undefined ? action.delta : 0;
-      if (action.newQuantity !== undefined && action.delta === undefined) {
-        delta = action.newQuantity - matchedItem.quantity;
-      }
-
+      const delta = action.delta !== undefined ? action.delta : 0;
       if (delta === 0) {
         return {
           success: true,
-          message: `Stock for "${matchedItem.itemName}" is already ${matchedItem.quantity} ${matchedItem.unit}.`,
+          message: `No quantity change specified for "${matchedItem.itemName}".`,
           previousQuantity: matchedItem.quantity,
           newQuantity: matchedItem.quantity,
         };
@@ -1366,6 +1361,100 @@ export function App() {
         onSignOut={handleSignOut}
       />
 
+      {/* Cloud DB & Shared Access Status Banner */}
+      {!isAuthLoading && (
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-3">
+          {currentUser ? (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3.5 py-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-2xs">
+              <div className="flex items-center gap-2 text-xs font-semibold text-emerald-900 min-w-0">
+                <span className="relative flex h-2 w-2 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600"></span>
+                </span>
+                <span className="truncate">
+                  Persistent Cloud DB Active • Real-time Firestore sync enabled{' '}
+                  {currentUser.isAnonymous ? (
+                    <>
+                      <strong className="font-bold">(Quick Team Access)</strong>
+                      <button
+                        type="button"
+                        onClick={() => setIsDomainModalOpen(true)}
+                        className="ml-2 text-[11px] text-emerald-800 hover:text-emerald-950 underline font-semibold cursor-pointer"
+                      >
+                        Authorize Google Login
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      for <strong className="font-bold">{currentUser.email}</strong>
+                    </>
+                  )}
+                </span>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <span className="text-[11px] font-medium text-emerald-800 bg-white/70 px-2 py-0.5 rounded-lg border border-emerald-200">
+                  Shared Team Access: All staff can Create, Edit & Delete with full Audit Trail
+                </span>
+                {isMigrating && (
+                  <div className="inline-flex items-center gap-1.5 text-xs text-emerald-700 font-bold shrink-0">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Migrating items...</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border border-emerald-200 rounded-xl p-3 sm:py-2.5 sm:px-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+              <div className="flex items-center gap-2.5 text-xs text-slate-700">
+                <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                  <Database className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="font-bold text-slate-900 text-xs sm:text-sm">
+                    Connect Persistent Cloud Database
+                  </p>
+                  <p className="text-[11px] sm:text-xs text-slate-500">
+                    Store stock items and audit logs permanently in Firestore. All team members share full CRUD access.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto shrink-0">
+                <button
+                  type="button"
+                  onClick={handleQuickConnect}
+                  className="flex-1 sm:flex-initial min-h-[38px] px-3.5 py-1.5 text-xs font-bold text-emerald-800 bg-white hover:bg-emerald-100/60 border border-emerald-300 rounded-xl shadow-2xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                  title="Instant database connection without requiring Google OAuth domain setup"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Instant Quick Connect</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSignInWithGoogle}
+                  className="flex-1 sm:flex-initial min-h-[38px] px-4 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>Connect Google Account</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const host = typeof window !== 'undefined' ? window.location.hostname : '';
+                    setCurrentDomain(host);
+                    setIsDomainModalOpen(true);
+                  }}
+                  className="min-h-[38px] px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-200/50 rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1"
+                  title="View domain whitelisting instructions for Firebase"
+                >
+                  <Info className="w-3.5 h-3.5 text-slate-500" />
+                  <span className="hidden md:inline">Domain Help</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-7 space-y-4 sm:space-y-6">
         {/* KPI / Stock Metrics (Tap to filter) */}
@@ -1403,18 +1492,18 @@ export function App() {
         />
       </main>
 
-      {/* Mobile Floating Action Buttons (FAB): Quick AI Voice Agent + Add Item */}
+      {/* Mobile Floating Action Buttons (FAB): Quick AI Chat + Add Item */}
       <div className="sm:hidden fixed bottom-5 left-3 right-3 z-40 flex items-center justify-between pointer-events-none">
-        {/* Mobile FAB: Talk to Voice Agent */}
+        {/* Mobile FAB: Talk to Gemini AI */}
         <button
           id="btn-mobile-fab-gemini"
           type="button"
           onClick={() => setIsGeminiChatOpen(true)}
           className="pointer-events-auto min-h-[48px] px-3.5 py-2.5 rounded-full bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-bold shadow-lg shadow-slate-950/25 flex items-center justify-center gap-1.5 transition-transform active:scale-95 cursor-pointer border border-slate-700 backdrop-blur-xs"
-          aria-label="Talk to Voice Agent"
+          aria-label="Talk to Gemini AI"
         >
-          <Mic className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span className="text-xs font-bold">Voice Agent</span>
+          <Sparkles className="w-4 h-4 text-amber-300 animate-pulse shrink-0" />
+          <span className="text-xs font-bold">Talk to AI</span>
         </button>
 
         {/* Mobile FAB: 1-Tap Add Item */}

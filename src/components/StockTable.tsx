@@ -249,18 +249,18 @@ export const StockTable: React.FC<StockTableProps> = ({
             </div>
           </div>
 
-          {/* Talk to Stock Agent button in toolbar */}
+          {/* Talk to Gemini AI button in toolbar */}
           {onOpenGeminiChat && (
             <button
               id="btn-stock-gemini-chat"
               type="button"
               onClick={onOpenGeminiChat}
               className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3 sm:px-3.5 py-2 text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 active:scale-95 rounded-xl shadow-xs transition-all cursor-pointer shrink-0"
-              title="Talk with Stock Agent about your stock"
+              title="Talk with Gemini AI about your stock"
             >
               <Sparkles className="w-4 h-4 text-amber-300 shrink-0 animate-pulse" />
-              <span className="hidden sm:inline">Stock Agent</span>
-              <span className="sm:hidden">Agent</span>
+              <span className="hidden sm:inline">Talk to AI</span>
+              <span className="sm:hidden">AI</span>
             </button>
           )}
 

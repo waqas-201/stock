@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles,
   Send,
@@ -20,19 +20,8 @@ import {
   Plus,
   Sliders,
   Filter,
-  Languages,
-  ArrowLeft,
-  Check,
-  MessageSquare,
-  Radio,
-  RefreshCw,
 } from 'lucide-react';
 import { StockItem, StockFilter, GeminiAgentAction } from '../types';
-import { processStockChat, processAudioTranscription, cleanSpokenTranscript } from '../lib/geminiLogic';
-
-export function isUrduText(text: string): boolean {
-  return /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(text);
-}
 
 export interface ExecutedActionRecord {
   id: string;
@@ -49,14 +38,13 @@ export interface ExecutedActionRecord {
   summary: string;
 }
 
-export interface Message {
+interface Message {
   id: string;
   role: 'user' | 'model';
   text: string;
   timestamp: Date;
   suggestions?: string[];
   executedActions?: ExecutedActionRecord[];
-  isVoiceInput?: boolean;
 }
 
 export interface GeminiStockChatModalProps {
@@ -65,15 +53,14 @@ export interface GeminiStockChatModalProps {
   items: StockItem[];
   onApplyFilter?: (filter: StockFilter) => void;
   onSearchItem?: (query: string) => void;
-  onQuickQuantityChange?: (itemId: string, newQuantity: number) => void;
+  onQuickQuantityChange?: (item: StockItem, delta: number) => void;
   onExecuteAgentAction?: (action: GeminiAgentAction) => {
     success: boolean;
     message: string;
+    undo?: () => void;
     previousQuantity?: number;
     newQuantity?: number;
-    undo?: () => void;
   };
-  initialMode?: 'voice' | 'chat';
 }
 
 export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
@@ -84,58 +71,34 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
   onSearchItem,
   onQuickQuantityChange,
   onExecuteAgentAction,
-  initialMode = 'voice',
 }) => {
-  // Main view state: 'voice' (ChatGPT / WhatsApp calm voice orb) vs 'chat' (classic message log)
-  const [viewMode, setViewMode] = useState<'voice' | 'chat'>(initialMode);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [speechSupported, setSpeechSupported] = useState(true);
-  const [autoSpeechEnabled, setAutoSpeechEnabled] = useState(true);
+  const [autoSpeechEnabled, setAutoSpeechEnabled] = useState(false);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [speechError, setSpeechError] = useState<string | null>(null);
-  const [languageMode, setLanguageMode] = useState<'en' | 'auto' | 'roman_ur' | 'ur'>('en');
-
-  // Real-time audio frequency visualizer state
-  const [audioLevel, setAudioLevel] = useState<number>(0); // 0 to 1
-  const [latestVoiceAction, setLatestVoiceAction] = useState<ExecutedActionRecord | null>(null);
-  const [latestTranscript, setLatestTranscript] = useState<string>('');
-  const [agentStatusText, setAgentStatusText] = useState<string>('Ready to listen');
+  const [speechStatus, setSpeechStatus] = useState<string>('');
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const recordingTimerRef = useRef<any>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const animFrameRef = useRef<number | null>(null);
-  const recognitionRef = useRef<any>(null);
-  const liveTranscriptRef = useRef<string>('');
-  const shouldAutoSubmitRef = useRef(false);
-  const isListeningRef = useRef<boolean>(false);
 
-  useEffect(() => {
-    isListeningRef.current = isListening;
-  }, [isListening]);
-
-  // Helper to format recording timer display (e.g. 00:05)
-  const formatTimer = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
-
-  // Initialize Speech Synthesis
+  // Initialize Speech Recognition & Synthesis
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const hasMedia = Boolean(navigator?.mediaDevices?.getUserMedia);
-      if (!hasMedia && !('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
+      const SpeechRecognition =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const hasMedia = Boolean(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+      if (!SpeechRecognition && !hasMedia) {
         setSpeechSupported(false);
       }
       if ('speechSynthesis' in window) {
@@ -144,7 +107,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
     }
   }, []);
 
-  // Set initial welcome prompt on open
+  // Set initial welcoming message when opened with inventory stats & actionable prompts
   useEffect(() => {
     if (isOpen && messages.length === 0) {
       const totalCount = items.length;
@@ -153,17 +116,17 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
         return (i.quantity || 0) > 0 && (i.quantity || 0) <= thresh;
       }).length;
       const outCount = items.filter((i) => (i.quantity || 0) <= 0).length;
+
       const sampleItem = items.length > 0 ? items[0].itemName : 'Widget A';
 
-      let welcome = `👋 Hello! I'm your **Stock Voice Agent**, connected to **${totalCount} products**.`;
-      welcome += `\n\n🎙️ **Speak your inventory command in native English:**\n`;
-      welcome += `• *"Add 10 units to ${sampleItem}"*\n`;
-      welcome += `• *"Deduct 5 boxes from ${sampleItem}"*\n`;
-      welcome += `• *"What items are running low on stock?"*\n`;
-      welcome += `• *"What is our total inventory count?"*`;
+      let welcome = `👋 Hello! I'm your **Active Gemini AI Inventory Agent**, connected in real time to your **${totalCount} products**.`;
+      welcome += `\n\n⚡ **Direct Control Enabled**: You can operate your stock directly with natural language!\n`;
+      welcome += `• *"Hey, ${sampleItem} increased by 10 today"*\n`;
+      welcome += `• *"We used 5 ${sampleItem}"*\n`;
+      welcome += `• *"What items are running low?"*`;
 
       if (outCount > 0 || lowCount > 0) {
-        welcome += `\n\n⚠️ **Stock Status**: **${lowCount} low stock** and **${outCount} out of stock** items.`;
+        welcome += `\n\n⚠️ **Notice**: You currently have **${lowCount} low stock** and **${outCount} out of stock** items.`;
       }
 
       setMessages([
@@ -173,263 +136,361 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           text: welcome,
           timestamp: new Date(),
           suggestions: [
-            items.length > 0 ? `Add 10 to ${items[0].itemName}` : 'Check total inventory',
-            'What items are low on stock?',
-            items.length > 0 ? `Deduct 5 from ${items[0].itemName}` : 'Show out of stock items',
-            'Give me a stock summary',
+            items.length > 0 ? `Hey, ${items[0].itemName} increased by 10 today` : 'What items are low on stock?',
+            items.length > 1 ? `Deduct 5 from ${items[1].itemName}` : 'Give me a complete inventory summary',
+            'What items need immediate reordering?',
+            'Show items that are out of stock',
           ],
         },
       ]);
     }
-  }, [isOpen, items, messages.length]);
+  }, [isOpen, items]);
 
-  // Scroll to bottom in chat view
+  // Scroll to bottom when messages update
   useEffect(() => {
-    if (isOpen && viewMode === 'chat') {
+    if (isOpen) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, isLoading, isOpen, viewMode]);
+  }, [messages, isLoading, isOpen]);
 
-  // AudioContext cleanup helper
-  const stopAudioVisualization = useCallback(() => {
-    if (animFrameRef.current) {
-      cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = null;
+  // Fallback: Gemini Server-side Audio Recorder (Works everywhere)
+  const startGeminiAudioRecording = async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setSpeechError('Microphone recording is not supported in this browser.');
+      setIsListening(false);
+      return;
     }
-    if (audioContextRef.current) {
-      try {
-        if (audioContextRef.current.state !== 'closed') {
-          audioContextRef.current.close().catch(() => {});
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      audioChunksRef.current = [];
+
+      const mimeType =
+        typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/mp4')
+          ? 'audio/mp4'
+          : '';
+
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
         }
-      } catch {}
-      audioContextRef.current = null;
+      };
+
+      recorder.onstop = async () => {
+        setIsListening(false);
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
+        }
+
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: mimeType || 'audio/webm',
+        });
+        if (audioBlob.size < 200) {
+          setSpeechStatus('No audio detected. Please try again.');
+          return;
+        }
+
+        setIsTranscribing(true);
+        setSpeechStatus('Transcribing your voice with Gemini AI...');
+
+        try {
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+          reader.onloadend = async () => {
+            const base64Data = (reader.result as string).split(',')[1];
+            try {
+              const res = await fetch('/api/gemini/transcribe-audio', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  audioBase64: base64Data,
+                  mimeType: mimeType || 'audio/webm',
+                }),
+              });
+              const data = await res.json();
+              if (data.transcript && data.transcript.trim()) {
+                const transcribed = data.transcript.trim();
+                setInputText(transcribed);
+                setSpeechStatus(`Transcribed: "${transcribed}"`);
+              } else {
+                setSpeechStatus('No speech recognized. Please speak closer to the microphone.');
+              }
+            } catch (netErr: any) {
+              console.error('Transcription error:', netErr);
+              setSpeechError('Could not transcribe audio. Please check network connection.');
+            } finally {
+              setIsTranscribing(false);
+            }
+          };
+        } catch (readErr) {
+          console.error('Blob reading error:', readErr);
+          setIsTranscribing(false);
+        }
+      };
+
+      recorder.start(250);
+      setIsListening(true);
+      setRecordingSeconds(0);
+      setSpeechError(null);
+      setSpeechStatus('Recording your voice for Gemini AI... Speak now!');
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
+    } catch (err: any) {
+      console.error('Failed to start audio recording:', err);
+      setIsListening(false);
+      setSpeechError(
+        err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
+          ? 'Microphone permission was blocked. Please allow microphone access in your browser.'
+          : 'Could not access microphone.'
+      );
     }
-    analyserRef.current = null;
-    setAudioLevel(0);
-  }, []);
+  };
 
-  // Text-to-Speech Playback (calm and concise)
-  const speakText = useCallback(
-    (text: string, messageId: string) => {
-      if (!synthRef.current || !autoSpeechEnabled) return;
+  // Handle Speech Recognition with permission verification & live real-time typing
+  const startListening = async () => {
+    setSpeechError(null);
+    setSpeechStatus('Connecting to microphone...');
 
-      if (speakingMessageId === messageId) {
-        synthRef.current.cancel();
-        setSpeakingMessageId(null);
+    // 1. Verify and request microphone permissions via getUserMedia
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Release dummy stream so recognition or recorder has clean access
+        stream.getTracks().forEach((track) => track.stop());
+      } catch (err: any) {
+        console.warn('Microphone permission request failed:', err);
+        setIsListening(false);
+        setSpeechError(
+          err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
+            ? 'Microphone permission blocked. Please allow microphone access in your browser address bar.'
+            : 'Could not access microphone hardware. Please check your audio settings.'
+        );
         return;
       }
+    }
 
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    // 2. Primary: Web Speech API with real-time continuous typing
+    if (SpeechRecognition) {
       try {
-        synthRef.current.cancel();
-
-        // Clean text for speech synthesis
-        const cleanText = text
-          .replace(/\[SUGGESTIONS\][\s\S]*$/gi, '')
-          .replace(/\[ACTIONS\][\s\S]*?(\n\n|$)/gi, '')
-          .replace(/[*_~`#>-]/g, '')
-          .replace(/\[(.*?)\]\(.*?\)/g, '$1')
-          .trim();
-
-        if (!cleanText) return;
-
-        const utterance = new SpeechSynthesisUtterance(cleanText);
-        utterance.rate = 1.0;
-        utterance.pitch = 1.0;
-
-        const hasUrdu = isUrduText(cleanText);
-        if (hasUrdu || languageMode === 'ur') {
-          utterance.lang = 'ur-PK';
-          if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-            const voices = window.speechSynthesis.getVoices?.() || [];
-            const urduOrHindiVoice = voices.find(
-              (v) => v.lang.startsWith('ur') || v.lang.startsWith('hi')
-            );
-            if (urduOrHindiVoice) {
-              utterance.voice = urduOrHindiVoice;
-            }
-          }
-        } else {
-          utterance.lang = 'en-US';
-          if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-            const voices = window.speechSynthesis.getVoices?.() || [];
-            const englishVoice = voices.find(
-              (v) => v.lang === 'en-US' || v.lang.startsWith('en')
-            );
-            if (englishVoice) {
-              utterance.voice = englishVoice;
-            }
+        if (recognitionRef.current) {
+          try {
+            recognitionRef.current.abort();
+          } catch {
+            // ignore
           }
         }
 
-        utterance.onstart = () => {
-          setSpeakingMessageId(messageId);
-          setAgentStatusText('Speaking response...');
-        };
-        utterance.onend = () => {
-          setSpeakingMessageId(null);
-          setAgentStatusText('Ready to listen');
-        };
-        utterance.onerror = () => {
-          setSpeakingMessageId(null);
-          setAgentStatusText('Ready to listen');
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        recognition.onstart = () => {
+          setIsListening(true);
+          setSpeechError(null);
+          setSpeechStatus('Listening... Speak now (words will appear as you speak)');
         };
 
-        synthRef.current.speak(utterance);
+        recognition.onresult = (event: any) => {
+          let finalWords = '';
+          let interimWords = '';
+
+          for (let i = 0; i < event.results.length; ++i) {
+            const res = event.results[i];
+            if (res.isFinal) {
+              finalWords += res[0].transcript + ' ';
+            } else {
+              interimWords += res[0].transcript;
+            }
+          }
+
+          const combined = (finalWords + interimWords).trim();
+          if (combined) {
+            // TYPE DIRECTLY INTO THE INPUT FIELD IN REAL TIME
+            setInputText(combined);
+            setSpeechStatus(`Heard: "${combined}"`);
+          }
+        };
+
+        recognition.onerror = (e: any) => {
+          console.warn('Speech recognition error:', e.error);
+          if (e.error === 'not-allowed') {
+            setSpeechError(
+              'Microphone access blocked. Click the lock/camera icon in your address bar to enable.'
+            );
+            setIsListening(false);
+          } else if (e.error === 'no-speech') {
+            setSpeechStatus('No speech detected. Please speak closer to your microphone.');
+          } else if (e.error === 'network' || e.error === 'service-not-allowed') {
+            console.log('Falling back to Gemini Audio recording due to browser speech service error...');
+            try {
+              recognition.abort();
+            } catch {}
+            startGeminiAudioRecording();
+          } else {
+            setSpeechStatus(`Listening paused (${e.error}). Tap mic to try again.`);
+            setIsListening(false);
+          }
+        };
+
+        recognition.onend = () => {
+          setIsListening(false);
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
+        return;
       } catch (e) {
-        console.warn('Speech synthesis error:', e);
-        setSpeakingMessageId(null);
+        console.warn('Web Speech start failed, falling back to Gemini Audio:', e);
       }
-    },
-    [autoSpeechEnabled, languageMode, speakingMessageId]
-  );
+    }
 
-  // Stop everything immediately: recording, audio tracks, synth, and close modal
-  const handleCleanExit = useCallback(() => {
-    // 1. Stop timer
+    // 3. Fallback: Gemini Server-side Audio Recorder
+    startGeminiAudioRecording();
+  };
+
+  const stopListening = () => {
+    // Stop Web Speech API if running
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+    }
+
+    // Stop MediaRecorder if running
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch {
+        // ignore
+      }
+    }
+
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
     }
 
-    // 2. Stop media recorder and clear chunks
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch {}
-    }
-    mediaRecorderRef.current = null;
-    audioChunksRef.current = [];
-
-    // 3. Stop mic stream tracks
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-
-    // 4. Stop speech recognition
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {}
-      recognitionRef.current = null;
-    }
-    liveTranscriptRef.current = '';
-
-    // 5. Stop audio visualizer
-    stopAudioVisualization();
-
-    // 6. Cancel any speech
-    if (synthRef.current) {
-      try {
-        synthRef.current.cancel();
-      } catch {}
-    }
-
-    // 7. Reset states
     setIsListening(false);
-    setIsTranscribing(false);
-    setSpeakingMessageId(null);
-    setSpeechError(null);
+  };
 
-    // 8. Exit back to inventory table
-    onClose();
-  }, [onClose, stopAudioVisualization]);
+  // Text-to-Speech Playback
+  const speakText = (text: string, messageId: string) => {
+    if (!synthRef.current) return;
 
-  // Clean exit when modal is unmounted or isOpen toggled off
-  useEffect(() => {
-    if (!isOpen) {
-      handleCleanExit();
+    if (speakingMessageId === messageId) {
+      synthRef.current.cancel();
+      setSpeakingMessageId(null);
+      return;
     }
-  }, [isOpen, handleCleanExit]);
+
+    synthRef.current.cancel();
+
+    // Strip markdown formatting for cleaner speech output
+    const cleanText = text
+      .replace(/\[SUGGESTIONS\][\s\S]*$/gi, '')
+      .replace(/\[ACTIONS\][\s\S]*?(\n\n|$)/gi, '')
+      .replace(/[*_~`#>-]/g, '')
+      .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+      .trim();
+
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+
+    utterance.onend = () => setSpeakingMessageId(null);
+    utterance.onerror = () => setSpeakingMessageId(null);
+
+    setSpeakingMessageId(messageId);
+    synthRef.current.speak(utterance);
+  };
+
+  // Parse suggested follow-ups from Gemini response
+  const parseSuggestions = (rawText: string): { cleanText: string; suggestions: string[] } => {
+    // Strip [ACTIONS] block if rawText still contains it
+    let workingText = rawText.replace(/\[ACTIONS\][\s\S]*?(\n\n|$)/gi, '').trim();
+
+    const parts = workingText.split(/\[SUGGESTIONS\]/i);
+    const cleanText = parts[0].trim();
+    const suggestions: string[] = [];
+
+    if (parts.length > 1) {
+      const lines = parts[1].split('\n');
+      for (const line of lines) {
+        const cleaned = line.replace(/^[\s*-•\d.]+/, '').trim();
+        if (cleaned) {
+          suggestions.push(cleaned);
+        }
+      }
+    }
+
+    return { cleanText, suggestions };
+  };
 
   // Send message to Gemini server-side endpoint
-  const handleSendMessage = async (textToSend?: string, isVoice: boolean = false) => {
-    const rawQuery = (textToSend !== undefined ? textToSend : inputText).trim();
-    const query = isVoice ? cleanSpokenTranscript(rawQuery) : rawQuery;
+  const handleSendMessage = async (textToSend?: string) => {
+    const query = (textToSend !== undefined ? textToSend : inputText).trim();
     if (!query || isLoading) return;
 
     setInputText('');
-    setSpeechError(null);
-    setLatestTranscript(query);
 
     const userMessage: Message = {
       id: `user-${Date.now()}`,
       role: 'user',
       text: query,
       timestamp: new Date(),
-      isVoiceInput: isVoice,
     };
 
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
     setIsLoading(true);
-    setAgentStatusText('Stock Agent is thinking...');
 
     try {
+      // Build history payload for Gemini multi-turn conversation
       const historyPayload = newMessages.slice(-6).map((m) => ({
         role: m.role,
         parts: [{ text: m.text }],
       }));
 
-      const chatPayload = JSON.stringify({
-        message: query,
-        history: historyPayload,
-        stockItems: items,
-        languageMode,
+      const res = await fetch('/api/gemini/stock-chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: query,
+          history: historyPayload,
+          stockItems: items,
+        }),
       });
 
-      let res: any = null;
       let data: any = {};
-
       try {
-        res = await fetch('/api/gemini/stock-chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: chatPayload,
-        });
-
-        if (res && res.status === 404) {
-          res = await fetch('/api/stock-chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: chatPayload,
-          });
-        }
-
-        if (res && res.ok) {
-          data = await res.json();
-        }
-      } catch (fetchErr) {
-        console.warn('Network call to backend stock-chat failed:', fetchErr);
+        data = await res.json();
+      } catch {
+        // response was not JSON
       }
 
-      // If backend returned 404 or was unreachable (e.g. Vercel serverless cold start / static host)
-      if (!data?.reply && (!res || !res.ok)) {
-        const clientKey =
-          (import.meta as any).env?.VITE_GEMINI_API_KEY ||
-          (typeof window !== 'undefined' ? (window as any)._GEMINI_API_KEY : '');
-
-        if (clientKey) {
-          try {
-            setAgentStatusText('Processing via client-side Gemini...');
-            data = await processStockChat({
-              apiKey: clientKey,
-              message: query,
-              history: historyPayload,
-              stockItems: items,
-              languageMode,
-            });
-          } catch (directErr: any) {
-            throw new Error(`Direct AI Error: ${directErr?.message}`);
-          }
-        } else {
-          if (res?.status === 404) {
-            throw new Error(
-              'AI service endpoint returned 404 on Vercel. Please ensure GEMINI_API_KEY or VITE_GEMINI_API_KEY is configured in your Vercel Project Settings > Environment Variables.'
-            );
-          }
-          throw new Error(data?.error || `Server responded with HTTP ${res?.status || 500}`);
-        }
+      if (!res.ok) {
+        throw new Error(data?.error || `Server responded with HTTP ${res.status}`);
       }
 
       // Execute returned Agent Actions
@@ -438,7 +499,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
         for (const act of data.actions) {
           try {
             const execResult = onExecuteAgentAction(act);
-            const actRecord: ExecutedActionRecord = {
+            executedActionsList.push({
               id: `act-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
               type: act.type,
               itemName: act.itemName,
@@ -457,28 +518,14 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
               undo: execResult.undo,
               isUndone: false,
               summary: execResult.message || `${act.type} executed successfully`,
-            };
-            executedActionsList.push(actRecord);
-            setLatestVoiceAction(actRecord);
+            });
           } catch (e: any) {
             console.error('Failed to execute AI agent action:', act, e);
           }
         }
       }
 
-      // Parse suggestions
-      let cleanText = (data.reply || '').replace(/\[ACTIONS\][\s\S]*?(\n\n|$)/gi, '').trim();
-      const parts = cleanText.split(/\[SUGGESTIONS\]/i);
-      cleanText = parts[0].trim();
-      const suggestions: string[] = [];
-
-      if (parts.length > 1) {
-        const lines = parts[1].split('\n');
-        for (const line of lines) {
-          const cleaned = line.replace(/^[\s*-•\d.]+/, '').trim();
-          if (cleaned) suggestions.push(cleaned);
-        }
-      }
+      const { cleanText, suggestions } = parseSuggestions(data.reply || '');
 
       const modelMessageId = `model-${Date.now()}`;
       const modelMessage: Message = {
@@ -491,447 +538,28 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       };
 
       setMessages((prev) => [...prev, modelMessage]);
-      setAgentStatusText('Response ready');
 
-      // Speak back calmly if voice mode or auto-speech is enabled
-      if (autoSpeechEnabled || isVoice) {
+      if (autoSpeechEnabled) {
         speakText(cleanText, modelMessageId);
       }
     } catch (err: any) {
-      console.error('Error in handleSendMessage:', err);
+      console.error('Error communicating with Gemini:', err);
       const isFetchFailed = err?.message?.toLowerCase().includes('failed to fetch');
       const errorDetail = isFetchFailed
-        ? 'Could not connect to the inventory AI service. Please check your network connection.'
-        : (err.message || 'Please check your GEMINI_API_KEY in Settings.');
+        ? 'Could not connect to the inventory AI service. Please check your network connection or try again in a moment.'
+        : (err.message || 'Please ensure your GEMINI_API_KEY is configured in Settings > Secrets.');
 
       const errorMessage: Message = {
         id: `err-${Date.now()}`,
         role: 'model',
-        text: `⚠️ **Unable to connect**: ${errorDetail}`,
+        text: `⚠️ **Unable to connect to AI**: ${errorDetail}`,
         timestamp: new Date(),
+        suggestions: ["Try asking again", "Give me a complete inventory summary"],
       };
       setMessages((prev) => [...prev, errorMessage]);
-      setAgentStatusText('Error occurred');
     } finally {
       setIsLoading(false);
     }
-  };
-
-  // Start Voice Recording (WhatsApp / ChatGPT voice mode style)
-  const startRecording = async () => {
-    if (isLoading || isTranscribing) return;
-
-    // Cancel any active speech
-    if (synthRef.current) {
-      synthRef.current.cancel();
-      setSpeakingMessageId(null);
-    }
-
-    setSpeechError(null);
-    setLatestTranscript('');
-    liveTranscriptRef.current = '';
-
-    // 1. Try Browser Native Web Speech API first (zero latency on Android Chrome & iOS Safari)
-    // Avoid simultaneous getUserMedia so Android mic hardware does not lock or error
-    const SpeechRec =
-      typeof window !== 'undefined'
-        ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-        : null;
-
-    if (SpeechRec) {
-      try {
-        const recognition = new SpeechRec();
-        // Use continuous = false on voice assistant so Android Chrome processes the command cleanly
-        // without accumulating duplicate partial revisions into event.results
-        recognition.continuous = false;
-        recognition.interimResults = true;
-        recognition.lang = languageMode === 'ur' ? 'ur-PK' : 'en-US';
-
-        recognition.onresult = (event: any) => {
-          let latestChunk = '';
-          if (event.results && event.results.length > 0) {
-            const lastResult = event.results[event.results.length - 1];
-            if (lastResult && lastResult[0] && lastResult[0].transcript) {
-              latestChunk = lastResult[0].transcript;
-            }
-          }
-
-          if (!latestChunk) {
-            const chunks: string[] = [];
-            for (let i = 0; i < event.results.length; ++i) {
-              const text = event.results[i]?.[0]?.transcript?.trim();
-              if (text) chunks.push(text);
-            }
-            latestChunk = chunks.join(' ');
-          }
-
-          const recognized = cleanSpokenTranscript(latestChunk);
-          if (recognized) {
-            liveTranscriptRef.current = recognized;
-            setLatestTranscript(recognized);
-            setAgentStatusText(`Listening: "${recognized}"`);
-            setAudioLevel(0.45 + Math.random() * 0.45);
-          }
-        };
-
-        recognition.onerror = (e: any) => {
-          console.warn('SpeechRecognition notice:', e?.error);
-          if (e?.error === 'not-allowed') {
-            setSpeechError('Microphone access was denied. Please allow microphone permission.');
-            setIsListening(false);
-            isListeningRef.current = false;
-          }
-        };
-
-        recognition.onend = () => {
-          // When user pauses speaking in continuous = false mode, finalize and submit cleanly
-          const finalCommand = cleanSpokenTranscript(liveTranscriptRef.current);
-          if (isListeningRef.current && finalCommand.length > 1) {
-            markDoneAndSubmit();
-          }
-        };
-
-        recognition.start();
-        recognitionRef.current = recognition;
-        setIsListening(true);
-        isListeningRef.current = true;
-        setRecordingSeconds(0);
-        setAgentStatusText('Listening... Speak your command in Urdu or English');
-
-        // Dynamic pulsing animation while speaking
-        if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-        recordingTimerRef.current = setInterval(() => {
-          setRecordingSeconds((prev) => prev + 1);
-          setAudioLevel((prev) => (prev > 0.3 ? 0.15 : 0.65));
-        }, 500);
-
-        return; // Success! No getUserMedia collision!
-      } catch (recErr) {
-        console.warn('SpeechRecognition initialization failed, trying MediaRecorder:', recErr);
-      }
-    }
-
-    // 2. Fallback: MediaRecorder with getUserMedia
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-      setSpeechError('Microphone recording is not supported on this browser.');
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
-
-      streamRef.current = stream;
-      audioChunksRef.current = [];
-
-      // Setup Web Audio API volume visualizer
-      try {
-        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioCtx) {
-          const ctx = new AudioCtx();
-          audioContextRef.current = ctx;
-          const analyser = ctx.createAnalyser();
-          analyser.fftSize = 64;
-          analyserRef.current = analyser;
-          const source = ctx.createMediaStreamSource(stream);
-          source.connect(analyser);
-
-          const dataArray = new Uint8Array(analyser.frequencyBinCount);
-          const updateAudioLevel = () => {
-            if (!analyserRef.current) return;
-            analyserRef.current.getByteFrequencyData(dataArray);
-            let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-              sum += dataArray[i];
-            }
-            const avg = sum / dataArray.length;
-            const normalized = Math.min(1, avg / 90);
-            setAudioLevel(normalized);
-            animFrameRef.current = requestAnimationFrame(updateAudioLevel);
-          };
-          updateAudioLevel();
-        }
-      } catch (audioVisErr) {
-        console.warn('AudioContext visualization setup:', audioVisErr);
-      }
-
-      // Determine supported mime type
-      let mimeType = 'audio/webm';
-      if (typeof MediaRecorder !== 'undefined') {
-        const supportedTypes = [
-          'audio/webm;codecs=opus',
-          'audio/webm',
-          'audio/mp4',
-          'audio/aac',
-          'audio/ogg',
-        ];
-        for (const t of supportedTypes) {
-          if (MediaRecorder.isTypeSupported(t)) {
-            mimeType = t;
-            break;
-          }
-        }
-      }
-
-      const recorder = new MediaRecorder(stream, { mimeType });
-      mediaRecorderRef.current = recorder;
-
-      recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onstop = async () => {
-        setIsListening(false);
-        stopAudioVisualization();
-
-        if (recordingTimerRef.current) {
-          clearInterval(recordingTimerRef.current);
-          recordingTimerRef.current = null;
-        }
-
-        // Release hardware mic stream immediately
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach((track) => track.stop());
-          streamRef.current = null;
-        }
-
-        // Stop browser speech recognition if still active
-        if (recognitionRef.current) {
-          try {
-            recognitionRef.current.stop();
-          } catch {}
-          recognitionRef.current = null;
-        }
-
-        // 1. Check if browser SpeechRecognition already captured live transcript accurately
-        const rawLive = liveTranscriptRef.current.trim();
-        const liveText = cleanSpokenTranscript(rawLive);
-        if (liveText && liveText.length > 1) {
-          setLatestTranscript(liveText);
-          setInputText(liveText);
-          setAgentStatusText(`Heard: "${liveText}"`);
-          // Automatically execute the voice command
-          await handleSendMessage(liveText, true);
-          return;
-        }
-
-        // If recording was cancelled, audio chunks are empty
-        if (audioChunksRef.current.length === 0) {
-          setAgentStatusText('Recording cancelled');
-          return;
-        }
-
-        const audioBlob = new Blob(audioChunksRef.current, {
-          type: recorder.mimeType || mimeType,
-        });
-        audioChunksRef.current = [];
-
-        if (audioBlob.size < 400) {
-          setSpeechError('Audio was too brief. Please tap to speak and say your stock command.');
-          setAgentStatusText('Ready to listen');
-          return;
-        }
-
-        setIsTranscribing(true);
-        setAgentStatusText('Understanding your voice with Gemini...');
-
-        try {
-          const reader = new FileReader();
-          reader.readAsDataURL(audioBlob);
-          reader.onloadend = async () => {
-            const base64Data = (reader.result as string).split(',')[1];
-            try {
-              const audioPayload = JSON.stringify({
-                audioBase64: base64Data,
-                mimeType: recorder.mimeType || mimeType,
-              });
-
-              let res: any = null;
-              let data: any = {};
-
-              try {
-                res = await fetch('/api/gemini/transcribe-audio', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: audioPayload,
-                });
-
-                // Fallback alias attempt if primary route returned 404
-                if (res && res.status === 404) {
-                  res = await fetch('/api/transcribe-audio', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: audioPayload,
-                  });
-                }
-
-                if (res && res.ok) {
-                  data = await res.json();
-                }
-              } catch (fetchErr) {
-                console.warn('Transcription network call failed:', fetchErr);
-              }
-
-              // Fallback to client-side transcription if server returned 404 (e.g. Vercel static host)
-              if (!data?.transcript && (!res || !res.ok)) {
-                const clientKey =
-                  (import.meta as any).env?.VITE_GEMINI_API_KEY ||
-                  (typeof window !== 'undefined' ? (window as any)._GEMINI_API_KEY : '');
-
-                if (clientKey) {
-                  try {
-                    setAgentStatusText('Transcribing via client-side Gemini...');
-                    data = await processAudioTranscription({
-                      apiKey: clientKey,
-                      audioBase64: base64Data,
-                      mimeType: recorder.mimeType || mimeType,
-                    });
-                  } catch (directErr: any) {
-                    throw new Error(`Direct transcription error: ${directErr?.message}`);
-                  }
-                } else {
-                  if (res?.status === 404) {
-                    throw new Error(
-                      'Transcription route returned 404 on Vercel. Please ensure GEMINI_API_KEY or VITE_GEMINI_API_KEY is configured in Vercel Project Settings > Environment Variables.'
-                    );
-                  }
-                  throw new Error(data?.error || `Server returned error status ${res?.status || 500}`);
-                }
-              }
-
-              const rawTranscript = data?.transcript ? data.transcript.trim() : '';
-              const transcript = cleanSpokenTranscript(rawTranscript);
-
-              if (transcript) {
-                setLatestTranscript(transcript);
-                setInputText(transcript);
-                setAgentStatusText(`Heard: "${transcript}"`);
-                // Automatically execute the voice command
-                await handleSendMessage(transcript, true);
-              } else {
-                setSpeechError('Could not detect clear speech in the audio. Please tap to speak again.');
-                setAgentStatusText('Ready to listen');
-              }
-            } catch (err: any) {
-              console.error('Transcription error:', err);
-              const isFetchFailed = err?.message?.toLowerCase().includes('failed to fetch');
-              const message = isFetchFailed
-                ? 'Could not connect to the inventory service. Please check your network connection.'
-                : (err?.message || 'Could not transcribe audio. Please tap to speak again.');
-              setSpeechError(message);
-              setAgentStatusText('Ready to listen');
-            } finally {
-              setIsTranscribing(false);
-            }
-          };
-        } catch (readErr: any) {
-          console.error('Blob reading error:', readErr);
-          setSpeechError(readErr?.message || 'Failed to read recorded audio file.');
-          setIsTranscribing(false);
-          setAgentStatusText('Ready to listen');
-        }
-      };
-
-      recorder.start(200);
-      setIsListening(true);
-      setRecordingSeconds(0);
-      setAgentStatusText('Listening calmly...');
-
-      if (recordingTimerRef.current) {
-        clearInterval(recordingTimerRef.current);
-      }
-      recordingTimerRef.current = setInterval(() => {
-        setRecordingSeconds((prev) => prev + 1);
-      }, 1000);
-    } catch (err: any) {
-      console.warn('Microphone error:', err);
-      setIsListening(false);
-      stopAudioVisualization();
-
-      const isBlocked =
-        err?.name === 'NotAllowedError' ||
-        err?.name === 'PermissionDeniedError' ||
-        err?.name === 'SecurityError';
-
-      if (isBlocked) {
-        setSpeechError('Microphone permission was blocked. Please enable it in browser settings.');
-      } else {
-        setSpeechError('Could not connect to microphone. You can type in the Chat view.');
-      }
-      setAgentStatusText('Ready to listen');
-    }
-  };
-
-  // Mark Done: Immediately stops recording, releases mic, and triggers transcription
-  const markDoneAndSubmit = () => {
-    if (recordingTimerRef.current) {
-      clearInterval(recordingTimerRef.current);
-      recordingTimerRef.current = null;
-    }
-    setIsListening(false);
-    stopAudioVisualization();
-
-    // 1. If MediaRecorder was active:
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch (e) {
-        console.warn('Error stopping recorder:', e);
-      }
-      return;
-    }
-
-    // 2. If Web Speech API was active:
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {}
-      recognitionRef.current = null;
-    }
-
-    const rawText = liveTranscriptRef.current.trim();
-    const liveText = cleanSpokenTranscript(rawText);
-    if (liveText && liveText.length > 0) {
-      setLatestTranscript(liveText);
-      setInputText(liveText);
-      setAgentStatusText(`Heard: "${liveText}"`);
-      handleSendMessage(liveText, true);
-    } else {
-      setAgentStatusText('Ready to listen');
-      setSpeechError('Could not detect clear speech. Please tap to speak again.');
-    }
-  };
-
-  // Cancel Recording: Discards audio chunks, stops tracks, leaves without submitting
-  const cancelRecording = () => {
-    isListeningRef.current = false;
-    audioChunksRef.current = [];
-    liveTranscriptRef.current = '';
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {}
-      recognitionRef.current = null;
-    }
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch {}
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-    stopAudioVisualization();
-    setIsListening(false);
-    setAgentStatusText('Ready to listen');
   };
 
   // Handle Undo of an executed action
@@ -951,10 +579,6 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           };
         })
       );
-
-      if (latestVoiceAction && latestVoiceAction.id === actionRecord.id) {
-        setLatestVoiceAction({ ...latestVoiceAction, isUndone: true });
-      }
     }
   };
 
@@ -969,9 +593,6 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
     if (synthRef.current) synthRef.current.cancel();
     setSpeakingMessageId(null);
     setMessages([]);
-    setLatestTranscript('');
-    setLatestVoiceAction(null);
-    setAgentStatusText('Ready to listen');
   };
 
   if (!isOpen) return null;
@@ -979,83 +600,40 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
   return (
     <div
       id="gemini-stock-chat-modal"
-      className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-200"
-      onClick={handleCleanExit}
+      className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-150"
+      onClick={onClose}
     >
       <div
-        className="bg-slate-900 text-white w-full max-w-2xl rounded-3xl border border-slate-800 shadow-2xl flex flex-col h-[94vh] sm:h-[680px] max-h-[820px] overflow-hidden animate-in zoom-in-95 duration-150"
+        className="bg-white w-full max-w-2xl rounded-3xl border border-slate-200 shadow-2xl flex flex-col h-[92vh] sm:h-[680px] max-h-[820px] overflow-hidden animate-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Top Header Bar */}
-        <div className="px-4 py-3 sm:px-6 sm:py-3.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between shrink-0 shadow-xs">
-          {/* Back Button ("when I click back, it should leave just like your one") */}
-          <button
-            id="btn-voice-agent-back"
-            type="button"
-            onClick={handleCleanExit}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 active:bg-slate-800 text-slate-200 hover:text-white font-semibold text-xs sm:text-sm transition-colors cursor-pointer border border-slate-700/60 shadow-xs"
-            title="Leave and return to inventory"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Back</span>
-          </button>
-
-          {/* Central Title & Mode Status */}
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700/60 text-xs">
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  isListening
-                    ? 'bg-rose-500 animate-ping'
-                    : isTranscribing || isLoading
-                    ? 'bg-amber-400 animate-pulse'
-                    : speakingMessageId
-                    ? 'bg-teal-400 animate-pulse'
-                    : 'bg-emerald-400'
-                }`}
-              />
-              <span className="font-bold text-slate-200 text-xs truncate">
-                {isListening
-                  ? `Listening (${formatTimer(recordingSeconds)})`
-                  : isTranscribing
-                  ? 'Transcribing...'
-                  : isLoading
-                  ? 'Processing...'
-                  : speakingMessageId
-                  ? 'Speaking...'
-                  : 'Voice Agent'}
-              </span>
+        {/* Modal Header */}
+        <div className="px-4 py-3.5 sm:px-6 sm:py-4 bg-gradient-to-r from-emerald-700 via-teal-700 to-emerald-800 text-white flex items-center justify-between shrink-0 shadow-xs">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center text-white shrink-0 shadow-inner">
+              <Sparkles className="w-5 h-5 text-amber-300 animate-pulse" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-base sm:text-lg font-bold tracking-tight text-white truncate">
+                  Gemini AI Stock Agent
+                </h2>
+                <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white border border-white/30">
+                  Active Agent
+                </span>
+              </div>
+              <p className="text-xs text-emerald-100/90 truncate flex items-center gap-1.5">
+                <span>Direct UI control on {items.length} items</span>
+                <span>•</span>
+                <span className="font-mono text-[11px] text-emerald-200">
+                  {items.reduce((s, i) => s + (i.quantity || 0), 0)} total stock
+                </span>
+              </p>
             </div>
           </div>
 
-          {/* Right Action Controls: Mode Switcher & TTS Toggle */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            {/* Toggle View Mode: Voice Orb vs Chat Log */}
-            <button
-              id="btn-toggle-view-mode"
-              type="button"
-              onClick={() => {
-                // If currently listening, stop first
-                if (isListening) markDoneAndSubmit();
-                setViewMode(viewMode === 'voice' ? 'chat' : 'voice');
-              }}
-              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-              title={viewMode === 'voice' ? 'Switch to Chat History' : 'Switch to Calm Voice Mode'}
-            >
-              {viewMode === 'voice' ? (
-                <>
-                  <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="hidden sm:inline">Chat History</span>
-                </>
-              ) : (
-                <>
-                  <Radio className="w-3.5 h-3.5 text-teal-400" />
-                  <span className="hidden sm:inline">Voice Mode</span>
-                </>
-              )}
-            </button>
-
-            {/* Audio Voice readout toggle */}
+          <div className="flex items-center gap-1 shrink-0">
+            {/* Audio Auto-read Toggle */}
             <button
               type="button"
               onClick={() => {
@@ -1065,483 +643,453 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                   setSpeakingMessageId(null);
                 }
               }}
-              className={`p-2 rounded-xl border transition-colors cursor-pointer flex items-center justify-center ${
+              title={
                 autoSpeechEnabled
-                  ? 'bg-emerald-600/20 text-emerald-300 border-emerald-500/40'
-                  : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                  ? 'Voice readout is ON. Tap to mute'
+                  : 'Voice readout is OFF. Tap to hear Gemini speak'
+              }
+              className={`min-h-[38px] min-w-[38px] p-2 rounded-xl border transition-colors cursor-pointer flex items-center justify-center ${
+                autoSpeechEnabled
+                  ? 'bg-white text-emerald-800 border-white font-bold'
+                  : 'bg-white/10 text-white border-white/20 hover:bg-white/20'
               }`}
-              title={autoSpeechEnabled ? 'Voice readout is ON (tap to mute)' : 'Voice readout is OFF (tap to unmute)'}
             >
               {autoSpeechEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            </button>
+
+            {/* Clear Chat Button */}
+            <button
+              type="button"
+              onClick={clearChat}
+              title="Reset conversation"
+              className="min-h-[38px] min-w-[38px] p-2 text-white/80 hover:text-white bg-white/10 hover:bg-white/20 rounded-xl transition-colors cursor-pointer flex items-center justify-center"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+
+            {/* Close Button */}
+            <button
+              type="button"
+              onClick={onClose}
+              className="min-h-[38px] min-w-[38px] p-2 text-white/80 hover:text-white bg-white/10 hover:bg-white/20 rounded-xl transition-colors cursor-pointer flex items-center justify-center ml-1"
+              aria-label="Close Gemini stock chat"
+            >
+              <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Multilingual / Quick Language Bar */}
-        <div className="bg-slate-950/80 px-4 py-2 flex items-center justify-between gap-2 border-b border-slate-800/80 text-xs shrink-0">
-          <div className="flex items-center gap-1.5 text-slate-400 font-medium text-[11px]">
-            <Languages className="w-3.5 h-3.5 text-teal-400" />
-            <span>Voice Language:</span>
-          </div>
+        {/* Chat Messages Feed */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 bg-slate-50/70">
+          {messages.map((msg) => {
+            const isModel = msg.role === 'model';
+            const isSpeaking = speakingMessageId === msg.id;
 
-          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
-            {(
-              [
-                { id: 'en', label: 'English (Native)' },
-                { id: 'auto', label: 'Auto Detect' },
-                { id: 'roman_ur', label: 'Roman Urdu' },
-                { id: 'ur', label: 'اردو' },
-              ] as const
-            ).map((lang) => (
-              <button
-                key={lang.id}
-                type="button"
-                onClick={() => setLanguageMode(lang.id)}
-                className={`px-2.5 py-0.5 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-                  languageMode === lang.id
-                    ? 'bg-emerald-500 text-slate-950 font-bold shadow-xs'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                }`}
-              >
-                {lang.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* MAIN BODY: VOICE MODE (ChatGPT / WhatsApp Style) */}
-        {viewMode === 'voice' ? (
-          <div className="flex-1 flex flex-col items-center justify-between p-4 sm:p-6 select-none overflow-y-auto">
-            {/* Top Prompt / Instruction Banner */}
-            <div className="w-full text-center space-y-1">
-              <p className="text-xs uppercase tracking-wider font-bold text-teal-400">
-                AI Stock Voice Agent
-              </p>
-              <h3 className="text-base sm:text-lg font-bold text-slate-100">
-                {isListening
-                  ? 'Listening calmly... Speak your stock update'
-                  : isTranscribing
-                  ? 'Understanding what you said...'
-                  : isLoading
-                  ? 'Applying changes to inventory...'
-                  : speakingMessageId
-                  ? 'Agent speaking response...'
-                  : 'Tap the button below and speak'}
-              </h3>
-              <p className="text-xs text-slate-400 max-w-md mx-auto">
-                {languageMode === 'ur'
-                  ? 'آسانی سے بولیں: "Widget A میں 10 شامل کرو" یا "5 ڈبے فروخت ہوئے"'
-                  : 'Speak naturally: "Add 10 to Widget A", "Sold 5 laptops", or "What items are low in stock?"'}
-              </p>
-            </div>
-
-            {/* Error Banner */}
-            {speechError && (
-              <div className="w-full max-w-md my-2 p-3 rounded-2xl bg-rose-950/60 border border-rose-800/80 text-rose-200 text-xs flex items-start justify-between gap-2 shadow-lg animate-in fade-in">
-                <div className="flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                  <p className="leading-relaxed">{speechError}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSpeechError(null)}
-                  className="p-1 text-rose-400 hover:text-white rounded-md cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-
-            {/* Central Animated Voice Orb / Waveform Sphere */}
-            <div className="relative my-auto flex flex-col items-center justify-center py-6 sm:py-10">
-              {/* Outer Pulsing Glow Rings */}
+            return (
               <div
-                className={`absolute w-44 h-44 sm:w-56 sm:h-56 rounded-full transition-all duration-300 pointer-events-none ${
-                  isListening
-                    ? 'bg-rose-500/20 blur-xl scale-125'
-                    : isTranscribing || isLoading
-                    ? 'bg-amber-500/20 blur-xl scale-110'
-                    : speakingMessageId
-                    ? 'bg-teal-500/20 blur-xl scale-115'
-                    : 'bg-emerald-500/10 blur-lg scale-100'
-                }`}
-                style={{
-                  transform: isListening
-                    ? `scale(${1.15 + audioLevel * 0.45})`
-                    : undefined,
-                }}
-              />
-
-              {/* Middle Concentric Ring */}
-              <div
-                className={`w-36 h-36 sm:w-44 sm:h-44 rounded-full flex items-center justify-center transition-all duration-200 border ${
-                  isListening
-                    ? 'border-rose-500/40 bg-gradient-to-tr from-rose-900/40 to-pink-900/30'
-                    : isTranscribing || isLoading
-                    ? 'border-amber-500/40 bg-gradient-to-tr from-amber-900/30 to-yellow-900/20 animate-spin'
-                    : speakingMessageId
-                    ? 'border-teal-500/40 bg-gradient-to-tr from-teal-900/40 to-emerald-900/30'
-                    : 'border-emerald-500/30 bg-gradient-to-tr from-emerald-950/60 to-slate-900/80 shadow-inner'
-                }`}
-                style={{
-                  transform: isListening
-                    ? `scale(${1 + audioLevel * 0.25})`
-                    : undefined,
-                }}
+                key={msg.id}
+                className={`flex flex-col ${isModel ? 'items-start' : 'items-end'}`}
               >
-                {/* Core Sphere */}
                 <div
-                  className={`w-28 h-28 sm:w-32 sm:h-32 rounded-full flex items-center justify-center shadow-2xl transition-all duration-200 cursor-pointer ${
-                    isListening
-                      ? 'bg-gradient-to-br from-rose-500 via-red-600 to-rose-700 shadow-rose-950/50'
-                      : isTranscribing || isLoading
-                      ? 'bg-gradient-to-br from-amber-500 to-yellow-600 shadow-amber-950/50'
-                      : speakingMessageId
-                      ? 'bg-gradient-to-br from-teal-500 via-emerald-600 to-teal-700 shadow-teal-950/50'
-                      : 'bg-gradient-to-br from-emerald-600 to-teal-700 shadow-emerald-950/50 hover:scale-105 active:scale-95'
+                  className={`flex items-start gap-2.5 max-w-[95%] sm:max-w-[88%] ${
+                    isModel ? 'flex-row' : 'flex-row-reverse'
                   }`}
-                  onClick={
-                    isListening
-                      ? markDoneAndSubmit
-                      : isTranscribing || isLoading
-                      ? undefined
-                      : startRecording
-                  }
-                  title={isListening ? 'Tap to mark Done' : 'Tap to start recording'}
                 >
-                  {isListening ? (
-                    <div className="flex flex-col items-center text-white">
-                      <span className="font-mono text-base font-extrabold tracking-wider">
-                        {formatTimer(recordingSeconds)}
-                      </span>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-rose-100 mt-0.5">
-                        Done ✓
-                      </span>
-                    </div>
-                  ) : isTranscribing || isLoading ? (
-                    <Loader2 className="w-10 h-10 text-white animate-spin" />
-                  ) : speakingMessageId ? (
-                    <div className="flex items-center gap-1">
-                      <span className="w-1.5 h-6 bg-white rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <span className="w-1.5 h-9 bg-white rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <span className="w-1.5 h-5 bg-white rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                      <span className="w-1.5 h-8 bg-white rounded-full animate-bounce" style={{ animationDelay: '450ms' }} />
-                    </div>
-                  ) : (
-                    <Mic className="w-10 h-10 text-white" />
-                  )}
-                </div>
-              </div>
-
-              {/* WhatsApp-style Live Audio Waves while recording */}
-              {isListening && (
-                <div className="flex items-center gap-1.5 mt-5 h-8 px-4 py-1.5 bg-slate-800/90 rounded-full border border-rose-500/30 shadow-md">
-                  <span
-                    className="w-1.5 bg-rose-400 rounded-full transition-all duration-75"
-                    style={{ height: `${Math.max(6, audioLevel * 24)}px` }}
-                  />
-                  <span
-                    className="w-1.5 bg-rose-500 rounded-full transition-all duration-75"
-                    style={{ height: `${Math.max(10, audioLevel * 30)}px` }}
-                  />
-                  <span
-                    className="w-1.5 bg-rose-400 rounded-full transition-all duration-75"
-                    style={{ height: `${Math.max(14, audioLevel * 22)}px` }}
-                  />
-                  <span
-                    className="w-1.5 bg-rose-500 rounded-full transition-all duration-75"
-                    style={{ height: `${Math.max(8, audioLevel * 28)}px` }}
-                  />
-                  <span
-                    className="w-1.5 bg-rose-400 rounded-full transition-all duration-75"
-                    style={{ height: `${Math.max(12, audioLevel * 20)}px` }}
-                  />
-                  <span className="text-[11px] font-mono text-rose-300 ml-2 font-bold">
-                    {formatTimer(recordingSeconds)}
-                  </span>
-                </div>
-              )}
-
-              {/* Spoken Text Preview or Action Outcome Card */}
-              {latestTranscript && !isListening && (
-                <div className="w-full max-w-md mt-4 p-3.5 rounded-2xl bg-slate-800/90 border border-slate-700/80 shadow-md animate-in fade-in space-y-2">
-                  <div className="flex items-center justify-between text-[11px] text-slate-400">
-                    <span className="font-semibold text-slate-300">You said:</span>
-                    <span className="font-mono text-[10px] text-emerald-400">Transcribed</span>
-                  </div>
-                  <p className="text-sm font-medium text-slate-100 break-words">
-                    "{latestTranscript}"
-                  </p>
-
-                  {/* If action was executed, show confirmation badge and undo */}
-                  {latestVoiceAction && (
-                    <div className="pt-2 border-t border-slate-700/60 flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-1.5 text-emerald-400 font-bold min-w-0">
-                        <CheckCircle2 className="w-4 h-4 shrink-0" />
-                        <span className="truncate">{latestVoiceAction.summary}</span>
-                      </div>
-                      {latestVoiceAction.undo && !latestVoiceAction.isUndone && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            latestVoiceAction.undo?.();
-                            setLatestVoiceAction({ ...latestVoiceAction, isUndone: true });
-                          }}
-                          className="px-2 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer shrink-0 ml-2"
-                        >
-                          <Undo2 className="w-3 h-3" />
-                          <span>Undo</span>
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Bottom Primary Controls: Just ONE Button Interface */}
-            <div className="w-full flex flex-col items-center justify-center pt-2 pb-2">
-              {isListening ? (
-                /* While Recording: Clear "Done" Button + Cancel */
-                <div className="flex items-center gap-4">
-                  {/* Cancel Button */}
-                  <button
-                    id="btn-voice-cancel"
-                    type="button"
-                    onClick={cancelRecording}
-                    className="min-h-[48px] px-5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold text-xs transition-colors cursor-pointer border border-slate-700"
-                  >
-                    Cancel
-                  </button>
-
-                  {/* ONE Big Primary Done Button */}
-                  <button
-                    id="btn-voice-done"
-                    type="button"
-                    onClick={markDoneAndSubmit}
-                    className="min-h-[56px] px-8 rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 active:scale-95 text-slate-950 font-extrabold text-base flex items-center gap-2.5 shadow-xl shadow-emerald-950/40 transition-transform cursor-pointer border border-emerald-400"
-                  >
-                    <Check className="w-5 h-5 stroke-[3]" />
-                    <span>Done</span>
-                  </button>
-                </div>
-              ) : isTranscribing || isLoading ? (
-                /* Processing State */
-                <div className="flex items-center gap-2 text-slate-300 text-sm font-semibold py-3">
-                  <Loader2 className="w-5 h-5 animate-spin text-teal-400" />
-                  <span>{isTranscribing ? 'Transcribing audio...' : 'Stock Agent is updating...'}</span>
-                </div>
-              ) : speakingMessageId ? (
-                /* Speaking State: Tap to Stop Speaking or Speak Again */
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      synthRef.current?.cancel();
-                      setSpeakingMessageId(null);
-                    }}
-                    className="min-h-[48px] px-5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-2 cursor-pointer border border-slate-700"
-                  >
-                    <VolumeX className="w-4 h-4" />
-                    <span>Stop Speaking</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={startRecording}
-                    className="min-h-[52px] px-6 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm flex items-center gap-2 cursor-pointer shadow-lg active:scale-95 transition-transform"
-                  >
-                    <Mic className="w-4 h-4" />
-                    <span>Speak Again</span>
-                  </button>
-                </div>
-              ) : (
-                /* Idle State: ONE Big Tap to Speak Button */
-                <div className="flex flex-col items-center gap-2">
-                  <button
-                    id="btn-voice-start"
-                    type="button"
-                    onClick={startRecording}
-                    className="min-h-[60px] px-8 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-extrabold text-base flex items-center gap-3 shadow-xl shadow-emerald-950/40 active:scale-95 transition-transform cursor-pointer border border-emerald-300"
-                  >
-                    <Mic className="w-5 h-5 text-slate-950" />
-                    <span>Tap to Speak</span>
-                  </button>
-                  <p className="text-[11px] text-slate-400">
-                    Tap to speak • Keep talking • Tap Done when finished
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          /* SECONDARY BODY: CHAT & AUDIT LOG MODE */
-          <div className="flex-1 flex flex-col min-h-0 bg-slate-950/60">
-            {/* Messages Scroll Area */}
-            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
-              {messages.map((msg) => {
-                const isUser = msg.role === 'user';
-                const hasUrdu = isUrduText(msg.text);
-
-                return (
+                  {/* Avatar */}
                   <div
-                    key={msg.id}
-                    className={`flex items-start gap-2.5 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
+                    className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-2xs ${
+                      isModel ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-white'
+                    }`}
                   >
-                    {/* Role Avatar */}
-                    <div
-                      className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-2xs ${
-                        isUser
-                          ? 'bg-slate-700 text-slate-200'
-                          : 'bg-emerald-600 text-white'
-                      }`}
-                    >
-                      {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+                    {isModel ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
+                  </div>
+
+                  {/* Message Bubble */}
+                  <div
+                    className={`rounded-2xl px-4 py-3 text-sm shadow-2xs select-text ${
+                      isModel
+                        ? 'bg-white text-slate-800 border border-slate-200/90 rounded-tl-xs leading-relaxed w-full'
+                        : 'bg-emerald-600 text-white font-medium rounded-tr-xs leading-relaxed'
+                    }`}
+                  >
+                    {/* Render message body with formatted markdown elements */}
+                    <div className="space-y-2 whitespace-pre-wrap break-words">
+                      {msg.text.split('\n\n').map((paragraph, idx) => {
+                        return (
+                          <p key={idx} className="leading-relaxed">
+                            {formatTextWithBold(paragraph)}
+                          </p>
+                        );
+                      })}
                     </div>
 
-                    {/* Message Bubble */}
-                    <div
-                      className={`max-w-[85%] sm:max-w-[78%] rounded-2xl px-4 py-3 shadow-sm ${
-                        isUser
-                          ? 'bg-emerald-600 text-white rounded-tr-xs'
-                          : 'bg-slate-800 text-slate-100 rounded-tl-xs border border-slate-700/80'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <span className="text-[10px] font-bold uppercase tracking-wider opacity-75">
-                          {isUser ? (msg.isVoiceInput ? '🎤 Spoken Voice' : 'You') : 'Stock Agent'}
+                    {/* Render EXECUTED AGENT ACTIONS (Real UI Operations) */}
+                    {isModel && msg.executedActions && msg.executedActions.length > 0 && (
+                      <div className="mt-3 pt-2.5 border-t border-slate-100 space-y-2">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                          <span>AI Agent Inventory Action Applied</span>
                         </span>
-                        <div className="flex items-center gap-1">
-                          {!isUser && (
-                            <button
-                              type="button"
-                              onClick={() => speakText(msg.text, msg.id)}
-                              className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-700 transition-colors cursor-pointer"
-                              title={speakingMessageId === msg.id ? 'Stop audio' : 'Listen via voice'}
-                            >
-                              {speakingMessageId === msg.id ? (
-                                <VolumeX className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
-                              ) : (
-                                <Volume2 className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          )}
-                          <span className="text-[10px] opacity-60">
-                            {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                      </div>
 
-                      <div
-                        className={`text-sm leading-relaxed whitespace-pre-line ${
-                          hasUrdu ? 'font-serif text-right text-base leading-loose' : ''
-                        }`}
-                      >
-                        {msg.text}
-                      </div>
-
-                      {/* Executed Agent Actions in Chat */}
-                      {msg.executedActions && msg.executedActions.length > 0 && (
-                        <div className="mt-2.5 pt-2 border-t border-slate-700 space-y-1.5">
-                          {msg.executedActions.map((act) => (
-                            <div
-                              key={act.id}
-                              className={`p-2 rounded-xl text-xs flex items-center justify-between gap-2 ${
-                                act.isUndone
-                                  ? 'bg-slate-900/60 text-slate-400 line-through'
-                                  : 'bg-emerald-950/80 text-emerald-200 border border-emerald-800/80'
-                              }`}
-                            >
-                              <div className="flex items-center gap-1.5 truncate">
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                                <span className="font-semibold truncate">{act.summary}</span>
+                        {msg.executedActions.map((actionRecord) => (
+                          <div
+                            key={actionRecord.id}
+                            className={`p-3 rounded-xl border transition-all ${
+                              actionRecord.isUndone
+                                ? 'bg-slate-100/80 border-slate-200 opacity-60'
+                                : 'bg-emerald-50/80 border-emerald-200'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                                  <TrendingUp className="w-3.5 h-3.5" />
+                                </span>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-bold text-slate-900 text-xs sm:text-sm truncate">
+                                      {actionRecord.itemName || 'Stock Item'}
+                                    </span>
+                                    {actionRecord.delta !== undefined && (
+                                      <span
+                                        className={`text-xs font-bold font-mono px-1.5 py-0.2 rounded-md ${
+                                          actionRecord.delta > 0
+                                            ? 'bg-emerald-600 text-white'
+                                            : 'bg-rose-600 text-white'
+                                        }`}
+                                      >
+                                        {actionRecord.delta > 0 ? `+${actionRecord.delta}` : actionRecord.delta}{' '}
+                                        {actionRecord.unit || ''}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-slate-500">
+                                    {actionRecord.summary}
+                                  </p>
+                                </div>
                               </div>
-                              {act.undo && !act.isUndone && (
+
+                              {/* Undo Button */}
+                              {actionRecord.undo && (
                                 <button
                                   type="button"
-                                  onClick={() => handleUndoAction(act, msg.id)}
-                                  className="px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                                  disabled={actionRecord.isUndone}
+                                  onClick={() => handleUndoAction(actionRecord, msg.id)}
+                                  className={`min-h-[28px] px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shrink-0 ${
+                                    actionRecord.isUndone
+                                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                                      : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-300 shadow-2xs'
+                                  }`}
                                 >
                                   <Undo2 className="w-3 h-3" />
-                                  <span>Undo</span>
+                                  <span>{actionRecord.isUndone ? 'Reverted' : 'Undo Action'}</span>
                                 </button>
                               )}
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
 
-              {isLoading && (
-                <div className="flex items-start gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
-                    <Bot className="w-4 h-4" />
-                  </div>
-                  <div className="bg-slate-800 border border-slate-700 rounded-2xl rounded-tl-xs px-4 py-3 flex items-center gap-2 text-sm text-slate-300">
-                    <Loader2 className="w-4 h-4 animate-spin text-emerald-400 shrink-0" />
-                    <span className="animate-pulse">Stock Agent is processing...</span>
+                            {/* Mathematical Calculation Flow */}
+                            {actionRecord.previousQuantity !== undefined &&
+                              actionRecord.newQuantity !== undefined && (
+                                <div className="mt-2 pt-1.5 border-t border-emerald-200/50 flex items-center justify-between text-[11px] font-mono text-slate-600">
+                                  <span>Previous: {actionRecord.previousQuantity}</span>
+                                  <ArrowRight className="w-3 h-3 text-emerald-600" />
+                                  <span className="font-bold text-emerald-800">
+                                    New Total: {actionRecord.newQuantity} {actionRecord.unit || ''}
+                                  </span>
+                                </div>
+                              )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Bottom toolbar for model message: Speech Readout & Timestamp */}
+                    {isModel && (
+                      <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-xs">
+                        <span className="text-[10px] text-slate-400 font-medium">
+                          {msg.timestamp.toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+
+                        <div className="flex items-center gap-1.5">
+                          {/* Speak aloud button */}
+                          <button
+                            type="button"
+                            onClick={() => speakText(msg.text, msg.id)}
+                            className={`min-h-[28px] px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
+                              isSpeaking
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                            }`}
+                            title={isSpeaking ? 'Stop speaking' : 'Read aloud with voice'}
+                          >
+                            <Volume2
+                              className={`w-3.5 h-3.5 ${
+                                isSpeaking ? 'animate-pulse text-emerald-600' : ''
+                              }`}
+                            />
+                            <span className="text-[11px]">
+                              {isSpeaking ? 'Stop' : 'Listen'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
 
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Chat Text Input Bar */}
-            <div className="p-3 sm:p-4 bg-slate-900 border-t border-slate-800 shrink-0">
-              <div className="flex items-center gap-2">
-                {/* Voice button in chat bar */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setViewMode('voice');
-                    startRecording();
-                  }}
-                  className="min-h-[44px] min-w-[44px] rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 flex items-center justify-center cursor-pointer transition-colors"
-                  title="Switch to Voice Mode & Speak"
-                >
-                  <Mic className="w-5 h-5" />
-                </button>
-
-                <input
-                  type="text"
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder={
-                    languageMode === 'ur'
-                      ? 'میسج لکھیں یا مائیک دبائیں...'
-                      : 'Type a stock command or question...'
-                  }
-                  className="flex-1 min-h-[44px] px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                />
-
-                <button
-                  type="button"
-                  onClick={() => handleSendMessage()}
-                  disabled={!inputText.trim() || isLoading}
-                  className="min-h-[44px] min-w-[44px] rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white flex items-center justify-center cursor-pointer transition-colors"
-                  title="Send message"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={clearChat}
-                  className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
-                  title="Clear chat history"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </button>
+                {/* Suggested follow-up prompts from model */}
+                {isModel && msg.suggestions && msg.suggestions.length > 0 && (
+                  <div className="mt-2.5 ml-10 flex flex-wrap gap-1.5 max-w-[88%]">
+                    {msg.suggestions.map((suggestion, sIdx) => (
+                      <button
+                        key={sIdx}
+                        type="button"
+                        onClick={() => handleSendMessage(suggestion)}
+                        className="text-xs font-semibold text-emerald-800 bg-emerald-50/90 hover:bg-emerald-100 active:bg-emerald-200 border border-emerald-200 rounded-xl px-2.5 py-1.5 text-left transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                      >
+                        <Sparkles className="w-3 h-3 text-emerald-600 shrink-0" />
+                        <span>{suggestion}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
+            );
+          })}
+
+          {/* Loading Indicator */}
+          {isLoading && (
+            <div className="flex items-start gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                <Bot className="w-4 h-4" />
+              </div>
+              <div className="bg-white border border-slate-200/90 rounded-2xl rounded-tl-xs px-4 py-3 shadow-2xs flex items-center gap-2 text-sm text-slate-600">
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-600 shrink-0" />
+                <span className="animate-pulse">Gemini is processing your request...</span>
+              </div>
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Quick Action Chips Bar (Direct agent command templates) */}
+        <div className="px-4 py-2 border-t border-slate-200 bg-white flex items-center gap-1.5 overflow-x-auto scrollbar-none shrink-0">
+          <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wide shrink-0">
+            Quick Commands:
+          </span>
+          {[
+            {
+              label: items.length > 0 ? `+10 to ${items[0].itemName}` : '+10 Stock',
+              query:
+                items.length > 0
+                  ? `Hey, ${items[0].itemName} increased by 10 today`
+                  : 'Add 10 to current stock',
+            },
+            {
+              label: items.length > 0 ? `-5 from ${items[0].itemName}` : '-5 Stock',
+              query:
+                items.length > 0
+                  ? `Deduct 5 from ${items[0].itemName}`
+                  : 'Deduct 5 from stock',
+            },
+            {
+              label: 'Low Stock Alert',
+              query: 'What items are low on stock and need reordering?',
+            },
+            {
+              label: 'Inventory Summary',
+              query: 'Give me a complete inventory summary and stock count',
+            },
+          ].map((chip) => (
+            <button
+              key={chip.label}
+              type="button"
+              onClick={() => handleSendMessage(chip.query)}
+              className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-200 border border-slate-200 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Speech Error Banner if microphone was blocked */}
+        {speechError && (
+          <div className="mx-3 sm:mx-4 mb-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span className="truncate">{speechError}</span>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={startListening}
+                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition-colors cursor-pointer text-[11px]"
+              >
+                Try Again
+              </button>
+              <button
+                type="button"
+                onClick={() => setSpeechError(null)}
+                className="p-1 text-amber-700 hover:bg-amber-100 rounded-md transition-colors cursor-pointer"
+                title="Dismiss"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
         )}
+
+        {/* Live Speech Recognition Waveform & Action Banner */}
+        {(isListening || isTranscribing) && (
+          <div className="mx-3 sm:mx-4 mb-2 p-2.5 rounded-xl bg-gradient-to-r from-rose-50 via-pink-50 to-rose-50 border border-rose-200 text-rose-900 text-xs flex flex-wrap items-center justify-between gap-2 shadow-2xs">
+            <div className="flex items-center gap-2.5 min-w-0">
+              {/* Animated Sound Wave Bars */}
+              <div className="flex items-center gap-0.5 h-4 px-1 shrink-0">
+                <span className="w-1 h-3 bg-rose-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-1 h-4 bg-rose-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-1 h-2.5 bg-rose-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                <span className="w-1 h-4 bg-rose-600 rounded-full animate-bounce" style={{ animationDelay: '450ms' }} />
+              </div>
+
+              <div className="min-w-0">
+                <p className="font-bold text-rose-900 truncate">
+                  {isTranscribing
+                    ? 'Transcribing audio with Gemini AI...'
+                    : recordingSeconds > 0
+                    ? `Recording voice (${recordingSeconds}s)... Speak now!`
+                    : 'Listening live... Speak your stock update'}
+                </p>
+                {inputText && (
+                  <p className="text-[11px] text-rose-700 truncate font-mono">
+                    "{inputText}"
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={stopListening}
+                className="px-2.5 py-1 text-xs font-semibold bg-white text-slate-700 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer shadow-2xs"
+              >
+                Done
+              </button>
+              {inputText.trim() && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopListening();
+                    handleSendMessage();
+                  }}
+                  className="px-2.5 py-1 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-colors cursor-pointer shadow-2xs flex items-center gap-1"
+                >
+                  <span>Send</span>
+                  <Send className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Input Bar with Voice Recognition and Text */}
+        <div className="p-3 sm:p-4 bg-white border-t border-slate-200 shrink-0">
+          <div className="flex items-center gap-2">
+            {/* Microphone Button */}
+            {speechSupported && (
+              <button
+                type="button"
+                onClick={isListening ? stopListening : startListening}
+                disabled={isTranscribing}
+                className={`min-h-[44px] min-w-[44px] rounded-xl flex items-center justify-center transition-all cursor-pointer border ${
+                  isListening
+                    ? 'bg-rose-600 text-white border-rose-700 animate-pulse ring-4 ring-rose-500/20'
+                    : isTranscribing
+                    ? 'bg-amber-100 text-amber-800 border-amber-300 cursor-wait'
+                    : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 active:bg-emerald-200'
+                }`}
+                title={
+                  isListening
+                    ? 'Click to stop listening'
+                    : isTranscribing
+                    ? 'Transcribing...'
+                    : 'Speak to Gemini: real-time voice typing'
+                }
+                aria-label={isListening ? 'Stop listening' : 'Speak to Gemini via microphone'}
+              >
+                {isTranscribing ? (
+                  <Loader2 className="w-5 h-5 animate-spin text-amber-700" />
+                ) : isListening ? (
+                  <MicOff className="w-5 h-5" />
+                ) : (
+                  <Mic className="w-5 h-5 text-emerald-700" />
+                )}
+              </button>
+            )}
+
+            {/* Text Input */}
+            <div className="relative flex-1">
+              <input
+                id="gemini-chat-input"
+                type="text"
+                placeholder={
+                  isListening
+                    ? 'Listening... say "Hey, Widget increased by 10 today"'
+                    : 'Ask or say: "Hey, [item] increased by 15 today"...'
+                }
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={isLoading || isTranscribing}
+                className={`w-full min-h-[44px] px-4 py-2.5 text-base sm:text-sm text-slate-900 bg-slate-50 border rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:bg-white placeholder:text-slate-400 transition-all ${
+                  isListening ? 'border-rose-400 bg-rose-50/30' : 'border-slate-300'
+                }`}
+              />
+            </div>
+
+            {/* Send Button */}
+            <button
+              type="button"
+              onClick={() => handleSendMessage()}
+              disabled={!inputText.trim() || isLoading || isTranscribing}
+              className="min-h-[44px] min-w-[44px] px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-40 disabled:cursor-not-allowed text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              aria-label="Send message"
+            >
+              {isLoading ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Send className="w-5 h-5" />
+              )}
+            </button>
+          </div>
+
+          {speechStatus && !isListening && !isTranscribing && (
+            <div className="mt-1.5 text-[11px] text-slate-500 flex items-center gap-1 truncate">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+              <span className="truncate">{speechStatus}</span>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 };
+
+// Helper to format basic markdown bolding in paragraphs
+function formatTextWithBold(text: string): React.ReactNode {
+  const parts = text.split(/(\*\*.*?\*\*)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return (
+        <strong key={index} className="font-bold text-slate-950">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    return part;
+  });
+}

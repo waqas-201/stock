@@ -66,8 +66,8 @@
         "id": { "type": "string", "maxLength": 128 },
         "timestamp": { "type": "string", "maxLength": 50 },
         "action": { "type": "string", "maxLength": 50 },
-        "summary": { "type": "string", "maxLength": 500 },
-        "details": { "type": "string", "maxLength": 3000 },
+        "summary": { "type": "string", "maxLength": 200 },
+        "details": { "type": "string", "maxLength": 2000 },
         "itemId": { "type": "string", "maxLength": 128 },
         "itemName": { "type": "string", "maxLength": 200 },
         "unit": { "type": "string", "maxLength": 50 },
@@ -76,7 +76,7 @@
         "delta": { "type": "number" },
         "performedBy": { "type": "string", "maxLength": 100 },
         "userEmail": { "type": "string", "maxLength": 100 },
-        "userPhotoURL": { "type": "string", "maxLength": 1000 },
+        "userPhotoURL": { "type": "string", "maxLength": 500 },
         "userId": { "type": "string", "maxLength": 128 }
       },
       "required": [

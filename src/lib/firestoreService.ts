@@ -331,75 +331,25 @@ export async function saveAuditLogToFirestore(
   log: GlobalAuditRecord,
   userId?: string
 ): Promise<void> {
-  // Ensure valid document ID format matching ^[a-zA-Z0-9_\-]+$ and length <= 128
-  const validIdRegex = /^[a-zA-Z0-9_\-]+$/;
-  const rawId = log.id ? String(log.id).trim() : '';
-  const cleanId = (rawId && validIdRegex.test(rawId) && rawId.length <= 128)
-    ? rawId
-    : `aud_g_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-
-  const docPath = `audit_logs/${cleanId}`;
+  const docPath = `audit_logs/${log.id}`;
   try {
-    const docRef = doc(db, 'audit_logs', cleanId);
-
-    // Sanitize itemId to comply with firestore rules isValidId
-    const rawItemId = log.itemId ? String(log.itemId).trim().replace(/[^a-zA-Z0-9_\-]/g, '_') : '';
-    const cleanItemId = (rawItemId && rawItemId.length <= 128) ? rawItemId : 'item_general';
-
-    const cleanItemName = log.itemName && typeof log.itemName === 'string' && log.itemName.trim()
-      ? log.itemName.trim().slice(0, 200)
-      : 'Inventory Item';
-
-    const cleanUnit = log.unit && typeof log.unit === 'string' && log.unit.trim()
-      ? log.unit.trim().slice(0, 50)
-      : 'Units';
-
-    const cleanAction = log.action && typeof log.action === 'string' && log.action.trim()
-      ? log.action.trim().slice(0, 50)
-      : 'quantity_changed';
-
-    const cleanSummary = log.summary && typeof log.summary === 'string' && log.summary.trim()
-      ? log.summary.trim().slice(0, 500)
-      : 'Inventory Activity';
-
-    const cleanDetails = log.details && typeof log.details === 'string'
-      ? log.details.slice(0, 3000)
-      : null;
-
-    const cleanPerformedBy = log.performedBy && typeof log.performedBy === 'string' && log.performedBy.trim()
-      ? log.performedBy.trim().slice(0, 100)
-      : 'Store Operator';
-
-    const cleanUserEmail = log.userEmail && typeof log.userEmail === 'string'
-      ? log.userEmail.trim().slice(0, 100)
-      : null;
-
-    const cleanUserPhotoURL = log.userPhotoURL && typeof log.userPhotoURL === 'string'
-      ? log.userPhotoURL.trim().slice(0, 1000)
-      : null;
-
-    const cleanTimestamp = log.timestamp && typeof log.timestamp === 'string' && log.timestamp.length <= 50
-      ? log.timestamp
-      : new Date().toISOString();
-
-    const cleanUserId = (userId || log.userId) ? String(userId || log.userId).slice(0, 128) : null;
-
+    const docRef = doc(db, 'audit_logs', log.id);
     const payload = {
-      id: cleanId,
-      timestamp: cleanTimestamp,
-      action: cleanAction,
-      summary: cleanSummary,
-      details: cleanDetails,
-      itemId: cleanItemId,
-      itemName: cleanItemName,
-      unit: cleanUnit,
-      previousQuantity: typeof log.previousQuantity === 'number' ? log.previousQuantity : null,
-      newQuantity: typeof log.newQuantity === 'number' ? log.newQuantity : null,
-      delta: typeof log.delta === 'number' ? log.delta : null,
-      performedBy: cleanPerformedBy,
-      userEmail: cleanUserEmail,
-      userPhotoURL: cleanUserPhotoURL,
-      userId: cleanUserId,
+      id: log.id,
+      timestamp: log.timestamp,
+      action: log.action,
+      summary: log.summary,
+      details: log.details || null,
+      itemId: log.itemId,
+      itemName: log.itemName,
+      unit: log.unit,
+      previousQuantity: log.previousQuantity ?? null,
+      newQuantity: log.newQuantity ?? null,
+      delta: log.delta ?? null,
+      performedBy: log.performedBy || 'Store Operator',
+      userEmail: log.userEmail || null,
+      userPhotoURL: log.userPhotoURL || null,
+      userId: userId || log.userId || null,
     };
     await setDoc(docRef, payload);
   } catch (error) {
@@ -499,20 +449,16 @@ export async function migrateLocalDataToCloud(
   }
 
   for (const log of localLogs.slice(0, 50)) {
-    try {
-      await saveAuditLogToFirestore(
-        {
-          ...log,
-          performedBy: log.performedBy || operator.name,
-          userEmail: log.userEmail || operator.email,
-          userId: userId || log.userId,
-        },
-        userId
-      );
-      migratedLogs++;
-    } catch (logErr) {
-      console.warn('Skipping problematic audit log during migration:', log.id, logErr);
-    }
+    await saveAuditLogToFirestore(
+      {
+        ...log,
+        performedBy: log.performedBy || operator.name,
+        userEmail: log.userEmail || operator.email,
+        userId: userId || log.userId,
+      },
+      userId
+    );
+    migratedLogs++;
   }
 
   return { migratedItems, migratedLogs };
