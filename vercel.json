@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/api/gemini/stock-chat",
+      "destination": "/api/gemini/stock-chat"
+    },
+    {
+      "source": "/api/gemini/transcribe-audio",
+      "destination": "/api/gemini/transcribe-audio"
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

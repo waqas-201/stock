@@ -28,6 +28,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { StockItem, StockFilter, GeminiAgentAction } from '../types';
+import { processStockChat, processAudioTranscription } from '../lib/geminiLogic';
 
 export function isUrduText(text: string): boolean {
   return /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(text);
@@ -360,30 +361,58 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
         languageMode,
       });
 
-      let res = await fetch('/api/gemini/stock-chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: chatPayload,
-      });
+      let res: any = null;
+      let data: any = {};
 
-      if (res.status === 404) {
-        res = await fetch('/api/stock-chat', {
+      try {
+        res = await fetch('/api/gemini/stock-chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: chatPayload,
         });
+
+        if (res && res.status === 404) {
+          res = await fetch('/api/stock-chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: chatPayload,
+          });
+        }
+
+        if (res && res.ok) {
+          data = await res.json();
+        }
+      } catch (fetchErr) {
+        console.warn('Network call to backend stock-chat failed:', fetchErr);
       }
 
-      let data: any = {};
-      try {
-        data = await res.json();
-      } catch {}
+      // If backend returned 404 or was unreachable (e.g. Vercel serverless cold start / static host)
+      if (!data?.reply && (!res || !res.ok)) {
+        const clientKey =
+          (import.meta as any).env?.VITE_GEMINI_API_KEY ||
+          (typeof window !== 'undefined' ? (window as any)._GEMINI_API_KEY : '');
 
-      if (!res.ok) {
-        if (res.status === 404) {
-          throw new Error('AI service endpoint not found (404). Please ensure the inventory backend is running.');
+        if (clientKey) {
+          try {
+            setAgentStatusText('Processing via client-side Gemini...');
+            data = await processStockChat({
+              apiKey: clientKey,
+              message: query,
+              history: historyPayload,
+              stockItems: items,
+              languageMode,
+            });
+          } catch (directErr: any) {
+            throw new Error(`Direct AI Error: ${directErr?.message}`);
+          }
+        } else {
+          if (res?.status === 404) {
+            throw new Error(
+              'AI service endpoint returned 404 on Vercel. Please ensure GEMINI_API_KEY or VITE_GEMINI_API_KEY is configured in your Vercel Project Settings > Environment Variables.'
+            );
+          }
+          throw new Error(data?.error || `Server responded with HTTP ${res?.status || 500}`);
         }
-        throw new Error(data?.error || `Server responded with HTTP ${res.status}`);
       }
 
       // Execute returned Agent Actions
@@ -485,61 +514,78 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
     setLatestTranscript('');
     liveTranscriptRef.current = '';
 
+    // 1. Try Browser Native Web Speech API first (zero latency on Android Chrome & iOS Safari)
+    // Avoid simultaneous getUserMedia so Android mic hardware does not lock or error
+    const SpeechRec =
+      typeof window !== 'undefined'
+        ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+        : null;
+
+    if (SpeechRec) {
+      try {
+        const recognition = new SpeechRec();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang =
+          languageMode === 'ur'
+            ? 'ur-PK'
+            : languageMode === 'en'
+            ? 'en-US'
+            : 'ur-PK';
+
+        recognition.onresult = (event: any) => {
+          let interim = '';
+          let final = '';
+          for (let i = 0; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              final += event.results[i][0].transcript + ' ';
+            } else {
+              interim += event.results[i][0].transcript;
+            }
+          }
+          const recognized = (final + interim).trim();
+          if (recognized) {
+            liveTranscriptRef.current = recognized;
+            setLatestTranscript(recognized);
+            setAgentStatusText(`Listening: "${recognized}"`);
+            setAudioLevel(0.45 + Math.random() * 0.45);
+          }
+        };
+
+        recognition.onerror = (e: any) => {
+          console.warn('SpeechRecognition notice:', e?.error);
+          if (e?.error === 'not-allowed') {
+            setSpeechError('Microphone access was denied. Please allow microphone permission.');
+            setIsListening(false);
+          }
+        };
+
+        recognition.start();
+        recognitionRef.current = recognition;
+        setIsListening(true);
+        setRecordingSeconds(0);
+        setAgentStatusText('Listening... Speak your command in Urdu or English');
+
+        // Dynamic pulsing animation while speaking
+        if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = setInterval(() => {
+          setRecordingSeconds((prev) => prev + 1);
+          setAudioLevel((prev) => (prev > 0.3 ? 0.15 : 0.65));
+        }, 500);
+
+        return; // Success! No getUserMedia collision!
+      } catch (recErr) {
+        console.warn('SpeechRecognition initialization failed, trying MediaRecorder:', recErr);
+      }
+    }
+
+    // 2. Fallback: MediaRecorder with getUserMedia
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       setSpeechError('Microphone recording is not supported on this browser.');
       return;
     }
 
     try {
-      // 1. Concurrently start Web Speech API if supported for zero-latency live transcription
-      const SpeechRec =
-        typeof window !== 'undefined'
-          ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-          : null;
-
-      if (SpeechRec) {
-        try {
-          const recognition = new SpeechRec();
-          recognition.continuous = true;
-          recognition.interimResults = true;
-          // Set language based on selected mode
-          recognition.lang =
-            languageMode === 'ur'
-              ? 'ur-PK'
-              : languageMode === 'en'
-              ? 'en-US'
-              : 'ur-PK';
-
-          recognition.onresult = (event: any) => {
-            let interim = '';
-            let final = '';
-            for (let i = 0; i < event.results.length; ++i) {
-              if (event.results[i].isFinal) {
-                final += event.results[i][0].transcript + ' ';
-              } else {
-                interim += event.results[i][0].transcript;
-              }
-            }
-            const recognized = (final + interim).trim();
-            if (recognized) {
-              liveTranscriptRef.current = recognized;
-              setLatestTranscript(recognized);
-              setAgentStatusText(`Listening: "${recognized}"`);
-            }
-          };
-
-          recognition.onerror = (e: any) => {
-            console.warn('Browser SpeechRecognition note:', e?.error);
-            // Non-fatal because MediaRecorder will send audio to Gemini transcribe
-          };
-
-          recognition.start();
-          recognitionRef.current = recognition;
-        } catch (recErr) {
-          console.warn('SpeechRecognition initialization note:', recErr);
-        }
-      }
-
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -674,31 +720,57 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                 mimeType: recorder.mimeType || mimeType,
               });
 
-              let res = await fetch('/api/gemini/transcribe-audio', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: audioPayload,
-              });
+              let res: any = null;
+              let data: any = {};
 
-              // Fallback alias attempt if primary route returned 404
-              if (res.status === 404) {
-                res = await fetch('/api/transcribe-audio', {
+              try {
+                res = await fetch('/api/gemini/transcribe-audio', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: audioPayload,
                 });
+
+                // Fallback alias attempt if primary route returned 404
+                if (res && res.status === 404) {
+                  res = await fetch('/api/transcribe-audio', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: audioPayload,
+                  });
+                }
+
+                if (res && res.ok) {
+                  data = await res.json();
+                }
+              } catch (fetchErr) {
+                console.warn('Transcription network call failed:', fetchErr);
               }
 
-              let data: any = {};
-              try {
-                data = await res.json();
-              } catch {}
+              // Fallback to client-side transcription if server returned 404 (e.g. Vercel static host)
+              if (!data?.transcript && (!res || !res.ok)) {
+                const clientKey =
+                  (import.meta as any).env?.VITE_GEMINI_API_KEY ||
+                  (typeof window !== 'undefined' ? (window as any)._GEMINI_API_KEY : '');
 
-              if (!res.ok) {
-                if (res.status === 404) {
-                  throw new Error('Transcription route not found (404). Please ensure the backend server has started.');
+                if (clientKey) {
+                  try {
+                    setAgentStatusText('Transcribing via client-side Gemini...');
+                    data = await processAudioTranscription({
+                      apiKey: clientKey,
+                      audioBase64: base64Data,
+                      mimeType: recorder.mimeType || mimeType,
+                    });
+                  } catch (directErr: any) {
+                    throw new Error(`Direct transcription error: ${directErr?.message}`);
+                  }
+                } else {
+                  if (res?.status === 404) {
+                    throw new Error(
+                      'Transcription route returned 404 on Vercel. Please ensure GEMINI_API_KEY or VITE_GEMINI_API_KEY is configured in Vercel Project Settings > Environment Variables.'
+                    );
+                  }
+                  throw new Error(data?.error || `Server returned error status ${res?.status || 500}`);
                 }
-                throw new Error(data?.error || `Server returned error status ${res.status}`);
               }
 
               const transcript = data?.transcript ? data.transcript.trim() : '';
@@ -765,17 +837,40 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
 
   // Mark Done: Immediately stops recording, releases mic, and triggers transcription
   const markDoneAndSubmit = () => {
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {}
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
     }
+    setIsListening(false);
+    stopAudioVisualization();
+
+    // 1. If MediaRecorder was active:
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       try {
         mediaRecorderRef.current.stop();
       } catch (e) {
         console.warn('Error stopping recorder:', e);
       }
+      return;
+    }
+
+    // 2. If Web Speech API was active:
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+      recognitionRef.current = null;
+    }
+
+    const liveText = liveTranscriptRef.current.trim();
+    if (liveText && liveText.length > 0) {
+      setLatestTranscript(liveText);
+      setInputText(liveText);
+      setAgentStatusText(`Heard: "${liveText}"`);
+      handleSendMessage(liveText, true);
+    } else {
+      setAgentStatusText('Ready to listen');
+      setSpeechError('Could not detect clear speech. Please tap to speak again.');
     }
   };
 
