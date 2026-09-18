@@ -21,7 +21,7 @@ import {
   Sliders,
   Filter,
 } from 'lucide-react';
-import { StockItem, StockFilter, GeminiAgentAction } from '../types';
+import { StockItem, StockFilter, GeminiAgentAction, StockUnit } from '../types';
 
 export interface ExecutedActionRecord {
   id: string;
@@ -51,6 +51,8 @@ export interface GeminiStockChatModalProps {
   isOpen: boolean;
   onClose: () => void;
   items: StockItem[];
+  units?: StockUnit[];
+  availableTags?: string[];
   onApplyFilter?: (filter: StockFilter) => void;
   onSearchItem?: (query: string) => void;
   onQuickQuantityChange?: (item: StockItem, delta: number) => void;
@@ -63,10 +65,84 @@ export interface GeminiStockChatModalProps {
   };
 }
 
+/**
+ * Removes immediate adjacent word and phrase repetitions caused by
+ * browser Web Speech API interim buffer stitching or acoustic echo.
+ */
+export function cleanDuplicateSpeech(raw: string): string {
+  if (!raw) return '';
+  let cleaned = raw.trim();
+
+  // 1. Remove duplicate adjacent single words (case-insensitive)
+  cleaned = cleaned.replace(/\b([A-Za-z0-9_-]+)(?:\s+\1\b)+/gi, '$1');
+
+  // 2. Remove duplicate adjacent 2-word phrases: "by 10 by 10", "Widget A Widget A"
+  cleaned = cleaned.replace(/\b([A-Za-z0-9_-]+\s+[A-Za-z0-9_-]+)(?:\s+\1\b)+/gi, '$1');
+
+  // 3. Remove duplicate adjacent 3-word phrases: "increased by 10 increased by 10"
+  cleaned = cleaned.replace(
+    /\b([A-Za-z0-9_-]+\s+[A-Za-z0-9_-]+\s+[A-Za-z0-9_-]+)(?:\s+\1\b)+/gi,
+    '$1'
+  );
+
+  // 4. Remove duplicate adjacent 4-word phrases
+  cleaned = cleaned.replace(
+    /\b([A-Za-z0-9_-]+\s+[A-Za-z0-9_-]+\s+[A-Za-z0-9_-]+\s+[A-Za-z0-9_-]+)(?:\s+\1\b)+/gi,
+    '$1'
+  );
+
+  // 5. Clean multi-spaces
+  return cleaned.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Merges a finalized transcript with an incoming interim transcript,
+ * resolving any prefix/suffix overlap produced by browser speech recognition engines.
+ */
+export function mergeSpeechTranscripts(finalText: string, interimText: string): string {
+  const f = cleanDuplicateSpeech(finalText);
+  const i = cleanDuplicateSpeech(interimText);
+
+  if (!f) return i;
+  if (!i) return f;
+
+  const fLower = f.toLowerCase();
+  const iLower = i.toLowerCase();
+
+  // Case 1: Interim completely contains final (e.g. final is "Widget A", interim is "Widget A increased by 5")
+  if (iLower.startsWith(fLower)) {
+    return cleanDuplicateSpeech(i);
+  }
+
+  // Case 2: Final already ends with interim (e.g. final is "Widget A increased by 5", interim is "by 5")
+  if (fLower.endsWith(iLower) || fLower.includes(iLower)) {
+    return f;
+  }
+
+  // Case 3: Suffix-prefix overlap (e.g. final is "Widget A increased by", interim is "increased by 5 today")
+  const fWords = f.split(/\s+/);
+  const iWords = i.split(/\s+/);
+  const maxOverlap = Math.min(fWords.length, iWords.length, 8);
+
+  for (let len = maxOverlap; len > 0; len--) {
+    const fSuffix = fWords.slice(-len).join(' ').toLowerCase();
+    const iPrefix = iWords.slice(0, len).join(' ').toLowerCase();
+    if (fSuffix === iPrefix) {
+      const remaining = iWords.slice(len).join(' ');
+      const merged = remaining ? `${f} ${remaining}` : f;
+      return cleanDuplicateSpeech(merged);
+    }
+  }
+
+  return cleanDuplicateSpeech(`${f} ${i}`);
+}
+
 export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
   isOpen,
   onClose,
   items = [],
+  units = [],
+  availableTags = [],
   onApplyFilter,
   onSearchItem,
   onQuickQuantityChange,
@@ -83,6 +159,8 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
   const [speechStatus, setSpeechStatus] = useState<string>('');
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [voiceEngine, setVoiceEngine] = useState<'live' | 'studio'>('live');
+  const [audioLevel, setAudioLevel] = useState<number>(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -91,6 +169,11 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const recordingTimerRef = useRef<any>(null);
+  const finalTranscriptRef = useRef<string>('');
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const isListeningRef = useRef<boolean>(false);
 
   // Initialize Speech Recognition & Synthesis
   useEffect(() => {
@@ -119,9 +202,10 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
 
       const sampleItem = items.length > 0 ? items[0].itemName : 'Widget A';
 
-      let welcome = `👋 Hello! I'm your **Active Gemini AI Inventory Agent**, connected in real time to your **${totalCount} products**.`;
-      welcome += `\n\n⚡ **Direct Control Enabled**: You can operate your stock directly with natural language!\n`;
+      let welcome = `👋 Hello! I'm your **Active Gemini AI Inventory Agent**, trained on your store's data and connected in real time to your **${totalCount} products**.`;
+      welcome += `\n\n⚡ **Direct Operational Control & Form-Filling Intelligence**:\n`;
       welcome += `• *"Hey, ${sampleItem} increased by 10 today"*\n`;
+      welcome += `• *"Hey, add this 5 grams"* *(I'll ask only for the missing product name, auto-detect tags, and add it!)*\n`;
       welcome += `• *"We used 5 ${sampleItem}"*\n`;
       welcome += `• *"What items are running low?"*`;
 
@@ -136,6 +220,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           text: welcome,
           timestamp: new Date(),
           suggestions: [
+            'Hey, add this 5 grams',
             items.length > 0 ? `Hey, ${items[0].itemName} increased by 10 today` : 'What items are low on stock?',
             items.length > 1 ? `Deduct 5 from ${items[1].itemName}` : 'Give me a complete inventory summary',
             'What items need immediate reordering?',
@@ -153,21 +238,87 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
     }
   }, [messages, isLoading, isOpen]);
 
-  // Fallback: Gemini Server-side Audio Recorder (Works everywhere)
+  // Web Audio API: Live volume meter & waveform analyzer
+  const attachAudioAnalyser = (stream: MediaStream) => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+
+      // Close previous context if any
+      if (audioContextRef.current) {
+        try {
+          audioContextRef.current.close();
+        } catch {}
+      }
+
+      const audioCtx = new AudioCtx();
+      audioContextRef.current = audioCtx;
+
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 64;
+      analyserRef.current = analyser;
+
+      const source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const updateVolume = () => {
+        if (!isListeningRef.current) return;
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        const avg = sum / dataArray.length;
+        setAudioLevel(Math.min(100, Math.round((avg / 128) * 100)));
+        animationFrameRef.current = requestAnimationFrame(updateVolume);
+      };
+      updateVolume();
+    } catch (e) {
+      console.warn('Could not attach audio analyser:', e);
+    }
+  };
+
+  const cleanupAudioAnalyser = () => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    analyserRef.current = null;
+    setAudioLevel(0);
+  };
+
+  // High-Accuracy: Gemini Studio Audio Recorder (Noise-cancelled, catalog grounded)
   const startGeminiAudioRecording = async () => {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       setSpeechError('Microphone recording is not supported in this browser.');
       setIsListening(false);
+      isListeningRef.current = false;
       return;
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Apply studio-grade hardware constraints: echo cancellation & noise suppression
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+        },
+      });
       streamRef.current = stream;
+      attachAudioAnalyser(stream);
       audioChunksRef.current = [];
 
       const mimeType =
-        typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm')
+        typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm')
           ? 'audio/webm'
           : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/mp4')
           ? 'audio/mp4'
@@ -184,6 +335,9 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
 
       recorder.onstop = async () => {
         setIsListening(false);
+        isListeningRef.current = false;
+        cleanupAudioAnalyser();
+
         if (recordingTimerRef.current) {
           clearInterval(recordingTimerRef.current);
           recordingTimerRef.current = null;
@@ -197,12 +351,12 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           type: mimeType || 'audio/webm',
         });
         if (audioBlob.size < 200) {
-          setSpeechStatus('No audio detected. Please try again.');
+          setSpeechStatus('No speech detected. Please speak closer to the microphone.');
           return;
         }
 
         setIsTranscribing(true);
-        setSpeechStatus('Transcribing your voice with Gemini AI...');
+        setSpeechStatus('Transcribing with Gemini AI inventory model...');
 
         try {
           const reader = new FileReader();
@@ -216,12 +370,15 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                 body: JSON.stringify({
                   audioBase64: base64Data,
                   mimeType: mimeType || 'audio/webm',
+                  itemNames: items.map((i) => i.itemName).filter(Boolean),
+                  units: units.map((u) => u.name).filter(Boolean),
                 }),
               });
               const data = await res.json();
               if (data.transcript && data.transcript.trim()) {
-                const transcribed = data.transcript.trim();
+                const transcribed = cleanDuplicateSpeech(data.transcript.trim());
                 setInputText(transcribed);
+                finalTranscriptRef.current = transcribed;
                 setSpeechStatus(`Transcribed: "${transcribed}"`);
               } else {
                 setSpeechStatus('No speech recognized. Please speak closer to the microphone.');
@@ -241,9 +398,10 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
 
       recorder.start(250);
       setIsListening(true);
+      isListeningRef.current = true;
       setRecordingSeconds(0);
       setSpeechError(null);
-      setSpeechStatus('Recording your voice for Gemini AI... Speak now!');
+      setSpeechStatus('Listening with Gemini Studio Mic... Speak your stock query or command');
 
       recordingTimerRef.current = setInterval(() => {
         setRecordingSeconds((prev) => prev + 1);
@@ -251,28 +409,60 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
     } catch (err: any) {
       console.error('Failed to start audio recording:', err);
       setIsListening(false);
+      isListeningRef.current = false;
+      cleanupAudioAnalyser();
       setSpeechError(
         err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
           ? 'Microphone permission was blocked. Please allow microphone access in your browser.'
-          : 'Could not access microphone.'
+          : 'Could not access microphone hardware.'
       );
     }
   };
 
   // Handle Speech Recognition with permission verification & live real-time typing
   const startListening = async () => {
+    // 1. Cancel any active Text-to-Speech so microphone does NOT pick up synthetic voice!
+    if (synthRef.current) {
+      synthRef.current.cancel();
+      setSpeakingMessageId(null);
+    }
+
     setSpeechError(null);
     setSpeechStatus('Connecting to microphone...');
 
-    // 1. Verify and request microphone permissions via getUserMedia
+    // If already listening, stop first
+    if (isListening) {
+      stopListening();
+      return;
+    }
+
+    // Initialize transcript accumulator with current input text if any
+    finalTranscriptRef.current = inputText.trim();
+
+    // If Studio Mic is selected explicitly, use Gemini server-side transcription
+    if (voiceEngine === 'studio') {
+      startGeminiAudioRecording();
+      return;
+    }
+
+    // 2. Request microphone permissions with hardware noise filtering
     if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        // Release dummy stream so recognition or recorder has clean access
-        stream.getTracks().forEach((track) => track.stop());
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+          },
+        });
+        streamRef.current = stream;
+        attachAudioAnalyser(stream);
       } catch (err: any) {
         console.warn('Microphone permission request failed:', err);
         setIsListening(false);
+        isListeningRef.current = false;
+        cleanupAudioAnalyser();
         setSpeechError(
           err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
             ? 'Microphone permission blocked. Please allow microphone access in your browser address bar.'
@@ -285,72 +475,85 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-    // 2. Primary: Web Speech API with real-time continuous typing
+    // 3. Primary: Web Speech API with real-time anti-repetition deduplication
     if (SpeechRecognition) {
       try {
         if (recognitionRef.current) {
           try {
             recognitionRef.current.abort();
-          } catch {
-            // ignore
-          }
+          } catch {}
         }
 
         const recognition = new SpeechRecognition();
         recognition.continuous = true;
         recognition.interimResults = true;
-        recognition.lang = 'en-US';
+        // Match user locale or fallback to en-US
+        recognition.lang = (typeof navigator !== 'undefined' && navigator.language) || 'en-US';
 
         recognition.onstart = () => {
           setIsListening(true);
+          isListeningRef.current = true;
           setSpeechError(null);
-          setSpeechStatus('Listening... Speak now (words will appear as you speak)');
+          setSpeechStatus('Listening live... Speak clearly (words appear in real time)');
         };
 
         recognition.onresult = (event: any) => {
-          let finalWords = '';
+          let accumulatedFinal = finalTranscriptRef.current;
           let interimWords = '';
 
-          for (let i = 0; i < event.results.length; ++i) {
+          // Only process newly changed results from event.resultIndex onwards to prevent loop duplication
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
             const res = event.results[i];
+            const segment = res[0]?.transcript || '';
             if (res.isFinal) {
-              finalWords += res[0].transcript + ' ';
+              accumulatedFinal = mergeSpeechTranscripts(accumulatedFinal, segment);
             } else {
-              interimWords += res[0].transcript;
+              interimWords += segment;
             }
           }
 
-          const combined = (finalWords + interimWords).trim();
-          if (combined) {
-            // TYPE DIRECTLY INTO THE INPUT FIELD IN REAL TIME
-            setInputText(combined);
-            setSpeechStatus(`Heard: "${combined}"`);
+          finalTranscriptRef.current = accumulatedFinal;
+
+          // Merge accumulated final with interim words, eliminating any prefix/suffix overlap
+          const combined = mergeSpeechTranscripts(accumulatedFinal, interimWords);
+          const cleanText = cleanDuplicateSpeech(combined);
+
+          if (cleanText) {
+            setInputText(cleanText);
+            setSpeechStatus(`Heard: "${cleanText}"`);
           }
         };
 
         recognition.onerror = (e: any) => {
           console.warn('Speech recognition error:', e.error);
+          cleanupAudioAnalyser();
           if (e.error === 'not-allowed') {
             setSpeechError(
               'Microphone access blocked. Click the lock/camera icon in your address bar to enable.'
             );
             setIsListening(false);
+            isListeningRef.current = false;
           } else if (e.error === 'no-speech') {
             setSpeechStatus('No speech detected. Please speak closer to your microphone.');
           } else if (e.error === 'network' || e.error === 'service-not-allowed') {
-            console.log('Falling back to Gemini Audio recording due to browser speech service error...');
+            console.log('Switching to Gemini Studio Audio recording due to browser speech service limitation...');
             try {
               recognition.abort();
             } catch {}
+            setVoiceEngine('studio');
             startGeminiAudioRecording();
           } else {
             setSpeechStatus(`Listening paused (${e.error}). Tap mic to try again.`);
             setIsListening(false);
+            isListeningRef.current = false;
           }
         };
 
         recognition.onend = () => {
           setIsListening(false);
+          isListeningRef.current = false;
+          cleanupAudioAnalyser();
+          setInputText((prev) => cleanDuplicateSpeech(prev));
         };
 
         recognitionRef.current = recognition;
@@ -361,11 +564,14 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       }
     }
 
-    // 3. Fallback: Gemini Server-side Audio Recorder
+    // 4. Fallback: Gemini Server-side Audio Recorder
     startGeminiAudioRecording();
   };
 
   const stopListening = () => {
+    isListeningRef.current = false;
+    cleanupAudioAnalyser();
+
     // Stop Web Speech API if running
     if (recognitionRef.current) {
       try {
@@ -384,12 +590,18 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       }
     }
 
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
     }
 
     setIsListening(false);
+    setInputText((prev) => cleanDuplicateSpeech(prev));
   };
 
   // Text-to-Speech Playback
@@ -401,6 +613,9 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
       setSpeakingMessageId(null);
       return;
     }
+
+    // IMPORTANT: Stop microphone listening so mic does not hear synthesized voice output!
+    stopListening();
 
     synthRef.current.cancel();
 
@@ -464,8 +679,8 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
     setIsLoading(true);
 
     try {
-      // Build history payload for Gemini multi-turn conversation
-      const historyPayload = newMessages.slice(-6).map((m) => ({
+      // Build history payload for Gemini multi-turn conversation (preserve up to 20 turns)
+      const historyPayload = newMessages.slice(-20).map((m) => ({
         role: m.role,
         parts: [{ text: m.text }],
       }));
@@ -479,6 +694,8 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           message: query,
           history: historyPayload,
           stockItems: items,
+          units,
+          tags: availableTags,
         }),
       });
 
@@ -883,6 +1100,10 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
           </span>
           {[
             {
+              label: 'Add ("5 grams...")',
+              query: 'Hey, add this 5 grams',
+            },
+            {
               label: items.length > 0 ? `+10 to ${items[0].itemName}` : '+10 Stock',
               query:
                 items.length > 0
@@ -945,53 +1166,149 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
 
         {/* Live Speech Recognition Waveform & Action Banner */}
         {(isListening || isTranscribing) && (
-          <div className="mx-3 sm:mx-4 mb-2 p-2.5 rounded-xl bg-gradient-to-r from-rose-50 via-pink-50 to-rose-50 border border-rose-200 text-rose-900 text-xs flex flex-wrap items-center justify-between gap-2 shadow-2xs">
-            <div className="flex items-center gap-2.5 min-w-0">
-              {/* Animated Sound Wave Bars */}
-              <div className="flex items-center gap-0.5 h-4 px-1 shrink-0">
-                <span className="w-1 h-3 bg-rose-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-1 h-4 bg-rose-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-1 h-2.5 bg-rose-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                <span className="w-1 h-4 bg-rose-600 rounded-full animate-bounce" style={{ animationDelay: '450ms' }} />
-              </div>
+          <div className="mx-3 sm:mx-4 mb-2 p-3 rounded-2xl bg-gradient-to-r from-rose-50 via-pink-50 to-amber-50 border border-rose-200/90 text-rose-950 text-xs shadow-sm flex flex-col gap-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-3 min-w-0">
+                {/* Real-time Dynamic Sound Wave Bars driven by microphone volume */}
+                <div className="flex items-end gap-1 h-7 px-1.5 py-0.5 bg-white/80 rounded-lg border border-rose-200/70 shrink-0">
+                  <span
+                    className="w-1 bg-rose-500 rounded-full transition-all duration-75"
+                    style={{ height: `${Math.max(6, Math.min(24, 6 + Math.round(audioLevel * 0.22)))}px` }}
+                  />
+                  <span
+                    className="w-1 bg-rose-600 rounded-full transition-all duration-75"
+                    style={{ height: `${Math.max(10, Math.min(28, 10 + Math.round(audioLevel * 0.28)))}px` }}
+                  />
+                  <span
+                    className="w-1 bg-rose-500 rounded-full transition-all duration-75"
+                    style={{ height: `${Math.max(8, Math.min(24, 8 + Math.round(audioLevel * 0.24)))}px` }}
+                  />
+                  <span
+                    className="w-1 bg-rose-600 rounded-full transition-all duration-75"
+                    style={{ height: `${Math.max(12, Math.min(28, 12 + Math.round(audioLevel * 0.3)))}px` }}
+                  />
+                  <span
+                    className="w-1 bg-rose-500 rounded-full transition-all duration-75"
+                    style={{ height: `${Math.max(6, Math.min(22, 6 + Math.round(audioLevel * 0.2)))}px` }}
+                  />
+                </div>
 
-              <div className="min-w-0">
-                <p className="font-bold text-rose-900 truncate">
-                  {isTranscribing
-                    ? 'Transcribing audio with Gemini AI...'
-                    : recordingSeconds > 0
-                    ? `Recording voice (${recordingSeconds}s)... Speak now!`
-                    : 'Listening live... Speak your stock update'}
-                </p>
-                {inputText && (
-                  <p className="text-[11px] text-rose-700 truncate font-mono">
-                    "{inputText}"
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="font-bold text-rose-950 text-xs sm:text-sm truncate">
+                      {isTranscribing
+                        ? 'Transcribing audio with Gemini AI...'
+                        : recordingSeconds > 0
+                        ? `Recording Studio Voice (${recordingSeconds}s)... Speak now!`
+                        : 'Listening live... Speak your stock update'}
+                    </p>
+                    <span
+                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 flex items-center gap-1 ${
+                        audioLevel > 10
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                          : 'bg-amber-100 text-amber-800 border border-amber-300'
+                      }`}
+                    >
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ${
+                          audioLevel > 10 ? 'bg-emerald-600 animate-ping' : 'bg-amber-500'
+                        }`}
+                      />
+                      {audioLevel > 10 ? 'Hearing clearly' : 'Speak into mic'}
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-slate-600 truncate mt-0.5">
+                    {inputText ? (
+                      <span className="font-mono text-rose-900 font-medium">"{inputText}"</span>
+                    ) : (
+                      'Try: "Hey, Widget A increased by 10 today" or "Deduct 5"'
+                    )}
                   </p>
-                )}
+                </div>
               </div>
-            </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                type="button"
-                onClick={stopListening}
-                className="px-2.5 py-1 text-xs font-semibold bg-white text-slate-700 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer shadow-2xs"
-              >
-                Done
-              </button>
-              {inputText.trim() && (
+              {/* Mode switch & Action buttons */}
+              <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+                {/* Voice Engine Mode Switcher */}
+                <div className="hidden sm:flex items-center bg-white/90 border border-slate-200 rounded-lg p-0.5 text-[11px] font-semibold shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (voiceEngine !== 'live') {
+                        stopListening();
+                        setVoiceEngine('live');
+                        setTimeout(startListening, 150);
+                      }
+                    }}
+                    className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${
+                      voiceEngine === 'live'
+                        ? 'bg-rose-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="Real-time typing with anti-repetition filter"
+                  >
+                    Live Voice
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (voiceEngine !== 'studio') {
+                        stopListening();
+                        setVoiceEngine('studio');
+                        setTimeout(startListening, 150);
+                      }
+                    }}
+                    className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${
+                      voiceEngine === 'studio'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="Studio noise suppression & Gemini inventory model"
+                  >
+                    Studio Mic
+                  </button>
+                </div>
+
+                {/* Clear & Re-speak button to prevent any residue */}
+                {inputText.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInputText('');
+                      finalTranscriptRef.current = '';
+                      setSpeechStatus('Cleared. Ready for your voice...');
+                    }}
+                    className="px-2 py-1 text-xs font-semibold bg-white text-slate-700 hover:bg-slate-100 active:bg-slate-200 border border-slate-200 rounded-lg transition-colors cursor-pointer shadow-2xs flex items-center gap-1"
+                    title="Clear spoken text and speak again"
+                  >
+                    <RotateCcw className="w-3 h-3 text-slate-500" />
+                    <span>Clear</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
-                  onClick={() => {
-                    stopListening();
-                    handleSendMessage();
-                  }}
-                  className="px-2.5 py-1 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-colors cursor-pointer shadow-2xs flex items-center gap-1"
+                  onClick={stopListening}
+                  className="px-2.5 py-1 text-xs font-semibold bg-white text-slate-700 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer shadow-2xs"
                 >
-                  <span>Send</span>
-                  <Send className="w-3 h-3" />
+                  Done
                 </button>
-              )}
+
+                {inputText.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      stopListening();
+                      handleSendMessage();
+                    }}
+                    className="px-2.5 py-1 text-xs font-bold bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-lg transition-colors cursor-pointer shadow-2xs flex items-center gap-1"
+                  >
+                    <span>Send</span>
+                    <Send className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}

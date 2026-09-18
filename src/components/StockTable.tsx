@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Search,
   Plus,
@@ -22,6 +22,10 @@ import {
   Sparkles,
   Tag as TagIcon,
   Hash,
+  ChevronDown,
+  ChevronUp,
+  Check,
+  Layers,
 } from 'lucide-react';
 import { StockItem, StockFilter, SortField, SortOrder, StockTag, StockLabel } from '../types';
 import { getTagStyle, getUniqueTagsWithCounts } from '../lib/tagUtils';
@@ -138,7 +142,71 @@ export const StockTable: React.FC<StockTableProps> = ({
 
   // Unique tags extracted from inventory items
   const safeItems = Array.isArray(items) ? items : [];
-  const uniqueTags = getUniqueTagsWithCounts(safeItems);
+  const uniqueTags = useMemo(() => getUniqueTagsWithCounts(safeItems), [safeItems]);
+
+  // Clean tags UI state
+  const [isTagDropdownOpen, setIsTagDropdownOpen] = useState(false);
+  const [tagSearchTerm, setTagSearchTerm] = useState('');
+  const [isTagsExpanded, setIsTagsExpanded] = useState(false);
+  const [expandedItemCardTags, setExpandedItemCardTags] = useState<Record<string, boolean>>({});
+  const tagDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close tag dropdown on click outside or escape key
+  useEffect(() => {
+    if (!isTagDropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (tagDropdownRef.current && !tagDropdownRef.current.contains(e.target as Node)) {
+        setIsTagDropdownOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsTagDropdownOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isTagDropdownOpen]);
+
+  // Top tags for clean, non-cluttered display (top 5 by usage count)
+  const MAX_COMPACT_TAGS = 5;
+  const topTags = useMemo(() => uniqueTags.slice(0, MAX_COMPACT_TAGS), [uniqueTags]);
+
+  const isSearchingTags = Boolean(tagSearchTerm.trim());
+
+  // Visible tags on the tag bar: if searching, show all matching; otherwise show topTags or all uniqueTags
+  const visibleBarTags = useMemo(() => {
+    if (isSearchingTags) {
+      const q = tagSearchTerm.toLowerCase().trim().replace(/^#+/, '');
+      return uniqueTags.filter((t) => t.name.toLowerCase().includes(q));
+    }
+    return isTagsExpanded ? uniqueTags : topTags;
+  }, [isSearchingTags, tagSearchTerm, uniqueTags, isTagsExpanded, topTags]);
+
+  // Check if currently selected tag is in top tags
+  const isSelectedTagInTop = useMemo(() => {
+    if (!selectedTag) return true;
+    return topTags.some((t) => t.name.toLowerCase() === selectedTag.toLowerCase());
+  }, [selectedTag, topTags]);
+
+  const selectedTagObject = useMemo(() => {
+    if (!selectedTag || isSelectedTagInTop) return null;
+    return (
+      uniqueTags.find((t) => t.name.toLowerCase() === selectedTag.toLowerCase()) || {
+        name: selectedTag,
+        count: safeItems.filter((i) => Array.isArray(i.tags) && i.tags.includes(selectedTag)).length,
+      }
+    );
+  }, [selectedTag, isSelectedTagInTop, uniqueTags, safeItems]);
+
+  // Filter tags in dropdown based on user search
+  const filteredDropdownTags = useMemo(() => {
+    if (!tagSearchTerm.trim()) return uniqueTags;
+    const q = tagSearchTerm.toLowerCase().trim().replace(/^#+/, '');
+    return uniqueTags.filter((t) => t.name.toLowerCase().includes(q));
+  }, [uniqueTags, tagSearchTerm]);
 
   // Filter items
   const filteredItems = safeItems.filter((item) => {
@@ -434,96 +502,356 @@ export const StockTable: React.FC<StockTableProps> = ({
           </div>
         </div>
 
-        {/* Row 3: Product Labels & Tags Filter Bar */}
+        {/* Row 3: Clean Product Labels & Tags Filter Bar */}
         {uniqueTags.length > 0 && (
           <div
             id="tag-filter-bar"
-            className="pt-2 border-t border-slate-200/80 flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1"
+            className="pt-2 border-t border-slate-200/80 relative"
           >
-            <div className="flex items-center gap-1 text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 pl-0.5 pr-1">
-              <TagIcon className="w-3.5 h-3.5 text-emerald-600" />
-              <span className="hidden xs:inline">Tags:</span>
-            </div>
-
-            {/* "All Tags" button */}
-            <button
-              type="button"
-              onClick={() => setSelectedTag(null)}
-              className={`min-h-[30px] px-2.5 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 ${
-                selectedTag === null
-                  ? 'bg-slate-900 text-white shadow-2xs'
-                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 hover:text-slate-900'
-              }`}
-            >
-              <span>All Tags</span>
-              <span
-                className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-                  selectedTag === null ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              {/* Left: Tag icon + Pills container */}
+              <div
+                className={`flex items-center gap-1.5 py-1 min-w-0 flex-1 ${
+                  isTagsExpanded || isSearchingTags
+                    ? 'flex-wrap'
+                    : 'overflow-x-auto scrollbar-none flex-nowrap'
                 }`}
               >
-                {safeItems.length}
-              </span>
-            </button>
+                <div className="flex items-center gap-1 text-xs font-bold text-slate-600 uppercase tracking-wider shrink-0 pl-0.5 pr-1">
+                  <TagIcon className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="hidden xs:inline">Tags:</span>
+                </div>
 
-            {/* Individual Tag Pills */}
-            {uniqueTags.map(({ name, count }) => {
-              const isSelected = selectedTag === name;
-              const style = getTagStyle(name, effectiveTags);
-              return (
+                {/* "All Tags" button */}
                 <button
-                  key={name}
                   type="button"
-                  onClick={() => setSelectedTag(isSelected ? null : name)}
-                  className={`min-h-[30px] px-2.5 py-1 text-xs font-semibold rounded-lg border transition-all cursor-pointer shrink-0 flex items-center gap-1.5 ${
-                    isSelected
-                      ? `${style.activeBg} shadow-2xs ring-2 ring-emerald-500/20`
-                      : `${style.bg} ${style.text} ${style.border} ${style.hover}`
+                  onClick={() => {
+                    setSelectedTag(null);
+                    setIsTagDropdownOpen(false);
+                  }}
+                  className={`min-h-[30px] px-2.5 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 ${
+                    selectedTag === null
+                      ? 'bg-slate-900 text-white shadow-2xs'
+                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 hover:text-slate-900'
                   }`}
-                  title={
-                    isSelected
-                      ? `Click to clear filter for "${name}"`
-                      : `Filter inventory by tag "${name}" (${count} items)`
-                  }
                 >
-                  <Hash className="w-3 h-3 opacity-60" />
-                  <span>{name}</span>
+                  <span>All Tags</span>
                   <span
                     className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-                      isSelected ? 'bg-black/20 text-white' : 'bg-black/5 text-current'
+                      selectedTag === null ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
                     }`}
                   >
-                    {count}
+                    {safeItems.length}
                   </span>
-                  {isSelected && <X className="w-3 h-3 ml-0.5" />}
                 </button>
-              );
-            })}
 
-            {/* Manage Tags shortcut */}
-            {handleOpenTagsModal && (
-              <button
-                id="btn-filterbar-manage-tags"
-                type="button"
-                onClick={handleOpenTagsModal}
-                className="min-h-[30px] px-2.5 py-1 text-xs font-semibold text-slate-600 hover:text-emerald-800 bg-white hover:bg-emerald-50 border border-dashed border-slate-300 hover:border-emerald-300 rounded-lg transition-colors cursor-pointer shrink-0 flex items-center gap-1.5"
-                title="Manage custom tags & color codes"
-              >
-                <TagIcon className="w-3 h-3 text-emerald-600" />
-                <span>Manage Tags</span>
-              </button>
-            )}
+                {/* Pinned Selected Tag if outside top 5 and not currently searching */}
+                {selectedTagObject && !isTagsExpanded && !isSearchingTags && (
+                  (() => {
+                    const style = getTagStyle(selectedTagObject.name, effectiveTags);
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTag(null)}
+                        className={`min-h-[30px] px-2.5 py-1 text-xs font-semibold rounded-lg border transition-all cursor-pointer shrink-0 flex items-center gap-1.5 ${style.activeBg} shadow-2xs ring-2 ring-emerald-500/20`}
+                        title={`Currently filtering by "${selectedTagObject.name}". Click to clear.`}
+                      >
+                        <Hash className="w-3 h-3 opacity-60" />
+                        <span>{selectedTagObject.name}</span>
+                        <span className="text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold bg-black/20 text-white">
+                          {selectedTagObject.count}
+                        </span>
+                        <X className="w-3 h-3 ml-0.5" />
+                      </button>
+                    );
+                  })()
+                )}
 
-            {/* Reset active tag filter */}
-            {selectedTag && (
-              <button
-                type="button"
-                onClick={() => setSelectedTag(null)}
-                className="text-xs text-rose-600 hover:text-rose-800 font-semibold px-2 py-1 underline shrink-0 cursor-pointer flex items-center gap-0.5"
-              >
-                <X className="w-3 h-3" />
-                <span>Clear Tag</span>
-              </button>
-            )}
+                {/* If searching tags and no matches found */}
+                {isSearchingTags && visibleBarTags.length === 0 && (
+                  <div className="flex items-center gap-1.5 px-2 py-1 text-xs text-slate-500 italic shrink-0">
+                    <span>No tags match "{tagSearchTerm}"</span>
+                    <button
+                      type="button"
+                      onClick={() => setTagSearchTerm('')}
+                      className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold underline cursor-pointer ml-1"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
+
+                {/* Visible Tags (either top 5, all if expanded, or filtered if searching) */}
+                {visibleBarTags.map(({ name, count }) => {
+                  const isSelected = selectedTag === name;
+                  const style = getTagStyle(name, effectiveTags);
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => setSelectedTag(isSelected ? null : name)}
+                      className={`min-h-[30px] px-2.5 py-1 text-xs font-semibold rounded-lg border transition-all cursor-pointer shrink-0 flex items-center gap-1.5 ${
+                        isSelected
+                          ? `${style.activeBg} shadow-2xs ring-2 ring-emerald-500/20`
+                          : `${style.bg} ${style.text} ${style.border} ${style.hover}`
+                      }`}
+                      title={
+                        isSelected
+                          ? `Click to clear filter for "${name}"`
+                          : `Filter inventory by tag "${name}" (${count} items)`
+                      }
+                    >
+                      <Hash className="w-3 h-3 opacity-60" />
+                      <span>{name}</span>
+                      <span
+                        className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                          isSelected ? 'bg-black/20 text-white' : 'bg-black/5 text-current'
+                        }`}
+                      >
+                        {count}
+                      </span>
+                      {isSelected && <X className="w-3 h-3 ml-0.5" />}
+                    </button>
+                  );
+                })}
+
+                {/* More Tags Dropdown Anchor Button (when not expanded, not searching, and tags > 5) */}
+                {!isTagsExpanded && !isSearchingTags && uniqueTags.length > MAX_COMPACT_TAGS && (
+                  <div className="relative shrink-0" ref={tagDropdownRef}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsTagDropdownOpen((prev) => !prev);
+                        setTagSearchTerm('');
+                      }}
+                      className={`min-h-[30px] px-2.5 py-1 text-xs font-semibold rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 ${
+                        isTagDropdownOpen || (!isSelectedTagInTop && selectedTag)
+                          ? 'bg-emerald-50 border-emerald-300 text-emerald-800 ring-2 ring-emerald-500/20'
+                          : 'bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700'
+                      }`}
+                      title={`Browse and search all ${uniqueTags.length} tags`}
+                    >
+                      <Layers className="w-3 h-3 text-emerald-600" />
+                      <span>+{uniqueTags.length - MAX_COMPACT_TAGS} More</span>
+                      <ChevronDown
+                        className={`w-3 h-3 text-slate-400 transition-transform duration-150 ${
+                          isTagDropdownOpen ? 'rotate-180' : ''
+                        }`}
+                      />
+                    </button>
+
+                    {/* Clean Tag Picker Popover */}
+                    {isTagDropdownOpen && (
+                      <div className="absolute left-0 top-full mt-1.5 w-72 sm:w-80 bg-white rounded-xl shadow-xl border border-slate-200 p-2.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                        <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                            <TagIcon className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Select Tag ({uniqueTags.length} total)</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setIsTagDropdownOpen(false)}
+                            className="text-slate-400 hover:text-slate-600 p-0.5 rounded cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        {/* Search tags inside dropdown */}
+                        <div className="relative mb-2">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            value={tagSearchTerm}
+                            onChange={(e) => setTagSearchTerm(e.target.value)}
+                            placeholder="Search tag name..."
+                            autoFocus
+                            className="w-full pl-8 pr-7 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-800 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+                          />
+                          {tagSearchTerm && (
+                            <button
+                              type="button"
+                              onClick={() => setTagSearchTerm('')}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Tags scrollable list */}
+                        <div className="max-h-56 overflow-y-auto space-y-1 pr-1 overscroll-contain">
+                          {filteredDropdownTags.length === 0 ? (
+                            <p className="text-center py-4 text-xs text-slate-400">
+                              No tags match "{tagSearchTerm}"
+                            </p>
+                          ) : (
+                            filteredDropdownTags.map(({ name, count }) => {
+                              const isSelected = selectedTag === name;
+                              const style = getTagStyle(name, effectiveTags);
+                              return (
+                                <button
+                                  key={name}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedTag(isSelected ? null : name);
+                                    setIsTagDropdownOpen(false);
+                                  }}
+                                  className={`w-full text-left px-2 py-1.5 rounded-lg text-xs flex items-center justify-between transition-colors cursor-pointer border ${
+                                    isSelected
+                                      ? `${style.activeBg} font-bold shadow-2xs`
+                                      : `${style.bg} ${style.text} ${style.border} hover:opacity-90`
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-1.5 truncate">
+                                    <Hash className="w-3 h-3 opacity-60 shrink-0" />
+                                    <span className="truncate">{name}</span>
+                                  </span>
+                                  <span className="flex items-center gap-1 shrink-0 ml-2">
+                                    <span
+                                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                                        isSelected
+                                          ? 'bg-black/20 text-white'
+                                          : 'bg-black/5 text-current'
+                                      }`}
+                                    >
+                                      {count}
+                                    </span>
+                                    {isSelected && <Check className="w-3 h-3" />}
+                                  </span>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+
+                        {/* Dropdown Footer */}
+                        <div className="pt-2 mt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+                          {selectedTag ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedTag(null);
+                                setIsTagDropdownOpen(false);
+                              }}
+                              className="text-rose-600 hover:text-rose-700 font-semibold cursor-pointer flex items-center gap-1"
+                            >
+                              <X className="w-3 h-3" />
+                              <span>Clear Active Tag</span>
+                            </button>
+                          ) : (
+                            <span className="text-slate-400 text-[11px]">Click tag to filter</span>
+                          )}
+                          {handleOpenTagsModal && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsTagDropdownOpen(false);
+                                handleOpenTagsModal();
+                              }}
+                              className="text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1 ml-auto"
+                            >
+                              <TagIcon className="w-3 h-3 text-emerald-600" />
+                              <span>Manage Tags</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Manage Tags shortcut */}
+                {handleOpenTagsModal && (
+                  <button
+                    id="btn-filterbar-manage-tags"
+                    type="button"
+                    onClick={handleOpenTagsModal}
+                    className="min-h-[30px] px-2.5 py-1 text-xs font-semibold text-slate-600 hover:text-emerald-800 bg-white hover:bg-emerald-50 border border-dashed border-slate-300 hover:border-emerald-300 rounded-lg transition-colors cursor-pointer shrink-0 flex items-center gap-1.5"
+                    title="Manage custom tags & color codes"
+                  >
+                    <TagIcon className="w-3 h-3 text-emerald-600" />
+                    <span className="hidden sm:inline">Manage</span>
+                  </button>
+                )}
+
+                {/* Reset active tag filter */}
+                {selectedTag && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTag(null)}
+                    className="text-xs text-rose-600 hover:text-rose-800 font-semibold px-2 py-1 underline shrink-0 cursor-pointer flex items-center gap-0.5"
+                  >
+                    <X className="w-3 h-3" />
+                    <span>Clear Tag</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Right: Search Tags Input & Compact/All Toggle */}
+              <div className="shrink-0 flex items-center gap-1.5 justify-end pl-1">
+                {/* Search tags input */}
+                <div className="relative flex items-center">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    id="input-search-tags-filter"
+                    type="text"
+                    value={tagSearchTerm}
+                    onChange={(e) => setTagSearchTerm(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && visibleBarTags.length > 0) {
+                        setSelectedTag(visibleBarTags[0].name);
+                      } else if (e.key === 'Escape') {
+                        setTagSearchTerm('');
+                      }
+                    }}
+                    placeholder="Search tags..."
+                    className="min-h-[30px] w-28 sm:w-36 md:w-44 pl-8 pr-6 py-1 text-xs bg-white hover:bg-slate-50 focus:bg-white border border-slate-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 rounded-lg text-slate-800 placeholder:text-slate-400 transition-all focus:w-36 sm:focus:w-52 shadow-2xs"
+                    title="Search tags (press Enter to select match, Esc to clear)"
+                  />
+                  {tagSearchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => setTagSearchTerm('')}
+                      className="absolute right-1.5 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer rounded"
+                      title="Clear tag search"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Expand/Collapse All Tags toggle (only if > 5 tags) */}
+                {uniqueTags.length > MAX_COMPACT_TAGS && (
+                  <button
+                    id="btn-toggle-compact-all-tags"
+                    type="button"
+                    onClick={() => {
+                      setIsTagsExpanded((prev) => !prev);
+                      if (tagSearchTerm) setTagSearchTerm('');
+                    }}
+                    className="min-h-[30px] px-2 py-1 text-xs font-medium text-slate-600 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer flex items-center gap-1 shrink-0 shadow-2xs"
+                    title={
+                      isTagsExpanded
+                        ? 'Switch to compact single-row tag view'
+                        : `Expand to view all ${uniqueTags.length} tags`
+                    }
+                  >
+                    {isTagsExpanded ? (
+                      <>
+                        <ChevronUp className="w-3 h-3 text-slate-500" />
+                        <span className="hidden sm:inline">Compact</span>
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="w-3 h-3 text-slate-500" />
+                        <span className="hidden sm:inline">All ({uniqueTags.length})</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -835,10 +1163,10 @@ export const StockTable: React.FC<StockTableProps> = ({
                     )}
                   </div>
 
-                  {/* Product Tags on Card */}
+                  {/* Product Tags on Card - Clean & Compact */}
                   {Array.isArray(item.tags) && item.tags.length > 0 && (
                     <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
-                      {item.tags.map((tag) => {
+                      {(expandedItemCardTags[item.id] ? item.tags : item.tags.slice(0, 3)).map((tag) => {
                         const style = getTagStyle(tag, effectiveTags);
                         const isSelected = selectedTag === tag;
                         return (
@@ -862,6 +1190,21 @@ export const StockTable: React.FC<StockTableProps> = ({
                           </button>
                         );
                       })}
+                      {item.tags.length > 3 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedItemCardTags((prev) => ({
+                              ...prev,
+                              [item.id]: !prev[item.id],
+                            }))
+                          }
+                          className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 border border-slate-200 transition-colors cursor-pointer"
+                          title={expandedItemCardTags[item.id] ? 'Show fewer tags' : `View all ${item.tags.length} tags`}
+                        >
+                          {expandedItemCardTags[item.id] ? 'Show less' : `+${item.tags.length - 3} more`}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1191,11 +1534,11 @@ export const StockTable: React.FC<StockTableProps> = ({
                       )}
                     </td>
 
-                    {/* Product Tags Column */}
+                    {/* Product Tags Column - Clean & Compact */}
                     <td className="py-3.5 px-4">
                       {Array.isArray(item.tags) && item.tags.length > 0 ? (
                         <div className="flex items-center gap-1 flex-wrap max-w-[200px]">
-                          {item.tags.map((tag) => {
+                          {item.tags.slice(0, 2).map((tag) => {
                             const style = getTagStyle(tag, effectiveTags);
                             const isSelected = selectedTag === tag;
                             return (
@@ -1215,10 +1558,18 @@ export const StockTable: React.FC<StockTableProps> = ({
                                 }
                               >
                                 <Hash className="w-2 h-2 opacity-60" />
-                                <span>{tag}</span>
+                                <span className="max-w-[70px] truncate">{tag}</span>
                               </button>
                             );
                           })}
+                          {item.tags.length > 2 && (
+                            <span
+                              className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 cursor-help shrink-0"
+                              title={`Additional tags: ${item.tags.slice(2).join(', ')}`}
+                            >
+                              +{item.tags.length - 2}
+                            </span>
+                          )}
                         </div>
                       ) : (
                         <span className="text-xs text-slate-300 italic">—</span>

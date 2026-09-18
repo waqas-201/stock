@@ -36,7 +36,7 @@ apiRouter.post('/gemini/stock-chat', async (req: Request, res: Response) => {
       });
     }
 
-    const { message, history = [], stockItems = [] } = req.body;
+    const { message, history = [], stockItems = [], units = [], tags = [] } = req.body;
     if (!message || typeof message !== 'string') {
       return res.status(400).json({ error: 'A user message is required.' });
     }
@@ -71,60 +71,112 @@ apiRouter.post('/gemini/stock-chat', async (req: Request, res: Response) => {
       notes: item.notes || null,
     }));
 
-    const systemInstruction = `You are the Active AI Inventory Agent for this warehouse and store inventory system.
-You do NOT just chat—you have DIRECT OPERATIONAL CONTROL to modify inventory records, adjust stock quantities, create new items, update alerts, and filter the UI on behalf of the user.
+    const unitsList = Array.isArray(units)
+      ? units.map((u: any) => (typeof u === 'string' ? u : u?.name)).filter(Boolean)
+      : ['Pieces', 'Boxes', 'Kilograms', 'Grams', 'Litres', 'Packs', 'Meters'];
 
-Current Inventory Overview:
+    const tagsList = Array.isArray(tags)
+      ? tags.map((t: any) => (typeof t === 'string' ? t : t?.name)).filter(Boolean)
+      : ['Raw Materials', 'Finished Goods', 'Packaging', 'Spices', 'Produce', 'Warehouse'];
+
+    const systemInstruction = `You are the Active AI Inventory Agent for this store and warehouse inventory system.
+You do NOT just chat—you have direct operational control to modify stock, record inbound shipments, adjust quantities, create new items, and filter the catalog.
+You must be highly intelligent, fast, and conversational.
+
+=== OUR STORE'S INVENTORY DATA SCHEMA ===
+1. NECESSARY FIELDS (The ONLY fields you ever need to ask for):
+   • "itemName" (string): The product/item/material name.
+   • "quantity" (number): Stock amount.
+   • "unit" (string): Unit of measurement (Store units: ${unitsList.join(', ')}).
+
+2. OPTIONAL FIELDS (NEVER interrogate the user for these unless the user explicitly mentions them):
+   • "tags" / Category (array): Pick up AUTOMATICALLY from existing items or context. Default: [] or inherited.
+   • "lowStockThreshold" (number): Default: 5 (or inherited from similar items).
+   • "productionDate" (string): Default: null or current date if relevant.
+   • "notes" (string): Default: null. ONLY ask for notes if the user deliberately mentions "with notes" or "add notes".
+
+=== CURRENT STORE INVENTORY STATE ===
 - Total Unique Items: ${totalItems}
 - Total Quantity Volume: ${totalQuantity} units
-- In Stock: ${inStockItems.length}
-- Low Stock Alerts: ${lowStockItems.length} (${lowStockItems.map((i: any) => `${i.itemName}: ${i.quantity} ${i.unit}`).join(', ') || 'None'})
-- Out of Stock: ${outOfStockItems.length} (${outOfStockItems.map((i: any) => i.itemName).join(', ') || 'None'})
-
-Current Inventory Catalog:
+- Catalog Products & Tags:
 ${JSON.stringify(inventorySnapshot, null, 2)}
+- Configured Store Units: ${unitsList.join(', ')}
+- Configured Store Tags: ${tagsList.join(', ')}
 
-OPERATIONAL AGENT CAPABILITIES:
-When the user speaks or commands stock operations, like:
-- "Hey, this item increased this much today" (e.g., "Widget A increased by 15 today", "We received 20 boxes of Milk", "Add 5 to A4 Paper", "Restock 50 Pens")
-- "We sold 4 laptops" or "Deduct 2 pens" or "Reduced by 3"
-- "Set stock of Widget B to 40"
-- "Add a new item called Toner with 30 units and alert 5"
-- "Change low stock threshold of Paper to 10"
-- "Delete old sample item"
-- "Show low stock items" or "Filter to out of stock"
-- "Search for printer"
+=== CONVERSATIONAL INTELLIGENCE RULES ===
 
-You MUST execute the action(s) in your [ACTIONS] block and write a polite, confirmation message in your [REPLY] block.
+RULE 1: MAXIMUM INFORMATION EXTRACTION (Pick up everything from conversation)
+Extract as much information as possible from the user's message and past dialogue:
+• Quantity & Unit: e.g., "5 grams" -> quantity: 5, unit: "grams". "10 boxes" -> quantity: 10, unit: "Boxes".
+• Category & Tags:
+  - If the item belongs to or resembles items already in catalog, AUTOMATICALLY pick up their tags! (e.g. if user adds "Saffron" or "Cloves" and "Cardamom" has tag "Spices", automatically pick up ["Spices"] without asking!).
+  - If the user says "organic tea" or "fresh milk packaging", pick up ["Produce"] or ["Packaging"] automatically.
+• Notes:
+  - If the user mentions shelf/rack, supplier, or batch (e.g. "from supplier Acme", "batch 202", "shelf B4"), automatically extract it as notes.
+  - If the user deliberately says "with notes" or "add a note" without providing the note text, ONLY THEN ask: "What note would you like me to attach?". Otherwise, do NOT ask for notes!
+• Threshold: Default to 5 unless the user specifically mentions an alert number.
 
-If the user asks an informational question (e.g., "What is low in stock?", "How much Milk do we have?"), provide a direct answer and output an empty array for [ACTIONS].
+RULE 2: ASK ONLY FOR THE STRICTLY NECESSARY MISSING ONE! (No Interrogations)
+When the user gives an incomplete command like:
+• "Hey, add this 5 grams" or "Add 5 grams" or "Add 10 pieces":
+  - What is extracted: **Quantity: 5**, **Unit: grams**.
+  - What is missing: ONLY the **Item Name**!
+  - DO NOT ask a long list of questions about threshold, dates, categories, or notes!
+  - Ask ONLY for the missing necessary item name in a concise, friendly way:
+    "Got it, **5 grams**! What is the **product or item name**?"
+  - Output [ACTIONS] []
+  - In [SUGGESTIONS], provide 2-3 quick examples (e.g. "It's Saffron", "It's Cardamom", "Add note: Batch A").
+
+RULE 3: EVALUATION WHEN ITEM NAME IS PROVIDED (Pick up existing tags & check duplicates)
+When the user gives the item name (e.g., "It's Cardamom" or "Saffron"):
+1. EXISTING PRODUCT CHECK:
+   - Check if the item already exists in the inventory catalog:
+   - If it already exists (e.g., "Cardamom" has 12 grams, tags: ["Spices"]):
+     - Pick up its existing tags, threshold, and unit!
+     - Intelligently ask:
+       "We already have **Cardamom** in stock (**12 grams**, Tag: *Spices*). Would you like to **add +5 grams** to the existing stock (making it **17 grams**), or register a separate new item?"
+     - Suggestions: ["Add +5g to existing Cardamom", "Register as new item"]
+     - If user confirms adding to existing stock, execute:
+       [ACTIONS]
+       [{"type": "update_stock", "itemName": "Cardamom", "delta": 5, "reason": "Restocked 5 grams"}]
+2. NEW PRODUCT:
+   - If it is a new product:
+     - Automatically pick up category/tags if matching/inferred.
+     - You now have all necessary fields (Name, Quantity, Unit).
+     - DO NOT delay with more questions! Execute "add_item" immediately with smart defaults:
+       [ACTIONS]
+       [
+         {
+           "type": "add_item",
+           "itemName": "Saffron",
+           "quantity": 5,
+           "unit": "grams",
+           "lowStockThreshold": 5,
+           "tags": ["Spices"],
+           "notes": null
+         }
+       ]
+     - In [REPLY], confirm with a clean, concise card: "Added **Saffron** (5 grams, Tag: *Spices*, Alert: ≤5 grams) to your inventory!"
+
+RULE 4: DIRECT COMMANDS ON EXISTING ITEMS
+• "Widget A increased by 15 today" -> {"type": "update_stock", "itemName": "Widget A", "delta": 15, "reason": "Stock increased today"}
+• "Deduct 2 pens" or "We sold 4 laptops" -> {"type": "update_stock", "itemName": "Matched Name", "delta": -2, "reason": "Deduction"}
+• "Set stock of Milk to 40" -> {"type": "update_stock", "itemName": "Milk", "newQuantity": 40}
+• "Change alert threshold of Paper to 10" -> {"type": "update_item", "itemName": "Paper", "lowStockThreshold": 10}
+• "Delete test sample" -> {"type": "delete_item", "itemName": "Test Sample"}
+• "Show low stock" -> {"type": "filter_ui", "filter": "low_stock"}
+• "Search for Sugar" -> {"type": "search_ui", "searchQuery": "Sugar"}
 
 STRICT OUTPUT FORMAT:
 You must strictly format your entire response using the following three sections:
 
 [REPLY]
-Your natural conversational reply to the user. If an action was taken, clearly state what was updated (e.g. "I've updated the inventory! Added 15 pcs to **Widget A**. The verified stock is now **65 pcs**.").
+Your natural conversational reply to the user. Use bold for key numbers and item names.
 
 [ACTIONS]
 [
-  {
-    "type": "update_stock",
-    "itemName": "Matched Item Name from Catalog",
-    "delta": 15,
-    "reason": "Stock increased today"
-  }
+  ... json array of actions, or [] if questioning, evaluating, or informational ...
 ]
-
-Note on [ACTIONS] schema:
-- For stock changes: {"type": "update_stock", "itemName": "Exact Name", "delta": 15, "reason": "..."} (Use positive delta for additions/inbound, negative delta for sales/deductions; or "newQuantity": 50 for direct set)
-- For creating items: {"type": "add_item", "itemName": "Name", "unit": "pcs", "quantity": 10, "lowStockThreshold": 5, "notes": "...", "tags": ["..."]}
-- For editing metadata: {"type": "update_item", "itemName": "Name", "lowStockThreshold": 10, "notes": "..."}
-- For deleting items: {"type": "delete_item", "itemName": "Name", "reason": "..."}
-- For UI filter: {"type": "filter_ui", "filter": "all" | "low_stock" | "out_of_stock" | "in_stock"}
-- For UI search: {"type": "search_ui", "query": "..."}
-If no action is performed, output:
-[ACTIONS]
-[]
 
 [SUGGESTIONS]
 - Suggestion 1
@@ -133,9 +185,9 @@ If no action is performed, output:
     // Build conversation contents
     const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
 
-    // Add recent history if available
+    // Add recent history if available (preserve up to 20 turns for multi-turn form filling)
     if (Array.isArray(history)) {
-      for (const turn of history.slice(-6)) {
+      for (const turn of history.slice(-20)) {
         if (turn && (turn.role === 'user' || turn.role === 'model') && Array.isArray(turn.parts)) {
           contents.push({
             role: turn.role,
@@ -151,7 +203,7 @@ If no action is performed, output:
       parts: [{ text: message }],
     });
 
-    // Primary Attempt: @google/genai SDK with gemini-2.5-flash and a 12s timeout
+    // Primary Attempt: @google/genai SDK with gemini-3.8-flash (fallback to gemini-2.5-flash)
     let replyText: string | null = null;
 
     try {
@@ -164,20 +216,34 @@ If no action is performed, output:
         },
       });
 
-      const sdkPromise = ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents,
-        config: {
-          systemInstruction,
-          temperature: 0.7,
-        },
-      });
+      let response: any = null;
+      try {
+        const sdkPromise = ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents,
+          config: {
+            systemInstruction,
+            temperature: 0.7,
+          },
+        });
 
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('SDK call timed out after 12s')), 12000)
-      );
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('SDK call timed out after 14s')), 14000)
+        );
 
-      const response: any = await Promise.race([sdkPromise, timeoutPromise]);
+        response = await Promise.race([sdkPromise, timeoutPromise]);
+      } catch (gemini38Err) {
+        console.warn('gemini-3.8-flash error or timeout, trying gemini-2.5-flash:', gemini38Err);
+        response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents,
+          config: {
+            systemInstruction,
+            temperature: 0.7,
+          },
+        });
+      }
+
       replyText = response.text || null;
     } catch (sdkError) {
       console.warn('Primary SDK call encountered issue, attempting REST fallback:', sdkError);
@@ -309,29 +375,80 @@ apiRouter.post('/gemini/transcribe-audio', async (req: Request, res: Response) =
       });
     }
 
-    const { audioBase64, mimeType = 'audio/webm' } = req.body;
+    const { audioBase64, mimeType = 'audio/webm', itemNames = [], units = [] } = req.body;
     if (!audioBase64) {
       return res.status(400).json({ error: 'audioBase64 data is required.' });
     }
 
     const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: [
-        {
-          inlineData: {
-            mimeType: mimeType || 'audio/webm',
-            data: audioBase64,
-          },
-        },
-        {
-          text: 'Listen to this spoken audio carefully. Transcribe exactly what the user said verbatim for an inventory management query or command (for example: "Hey, Widget A increased by 10 today", "Add 5 to stock", "What items are low on stock?", etc.). Return ONLY the transcribed text. Do not add conversational commentary, quotation marks, or explanations. If no speech is detected, return an empty string.',
-        },
-      ],
-    });
 
-    const transcript = response.text ? response.text.trim() : '';
-    return res.json({ transcript });
+    // Construct inventory vocabulary context so Gemini recognizes domain items and units with high acoustic precision
+    const validItems = Array.isArray(itemNames)
+      ? itemNames.filter((n: any) => typeof n === 'string' && n.trim()).slice(0, 80)
+      : [];
+    const validUnits = Array.isArray(units)
+      ? units.map((u: any) => (typeof u === 'string' ? u : u?.name)).filter(Boolean)
+      : ['Pieces', 'Boxes', 'Kilograms', 'Grams', 'Litres', 'Packs'];
+
+    const itemCatalogHint =
+      validItems.length > 0
+        ? `\nActive Store Inventory Items:\n${validItems.map((name: string) => `- "${name}"`).join('\n')}\nConfigured Units: ${validUnits.join(', ')}\n`
+        : `\nConfigured Units: ${validUnits.join(', ')}\n`;
+
+    const systemInstruction = `You are a precision audio transcription engine for an inventory management system.
+Listen to the user's spoken audio with extreme acoustic accuracy.
+${itemCatalogHint}
+Rules:
+1. Transcribe the user's speech verbatim. Pay close attention to product names, numbers, units (e.g. pcs, boxes, cartons, kg, litres), and operations (e.g. increased, decreased, added, restocked, sold, out of stock, low stock).
+2. If the user mentions one of the inventory item names listed above, transcribe the exact item name accurately.
+3. Clean up any unintended acoustic stutters or repeated words (e.g. if the user says "widget widget increased" or the audio loops, transcribe cleanly as "widget increased").
+4. Return ONLY the transcribed sentence. Do not add quotes, introductory remarks, markdown formatting, or explanations. If no speech or only background noise is detected, return an empty string.`;
+
+    let transcript = '';
+
+    // Primary: Try gemini-3.5-transcribe or gemini-3.8-flash
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.5-transcribe',
+        contents: [
+          {
+            inlineData: {
+              mimeType: mimeType || 'audio/webm',
+              data: audioBase64,
+            },
+          },
+          { text: systemInstruction },
+        ],
+      });
+      transcript = response.text ? response.text.trim() : '';
+    } catch (primaryErr) {
+      console.warn('gemini-3.5-transcribe not available or encountered error, falling back to gemini-3.8-flash:', primaryErr);
+      const fallbackResponse = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: [
+          {
+            inlineData: {
+              mimeType: mimeType || 'audio/webm',
+              data: audioBase64,
+            },
+          },
+          { text: systemInstruction },
+        ],
+      });
+      transcript = fallbackResponse.text ? fallbackResponse.text.trim() : '';
+    }
+
+    // Clean up quotation marks, markdown wrappers, and duplicate repeated words
+    let cleaned = transcript
+      .replace(/^["'`]+|["'`]+$/g, '')
+      .replace(/^Transcription:\s*/i, '')
+      .replace(/\b([A-Za-z0-9_-]+)(?:\s+\1\b)+/gi, '$1')
+      .replace(/\b([A-Za-z0-9_-]+\s+[A-Za-z0-9_-]+)(?:\s+\1\b)+/gi, '$1')
+      .replace(/\b([A-Za-z0-9_-]+\s+[A-Za-z0-9_-]+\s+[A-Za-z0-9_-]+)(?:\s+\1\b)+/gi, '$1')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return res.json({ transcript: cleaned });
   } catch (error: any) {
     console.error('Error in transcribe-audio:', error);
     return res.status(500).json({

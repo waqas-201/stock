@@ -68,6 +68,7 @@ import { OperatorModal } from './components/OperatorModal';
 import { GeminiStockChatModal } from './components/GeminiStockChatModal';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { UnauthorizedDomainModal } from './components/UnauthorizedDomainModal';
+import { ExportExcelModal } from './components/ExportExcelModal';
 import {
   CheckCircle2,
   AlertCircle,
@@ -145,6 +146,7 @@ export function App() {
   const [isTagModalOpen, setIsTagModalOpen] = useState(false);
   const [isDomainModalOpen, setIsDomainModalOpen] = useState(false);
   const [currentDomain, setCurrentDomain] = useState('');
+  const [isExportExcelModalOpen, setIsExportExcelModalOpen] = useState(false);
 
   // Notification Toast with optional Action (e.g. Undo)
   const [toast, setToast] = useState<{
@@ -1138,24 +1140,116 @@ export function App() {
     }
 
     if (action.type === 'add_item') {
-      const newItemName = action.itemName || 'New Product';
-      const initialQty = action.delta !== undefined ? Math.max(0, action.delta) : 0;
-      const unit = action.unit || 'pcs';
+      const newItemName = (action.itemName || '').trim() || 'New Product';
+      const initialQty =
+        action.quantity !== undefined
+          ? Math.max(0, action.quantity)
+          : action.delta !== undefined
+          ? Math.max(0, action.delta)
+          : 0;
+      const unit =
+        action.unit ||
+        (units && units.length > 0 && units[0]?.name ? units[0].name : 'Pieces');
+      const threshold =
+        action.lowStockThreshold !== undefined && !isNaN(Number(action.lowStockThreshold))
+          ? Number(action.lowStockThreshold)
+          : 5;
+      const prodDate = action.productionDate?.trim() || undefined;
+      const notes = action.notes?.trim() || undefined;
+      const tags = Array.isArray(action.tags)
+        ? action.tags.map((t) => t.trim().replace(/^#+/, '')).filter(Boolean)
+        : undefined;
 
       handleAddItem(
         newItemName,
         unit,
         initialQty,
-        5,
-        undefined,
-        action.reason || 'Created via Gemini AI Command',
-        ['AI-Added']
+        threshold,
+        prodDate,
+        notes || action.reason || 'Added via Gemini AI Assistant',
+        tags
+      );
+
+      const createdSummary = `Added "${newItemName}" (${initialQty} ${unit}, Alert: ≤${threshold}${
+        tags && tags.length > 0 ? `, Tags: [${tags.join(', ')}]` : ''
+      }${notes ? `, Notes: ${notes}` : ''})`;
+
+      return {
+        success: true,
+        message: createdSummary,
+        newQuantity: initialQty,
+      };
+    }
+
+    if (action.type === 'update_item') {
+      const targetName = (action.itemName || '').trim().toLowerCase();
+      const matchedItem = items.find(
+        (i) =>
+          (action.itemId && i.id === action.itemId) ||
+          i.itemName.trim().toLowerCase() === targetName ||
+          i.itemName.trim().toLowerCase().includes(targetName)
+      );
+
+      if (!matchedItem) {
+        return {
+          success: false,
+          message: `Item "${action.itemName}" was not found to update.`,
+        };
+      }
+
+      const nextQty =
+        action.newQuantity !== undefined
+          ? action.newQuantity
+          : action.quantity !== undefined
+          ? action.quantity
+          : matchedItem.quantity;
+      const nextThreshold =
+        action.lowStockThreshold !== undefined ? action.lowStockThreshold : matchedItem.lowStockThreshold;
+      const nextUnit = action.unit || matchedItem.unit;
+      const nextNotes = action.notes !== undefined ? action.notes : matchedItem.notes;
+      const nextTags = action.tags !== undefined ? action.tags : matchedItem.tags;
+      const nextProdDate =
+        action.productionDate !== undefined ? action.productionDate : matchedItem.productionDate;
+
+      handleSaveEditItem(
+        matchedItem.id,
+        action.itemName || matchedItem.itemName,
+        nextUnit,
+        nextQty,
+        nextThreshold,
+        nextProdDate,
+        nextNotes,
+        nextTags
       );
 
       return {
         success: true,
-        message: `Created new item "${newItemName}" with ${initialQty} ${unit}.`,
-        newQuantity: initialQty,
+        message: `Updated details for "${matchedItem.itemName}".`,
+        previousQuantity: matchedItem.quantity,
+        newQuantity: nextQty,
+      };
+    }
+
+    if (action.type === 'delete_item') {
+      const targetName = (action.itemName || '').trim().toLowerCase();
+      const matchedItem = items.find(
+        (i) =>
+          (action.itemId && i.id === action.itemId) ||
+          i.itemName.trim().toLowerCase() === targetName ||
+          i.itemName.trim().toLowerCase().includes(targetName)
+      );
+
+      if (!matchedItem) {
+        return {
+          success: false,
+          message: `Item "${action.itemName}" was not found to delete.`,
+        };
+      }
+
+      executeDelete(matchedItem);
+      return {
+        success: true,
+        message: `Removed "${matchedItem.itemName}" from inventory.`,
       };
     }
 
@@ -1188,11 +1282,10 @@ export function App() {
   // File export & import
   const handleExportExcel = () => {
     if (items.length === 0) {
-      showToast('No items to export.', 'info');
+      showToast('No items in inventory to export.', 'info');
       return;
     }
-    exportToExcel(items, 'stock-inventory.xlsx');
-    showToast('Excel file exported', 'success');
+    setIsExportExcelModalOpen(true);
   };
 
   const handleExportCsv = () => {
@@ -1584,6 +1677,15 @@ export function App() {
         }}
       />
 
+      {/* 4b. Export Excel with Time-Span & Scope Options */}
+      <ExportExcelModal
+        isOpen={isExportExcelModalOpen}
+        onClose={() => setIsExportExcelModalOpen(false)}
+        items={items}
+        globalLogs={globalLogs}
+        onShowToast={(msg, type) => showToast(msg, type)}
+      />
+
       {/* 5. Units Manager Modal */}
       <UnitManagementModal
         isOpen={isUnitModalOpen}
@@ -1658,6 +1760,8 @@ export function App() {
         isOpen={isGeminiChatOpen}
         onClose={() => setIsGeminiChatOpen(false)}
         items={items}
+        units={units}
+        availableTags={availableTags}
         onQuickQuantityChange={handleQuickQuantityChange}
         onExecuteAgentAction={handleExecuteGeminiAction}
         onApplyFilter={(f) => setActiveFilter(f)}

@@ -1,16 +1,391 @@
 import * as XLSX from 'xlsx';
 import { StockItem } from '../types';
+import { GlobalAuditRecord } from './stockStorage';
 
 /**
-  * Exports current stock items to an Excel (.xlsx) file with:
-  * - Item Name
-  * - Unit
-  * - Current Quantity
-  * - Low Stock Alert Threshold
-  * - Production Date
-  * - Tags
-  * - Notes
-  */
+ * Checks if an ISO timestamp string falls within [startDate, endDate] inclusive
+ */
+export function isTimestampInRange(
+  timestamp?: string | null,
+  startDate?: Date | null,
+  endDate?: Date | null
+): boolean {
+  if (!timestamp) return false;
+  const d = new Date(timestamp);
+  const time = d.getTime();
+  if (isNaN(time)) return false;
+  if (startDate && time < startDate.getTime()) return false;
+  if (endDate && time > endDate.getTime()) return false;
+  return true;
+}
+
+/**
+ * Computes start/end dates for a given number of past days (e.g. 20 days)
+ */
+export function getDateRangeFromDays(days: number): { startDate: Date; endDate: Date } {
+  const endDate = new Date();
+  endDate.setHours(23, 59, 59, 999);
+
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - (Math.max(1, days) - 1));
+  startDate.setHours(0, 0, 0, 0);
+
+  return { startDate, endDate };
+}
+
+/**
+ * Identifies items that were created, updated, or had activity logs within the given date range.
+ */
+export function getAffectedItems(
+  items: StockItem[],
+  startDate: Date | null,
+  endDate: Date | null,
+  globalLogs?: GlobalAuditRecord[]
+): {
+  affectedItems: StockItem[];
+  itemStatsMap: Map<string, { movementCount: number; netDelta: number; lastActivity?: string }>;
+} {
+  const safeItems = Array.isArray(items) ? items : [];
+  const itemStatsMap = new Map<string, { movementCount: number; netDelta: number; lastActivity?: string }>();
+  const affectedItemIds = new Set<string>();
+
+  // If no date boundaries, all items are considered
+  if (!startDate && !endDate) {
+    safeItems.forEach((item) => {
+      affectedItemIds.add(item.id);
+      itemStatsMap.set(item.id, {
+        movementCount: item.auditTrail?.length || 0,
+        netDelta: 0,
+        lastActivity: item.updatedAt || item.createdAt,
+      });
+    });
+    return { affectedItems: safeItems, itemStatsMap };
+  }
+
+  // 1. Process global audit records
+  if (Array.isArray(globalLogs)) {
+    globalLogs.forEach((log) => {
+      if (isTimestampInRange(log.timestamp, startDate, endDate)) {
+        if (log.itemId) {
+          affectedItemIds.add(log.itemId);
+          const current = itemStatsMap.get(log.itemId) || { movementCount: 0, netDelta: 0, lastActivity: undefined };
+          current.movementCount += 1;
+          if (typeof log.delta === 'number') {
+            current.netDelta += log.delta;
+          }
+          if (!current.lastActivity || new Date(log.timestamp) > new Date(current.lastActivity)) {
+            current.lastActivity = log.timestamp;
+          }
+          itemStatsMap.set(log.itemId, current);
+        }
+      }
+    });
+  }
+
+  // 2. Process item-level audit trails and timestamps
+  safeItems.forEach((item) => {
+    let isAffected = affectedItemIds.has(item.id);
+
+    // Created or updated within range
+    if (isTimestampInRange(item.updatedAt, startDate, endDate)) {
+      isAffected = true;
+    }
+    if (isTimestampInRange(item.createdAt, startDate, endDate)) {
+      isAffected = true;
+    }
+
+    // Check item's internal audit trail entries
+    if (Array.isArray(item.auditTrail)) {
+      item.auditTrail.forEach((entry) => {
+        if (isTimestampInRange(entry.timestamp, startDate, endDate)) {
+          isAffected = true;
+          const current = itemStatsMap.get(item.id) || { movementCount: 0, netDelta: 0, lastActivity: undefined };
+          if (!affectedItemIds.has(item.id)) {
+            current.movementCount += 1;
+            if (typeof entry.delta === 'number') {
+              current.netDelta += entry.delta;
+            }
+          }
+          if (!current.lastActivity || new Date(entry.timestamp) > new Date(current.lastActivity)) {
+            current.lastActivity = entry.timestamp;
+          }
+          itemStatsMap.set(item.id, current);
+        }
+      });
+    }
+
+    if (isAffected) {
+      affectedItemIds.add(item.id);
+      if (!itemStatsMap.has(item.id)) {
+        itemStatsMap.set(item.id, {
+          movementCount: 1,
+          netDelta: 0,
+          lastActivity: item.updatedAt || item.createdAt,
+        });
+      }
+    }
+  });
+
+  const affectedItems = safeItems.filter((item) => affectedItemIds.has(item.id));
+  return { affectedItems, itemStatsMap };
+}
+
+export interface AdvancedExportOptions {
+  items: StockItem[];
+  scope: 'whole_stock' | 'affected_only';
+  startDate?: Date | null;
+  endDate?: Date | null;
+  timeSpanLabel?: string;
+  includeAuditTrail?: boolean;
+  globalLogs?: GlobalAuditRecord[];
+  filename?: string;
+}
+
+/**
+ * Advanced Excel export with time span and scope options (Whole Stock vs Affected Only).
+ */
+export function exportToExcelAdvanced(options: AdvancedExportOptions): void {
+  const {
+    items,
+    scope,
+    startDate,
+    endDate,
+    timeSpanLabel = '',
+    includeAuditTrail = false,
+    globalLogs = [],
+    filename,
+  } = options;
+
+  const { affectedItems, itemStatsMap } = getAffectedItems(
+    items,
+    startDate ?? null,
+    endDate ?? null,
+    globalLogs
+  );
+
+  const exportList = scope === 'affected_only' ? affectedItems : items;
+
+  // Build Sheet 1: Stock Inventory
+  const data = exportList.map((item) => {
+    const stats = itemStatsMap.get(item.id);
+    const row: Record<string, string | number> = {
+      'Item Name': item.itemName,
+      'Unit': item.unit,
+      'Current Stock': item.quantity,
+      'Low Stock Alert (Min)': item.lowStockThreshold ?? 5,
+      'Production Date': item.productionDate || '',
+      'Tags': Array.isArray(item.tags) && item.tags.length > 0 ? item.tags.join(', ') : '',
+      'Notes': item.notes || '',
+    };
+
+    if (startDate || endDate) {
+      row['Movements in Period'] = stats ? stats.movementCount : 0;
+      row['Net Change in Period'] =
+        stats && stats.netDelta !== 0
+          ? stats.netDelta > 0
+            ? `+${stats.netDelta}`
+            : stats.netDelta
+          : 0;
+      row['Last Activity'] = stats?.lastActivity
+        ? new Date(stats.lastActivity).toLocaleDateString()
+        : item.updatedAt
+        ? new Date(item.updatedAt).toLocaleDateString()
+        : '';
+    }
+
+    return row;
+  });
+
+  const worksheet = XLSX.utils.json_to_sheet(data);
+  worksheet['!cols'] = [
+    { wch: 36 }, // Item Name
+    { wch: 18 }, // Unit
+    { wch: 16 }, // Current Stock
+    { wch: 22 }, // Low Stock Alert
+    { wch: 18 }, // Production Date
+    { wch: 26 }, // Tags
+    { wch: 36 }, // Notes
+    ...(startDate || endDate
+      ? [
+          { wch: 20 }, // Movements in Period
+          { wch: 20 }, // Net Change in Period
+          { wch: 18 }, // Last Activity
+        ]
+      : []),
+  ];
+
+  const workbook = XLSX.utils.book_new();
+  const sheetTitle = scope === 'affected_only' ? 'Affected Items' : 'Stock Inventory';
+  XLSX.utils.book_append_sheet(workbook, worksheet, sheetTitle);
+
+  // Build Sheet 2: Audit Trail & Movement History (if requested)
+  if (includeAuditTrail && Array.isArray(globalLogs) && globalLogs.length > 0) {
+    const filteredLogs = globalLogs.filter((log) => {
+      const matchDate = isTimestampInRange(log.timestamp, startDate, endDate);
+      if (!matchDate) return false;
+      if (scope === 'affected_only') {
+        return affectedItems.some(
+          (ai) =>
+            ai.id === log.itemId ||
+            (log.itemName && log.itemName.toLowerCase() === ai.itemName.toLowerCase())
+        );
+      }
+      return true;
+    });
+
+    if (filteredLogs.length > 0) {
+      const auditData = filteredLogs.map((log) => ({
+        'Timestamp': log.timestamp ? new Date(log.timestamp).toLocaleString() : '',
+        'Item Name': log.itemName || '',
+        'Action': log.action || '',
+        'Staff Member': log.performedBy || '',
+        'Staff Email': log.userEmail || '',
+        'Previous Qty': log.previousQuantity ?? '',
+        'New Qty': log.newQuantity ?? '',
+        'Change (Delta)':
+          log.delta !== undefined
+            ? log.delta > 0
+              ? `+${log.delta}`
+              : log.delta
+            : '',
+        'Unit': log.unit || '',
+        'Summary': log.summary || '',
+        'Details': log.details || '',
+      }));
+
+      const auditSheet = XLSX.utils.json_to_sheet(auditData);
+      auditSheet['!cols'] = [
+        { wch: 22 }, // Timestamp
+        { wch: 30 }, // Item Name
+        { wch: 16 }, // Action
+        { wch: 20 }, // Staff Member
+        { wch: 25 }, // Staff Email
+        { wch: 14 }, // Previous Qty
+        { wch: 14 }, // New Qty
+        { wch: 16 }, // Delta
+        { wch: 12 }, // Unit
+        { wch: 38 }, // Summary
+        { wch: 40 }, // Details
+      ];
+      XLSX.utils.book_append_sheet(workbook, auditSheet, 'Activity Trail');
+    }
+  }
+
+  const defaultFilename =
+    scope === 'affected_only'
+      ? `stock-inventory-affected-${
+          timeSpanLabel ? timeSpanLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-') : 'period'
+        }-${new Date().toISOString().slice(0, 10)}.xlsx`
+      : `stock-inventory-whole-stock-${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+  XLSX.writeFile(workbook, filename || defaultFilename);
+}
+
+/**
+ * Exports Audit Trail directly to an Excel file
+ */
+export function exportAuditTrailToExcel(
+  logs: GlobalAuditRecord[],
+  filename = `inventory-audit-trail-${new Date().toISOString().slice(0, 10)}.xlsx`
+): void {
+  const data = logs.map((log) => ({
+    'Timestamp': log.timestamp ? new Date(log.timestamp).toLocaleString() : '',
+    'Item Name': log.itemName || '',
+    'Action': log.action || '',
+    'Staff Member': log.performedBy || '',
+    'Staff Email': log.userEmail || '',
+    'Previous Qty': log.previousQuantity ?? '',
+    'New Qty': log.newQuantity ?? '',
+    'Change (Delta)':
+      log.delta !== undefined
+        ? log.delta > 0
+          ? `+${log.delta}`
+          : log.delta
+        : '',
+    'Unit': log.unit || '',
+    'Summary': log.summary || '',
+    'Details': log.details || '',
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(data);
+  worksheet['!cols'] = [
+    { wch: 22 },
+    { wch: 30 },
+    { wch: 16 },
+    { wch: 20 },
+    { wch: 25 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 16 },
+    { wch: 12 },
+    { wch: 38 },
+    { wch: 40 },
+  ];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Audit Trail');
+  XLSX.writeFile(workbook, filename);
+}
+
+/**
+ * Exports Audit Trail to a standard CSV file
+ */
+export function exportAuditTrailToCsv(
+  logs: GlobalAuditRecord[],
+  filename = `inventory-audit-trail-${new Date().toISOString().slice(0, 10)}.csv`
+): void {
+  const headers = [
+    'Timestamp',
+    'Item Name',
+    'Action',
+    'Staff Member',
+    'Staff Email',
+    'Previous Qty',
+    'New Qty',
+    'Change (Delta)',
+    'Unit',
+    'Summary',
+    'Details',
+  ];
+
+  const escape = (val: string | number | undefined | null) => {
+    const s = String(val ?? '');
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  };
+
+  const rows = logs.map((log) => [
+    escape(log.timestamp ? new Date(log.timestamp).toLocaleString() : ''),
+    escape(log.itemName),
+    escape(log.action),
+    escape(log.performedBy),
+    escape(log.userEmail),
+    escape(log.previousQuantity ?? ''),
+    escape(log.newQuantity ?? ''),
+    escape(log.delta !== undefined ? (log.delta > 0 ? `+${log.delta}` : log.delta) : ''),
+    escape(log.unit),
+    escape(log.summary),
+    escape(log.details),
+  ].join(','));
+
+  const csvContent = [headers.join(','), ...rows].join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Exports current stock items to an Excel (.xlsx) file
+ */
 export function exportToExcel(
   items: StockItem[],
   filename = 'stock-inventory.xlsx'

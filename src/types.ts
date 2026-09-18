@@ -114,6 +114,7 @@ export interface GeminiAgentAction {
   itemName?: string;
   delta?: number;
   newQuantity?: number;
+  quantity?: number;
   unit?: string;
   lowStockThreshold?: number;
   productionDate?: string;

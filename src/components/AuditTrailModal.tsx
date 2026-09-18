@@ -14,8 +14,16 @@ import {
   Layers,
   User,
   ShieldCheck,
+  Download,
+  FileSpreadsheet,
+  Clock,
 } from 'lucide-react';
 import { GlobalAuditRecord } from '../lib/stockStorage';
+import {
+  getDateRangeFromDays,
+  isTimestampInRange,
+  exportAuditTrailToExcel,
+} from '../lib/excelExport';
 
 interface AuditTrailModalProps {
   isOpen: boolean;
@@ -24,6 +32,8 @@ interface AuditTrailModalProps {
   onClearLogs?: () => void;
   onSelectItem?: (itemId: string) => void;
 }
+
+type DatePresetType = 'all' | 'today' | '7d' | '20d' | '30d' | 'custom';
 
 export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
   isOpen,
@@ -36,6 +46,52 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [filterAction, setFilterAction] = useState<string>('all');
   const [selectedStaff, setSelectedStaff] = useState<string>('all');
+
+  // Date span filtering state - default to 'all' or quick presets
+  const [datePreset, setDatePreset] = useState<DatePresetType>('all');
+  const initial20Days = useMemo(() => getDateRangeFromDays(20), []);
+  const [customStartDate, setCustomStartDate] = useState<string>(
+    initial20Days.startDate.toISOString().slice(0, 10)
+  );
+  const [customEndDate, setCustomEndDate] = useState<string>(
+    initial20Days.endDate.toISOString().slice(0, 10)
+  );
+
+  // Compute date range
+  const { startDate, endDate, dateSpanLabel } = useMemo(() => {
+    if (datePreset === 'all') {
+      return { startDate: null, endDate: null, dateSpanLabel: 'All Time' };
+    }
+    if (datePreset === 'today') {
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      const end = new Date();
+      end.setHours(23, 59, 59, 999);
+      return { startDate: start, endDate: end, dateSpanLabel: 'Today' };
+    }
+    if (datePreset === '7d') {
+      const r = getDateRangeFromDays(7);
+      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 7 Days' };
+    }
+    if (datePreset === '20d') {
+      const r = getDateRangeFromDays(20);
+      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 20 Days' };
+    }
+    if (datePreset === '30d') {
+      const r = getDateRangeFromDays(30);
+      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 30 Days' };
+    }
+    if (datePreset === 'custom') {
+      const start = customStartDate ? new Date(`${customStartDate}T00:00:00.000`) : null;
+      const end = customEndDate ? new Date(`${customEndDate}T23:59:59.999`) : null;
+      return {
+        startDate: start,
+        endDate: end,
+        dateSpanLabel: `${customStartDate || 'Start'} to ${customEndDate || 'Now'}`,
+      };
+    }
+    return { startDate: null, endDate: null, dateSpanLabel: 'All Time' };
+  }, [datePreset, customStartDate, customEndDate]);
 
   // Extract unique staff members
   const staffMembers = useMemo(() => {
@@ -70,8 +126,16 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
       selectedStaff === 'all' ||
       (log.performedBy && log.performedBy.trim() === selectedStaff);
 
-    return matchesSearch && matchesAction && matchesStaff;
+    const matchesDate = isTimestampInRange(log.timestamp, startDate, endDate);
+
+    return matchesSearch && matchesAction && matchesStaff && matchesDate;
   });
+
+  const handleExportFilteredTrail = () => {
+    if (filteredLogs.length === 0) return;
+    const filename = `inventory-audit-trail-${dateSpanLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    exportAuditTrailToExcel(filteredLogs, filename);
+  };
 
   const formatDateTime = (dateStr: string) => {
     try {
@@ -168,28 +232,142 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
             )}
           </div>
 
-          {/* Action filters */}
-          <div className="flex items-center gap-1 overflow-x-auto pb-0.5 sm:pb-0 scrollbar-none">
-            {[
-              { id: 'all', label: 'All Events' },
-              { id: 'created', label: 'Added' },
-              { id: 'quantity', label: 'Stock Changes' },
-              { id: 'edited', label: 'Edits' },
-              { id: 'deleted', label: 'Removed' },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setFilterAction(tab.id)}
-                className={`min-h-[30px] px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-colors cursor-pointer ${
-                  filterAction === tab.id
-                    ? 'bg-indigo-600 text-white shadow-2xs'
-                    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+          {/* Action & Date filters */}
+          <div className="space-y-2 pt-1">
+            {/* Row: Event Types */}
+            <div className="flex items-center justify-between gap-2 overflow-x-auto pb-0.5 scrollbar-none">
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider pr-1 hidden sm:inline">
+                  Action:
+                </span>
+                {[
+                  { id: 'all', label: 'All Events' },
+                  { id: 'created', label: 'Added' },
+                  { id: 'quantity', label: 'Stock Changes' },
+                  { id: 'edited', label: 'Edits' },
+                  { id: 'deleted', label: 'Removed' },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setFilterAction(tab.id)}
+                    className={`min-h-[28px] px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-colors cursor-pointer ${
+                      filterAction === tab.id
+                        ? 'bg-indigo-600 text-white shadow-2xs'
+                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Row: Date Span Filter */}
+            <div className="pt-1.5 border-t border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-1 overflow-x-auto pb-0.5 sm:pb-0 scrollbar-none">
+                <div className="flex items-center gap-1 text-[11px] font-bold text-slate-600 uppercase tracking-wider shrink-0 pr-1">
+                  <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Period:</span>
+                </div>
+
+                {[
+                  { id: 'all', label: 'All Time' },
+                  { id: 'today', label: 'Today' },
+                  { id: '7d', label: 'Last 7 Days' },
+                  { id: '20d', label: 'Last 20 Days', highlight: true },
+                  { id: '30d', label: 'Last 30 Days' },
+                  { id: 'custom', label: 'Custom' },
+                ].map((p) => {
+                  const isActive = datePreset === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setDatePreset(p.id as DatePresetType);
+                        if (p.id === '20d') {
+                          const r = getDateRangeFromDays(20);
+                          setCustomStartDate(r.startDate.toISOString().slice(0, 10));
+                          setCustomEndDate(r.endDate.toISOString().slice(0, 10));
+                        } else if (p.id === '7d') {
+                          const r = getDateRangeFromDays(7);
+                          setCustomStartDate(r.startDate.toISOString().slice(0, 10));
+                          setCustomEndDate(r.endDate.toISOString().slice(0, 10));
+                        }
+                      }}
+                      className={`min-h-[28px] px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-all cursor-pointer relative ${
+                        isActive
+                          ? 'bg-emerald-700 text-white shadow-2xs ring-2 ring-emerald-500/20'
+                          : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span>{p.label}</span>
+                      {p.highlight && !isActive && (
+                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full inline-block ml-1" />
+                      )}
+                    </button>
+                  );
+                })}
+
+                {datePreset !== 'all' && (
+                  <button
+                    type="button"
+                    onClick={() => setDatePreset('all')}
+                    className="text-[11px] text-rose-600 hover:text-rose-800 font-semibold px-1.5 py-0.5 underline shrink-0 cursor-pointer ml-1"
+                  >
+                    Reset Date
+                  </button>
+                )}
+              </div>
+
+              {/* Status info */}
+              <div className="text-[11px] font-medium text-slate-500 shrink-0 flex items-center gap-1.5">
+                <span className="px-2 py-0.5 rounded bg-slate-200/70 text-slate-700 font-mono font-bold">
+                  {filteredLogs.length} events
+                </span>
+                {datePreset !== 'all' && (
+                  <span className="text-emerald-700 font-semibold">
+                    ({dateSpanLabel})
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Granular Custom Date Range Pickers */}
+            {datePreset === 'custom' && (
+              <div className="p-2.5 bg-white border border-slate-200 rounded-xl flex items-center gap-2 flex-wrap text-xs">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-semibold text-slate-600">From:</span>
+                  <input
+                    type="date"
+                    value={customStartDate}
+                    onChange={(e) => setCustomStartDate(e.target.value)}
+                    className="px-2 py-1 text-xs bg-slate-50 border border-slate-300 rounded-lg text-slate-800"
+                  />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-semibold text-slate-600">To:</span>
+                  <input
+                    type="date"
+                    value={customEndDate}
+                    onChange={(e) => setCustomEndDate(e.target.value)}
+                    className="px-2 py-1 text-xs bg-slate-50 border border-slate-300 rounded-lg text-slate-800"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const r = getDateRangeFromDays(20);
+                    setCustomStartDate(r.startDate.toISOString().slice(0, 10));
+                    setCustomEndDate(r.endDate.toISOString().slice(0, 10));
+                  }}
+                  className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 underline cursor-pointer ml-auto"
+                >
+                  Set to Last 20 Days
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -360,14 +538,30 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 shrink-0">
+        <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shrink-0">
           <div className="text-xs text-slate-500">
             Total records: <strong className="text-slate-700">{logs.length}</strong>
+            {datePreset !== 'all' && (
+              <span className="text-emerald-700 font-semibold ml-1">
+                • {filteredLogs.length} in {dateSpanLabel}
+              </span>
+            )}
             {selectedStaff !== 'all' && (
               <span> (showing {filteredLogs.length} for {selectedStaff})</span>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 justify-end">
+            {filteredLogs.length > 0 && (
+              <button
+                type="button"
+                onClick={handleExportFilteredTrail}
+                className="min-h-[38px] px-3.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                title="Export filtered audit logs to Excel"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                <span>Export Trail ({filteredLogs.length})</span>
+              </button>
+            )}
             {onClearLogs && logs.length > 0 && (
               <button
                 type="button"
