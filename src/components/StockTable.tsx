@@ -281,11 +281,14 @@ export const StockTable: React.FC<StockTableProps> = ({
     }
   };
 
-  // Count items by category for filter tabs
-  const countAll = safeItems.length;
-  const countInStock = safeItems.filter((i) => isItemInStock(i)).length;
-  const countLowStock = safeItems.filter((i) => isItemLowStock(i)).length;
-  const countOutOfStock = safeItems.filter((i) => (i.quantity || 0) <= 0).length;
+  // Count items by category for filter tabs (interconnected with active tag filter)
+  const tagScopedItems = selectedTag
+    ? safeItems.filter((i) => Array.isArray(i.tags) && i.tags.includes(selectedTag))
+    : safeItems;
+  const countAll = tagScopedItems.length;
+  const countInStock = tagScopedItems.filter((i) => isItemInStock(i)).length;
+  const countLowStock = tagScopedItems.filter((i) => isItemLowStock(i)).length;
+  const countOutOfStock = tagScopedItems.filter((i) => (i.quantity || 0) <= 0).length;
 
   return (
     <div
@@ -988,17 +991,36 @@ export const StockTable: React.FC<StockTableProps> = ({
                       <div className="flex items-center gap-1">
                         {item.tags.slice(0, 2).map((tag) => {
                           const style = getTagStyle(tag, effectiveTags);
+                          const isSelected = selectedTag === tag;
                           return (
-                            <span
+                            <button
                               key={tag}
-                              className={`text-[10px] px-1.5 py-0.2 rounded font-medium ${style.bg} ${style.text}`}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedTag(isSelected ? null : tag);
+                              }}
+                              className={`text-[10px] px-1.5 py-0.5 rounded font-semibold border transition-all cursor-pointer inline-flex items-center gap-0.5 ${
+                                isSelected
+                                  ? `${style.activeBg} ring-1 ring-emerald-400`
+                                  : `${style.bg} ${style.text} ${style.border} hover:opacity-80`
+                              }`}
+                              title={
+                                isSelected
+                                  ? `Click to clear filter for "${tag}"`
+                                  : `Filter inventory & stats by tag "${tag}"`
+                              }
                             >
-                              {tag}
-                            </span>
+                              <Hash className="w-2 h-2 opacity-60" />
+                              <span>{tag}</span>
+                            </button>
                           );
                         })}
                         {item.tags.length > 2 && (
-                          <span className="text-[10px] text-slate-400">
+                          <span
+                            className="text-[10px] text-slate-400 font-medium cursor-help"
+                            title={`Additional tags: ${item.tags.slice(2).join(', ')}`}
+                          >
                             +{item.tags.length - 2}
                           </span>
                         )}

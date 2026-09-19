@@ -57,7 +57,6 @@ import {
 // Components
 import { Navbar } from './components/Navbar';
 import { StockSummary } from './components/StockSummary';
-import { GlobalStockVisualizer } from './components/GlobalStockVisualizer';
 import { StockTable } from './components/StockTable';
 import { AddItemModal } from './components/AddItemModal';
 import { EditItemModal } from './components/EditItemModal';
@@ -1532,6 +1531,8 @@ export function App() {
         isAuthLoading={isAuthLoading}
         onSignInWithGoogle={handleSignInWithGoogle}
         onSignOut={handleSignOut}
+        selectedTag={selectedTag}
+        onSelectTag={setSelectedTag}
       />
 
       {/* Cloud DB & Shared Access Status Banner */}
@@ -1630,22 +1631,14 @@ export function App() {
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-7 space-y-4 sm:space-y-6">
-        {/* KPI / Stock Metrics (Tap to filter) */}
+        {/* KPI / Stock Metrics (Tap to filter, reactive to selected tag) */}
         <StockSummary
           items={items}
           activeFilter={activeFilter}
           onSelectFilter={setActiveFilter}
-        />
-
-        {/* Global Stock Activity & Interactive Timeline Visualizer */}
-        <GlobalStockVisualizer
-          items={items}
-          globalLogs={globalLogs}
-          onViewItemDetails={(item) => setSelectedItemForDetails(item)}
-          onReceiveStock={(item) => {
-            setRestockTargetItem(item);
-            setIsAddModalOpen(true);
-          }}
+          selectedTag={selectedTag}
+          onSelectTag={setSelectedTag}
+          managedTags={tags}
         />
 
         {/* Stock Inventory List & Table with Metadata, Voice Search & Trail view */}

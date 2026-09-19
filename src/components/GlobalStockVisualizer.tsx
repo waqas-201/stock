@@ -20,8 +20,10 @@ import {
   RotateCcw,
   BarChart3,
 } from 'lucide-react';
-import { StockItem } from '../types';
+import { StockItem, StockTag } from '../types';
 import { GlobalAuditRecord } from '../lib/stockStorage';
+import { Tag as TagIcon, Hash } from 'lucide-react';
+import { getTagStyle } from '../lib/tagUtils';
 
 export type TimePeriodPreset = 'today' | '7d' | '20d' | '30d' | '60d' | 'all' | 'custom';
 export type VisualizerMetricFilter = 'all' | 'inbound' | 'outbound';
@@ -31,6 +33,9 @@ interface GlobalStockVisualizerProps {
   globalLogs: GlobalAuditRecord[];
   onViewItemDetails: (item: StockItem) => void;
   onReceiveStock?: (item: StockItem) => void;
+  selectedTag?: string | null;
+  onSelectTag?: (tag: string | null) => void;
+  managedTags?: StockTag[];
 }
 
 interface ChartEventPoint {
@@ -61,7 +66,25 @@ export const GlobalStockVisualizer: React.FC<GlobalStockVisualizerProps> = ({
   globalLogs = [],
   onViewItemDetails,
   onReceiveStock,
+  selectedTag,
+  onSelectTag,
+  managedTags = [],
 }) => {
+  const safeItems = Array.isArray(items) ? items : [];
+  const isTagActive = Boolean(selectedTag);
+
+  // Filter items and logs when a specific tag is selected
+  const scopedItems = useMemo(() => {
+    if (!selectedTag) return safeItems;
+    return safeItems.filter(
+      (item) => Array.isArray(item.tags) && item.tags.includes(selectedTag)
+    );
+  }, [safeItems, selectedTag]);
+
+  const scopedItemIds = useMemo(
+    () => new Set(scopedItems.map((item) => item.id)),
+    [scopedItems]
+  );
   // Collapsible panel state (default open)
   const [isExpanded, setIsExpanded] = useState(true);
 
@@ -152,10 +175,11 @@ export const GlobalStockVisualizer: React.FC<GlobalStockVisualizerProps> = ({
     const seenIds = new Set<string>();
 
     const itemMap = new Map<string, StockItem>();
-    items.forEach((item) => itemMap.set(item.id, item));
+    scopedItems.forEach((item) => itemMap.set(item.id, item));
 
-    // A. Extract from global audit logs
+    // A. Extract from global audit logs (scoped to selectedTag when active)
     globalLogs.forEach((log) => {
+      if (isTagActive && !scopedItemIds.has(log.itemId)) return;
       const d = new Date(log.timestamp);
       if (isNaN(d.getTime())) return;
       if (d >= startDate && d <= endDate) {
@@ -192,7 +216,7 @@ export const GlobalStockVisualizer: React.FC<GlobalStockVisualizerProps> = ({
     });
 
     // B. Extract from item audit trails if not already included
-    items.forEach((item) => {
+    scopedItems.forEach((item) => {
       if (item.auditTrail && Array.isArray(item.auditTrail)) {
         item.auditTrail.forEach((entry) => {
           const d = new Date(entry.timestamp);
@@ -283,12 +307,12 @@ export const GlobalStockVisualizer: React.FC<GlobalStockVisualizerProps> = ({
         distinctStaffCount: activeStaff.size,
       },
     };
-  }, [items, globalLogs, startDate, endDate, metricFilter]);
+  }, [scopedItems, globalLogs, startDate, endDate, metricFilter, isTagActive, scopedItemIds]);
 
-  // Total current stock units across all items
+  // Total current stock units across scoped items
   const currentTotalStock = useMemo(() => {
-    return items.reduce((sum, it) => sum + (it.quantity || 0), 0);
-  }, [items]);
+    return scopedItems.reduce((sum, it) => sum + (it.quantity || 0), 0);
+  }, [scopedItems]);
 
   // 3. Prepare D3 Scales and Geometry
   const margin = { top: 24, right: 32, bottom: 36, left: 48 };
@@ -350,9 +374,9 @@ export const GlobalStockVisualizer: React.FC<GlobalStockVisualizerProps> = ({
 
   // Inventory Levels Bar Chart Data & Scales
   const topInventoryItems = useMemo(() => {
-    const list = [...items];
+    const list = [...scopedItems];
     return list.slice(0, 18);
-  }, [items]);
+  }, [scopedItems]);
 
   const maxItemQuantity = useMemo(() => {
     if (topInventoryItems.length === 0) return 10;
@@ -439,13 +463,36 @@ export const GlobalStockVisualizer: React.FC<GlobalStockVisualizerProps> = ({
               <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight flex items-center gap-1.5">
                 <span>Interactive Stock Activity & Inventory Bar Chart</span>
               </h2>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200/70">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 inline-block" />
-                Live on Every Event
-              </span>
+              {isTagActive ? (
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-2xs">
+                  <TagIcon className="w-3 h-3 text-emerald-700" />
+                  <span>Filtered:</span>
+                  <span className="font-mono font-bold">#{selectedTag}</span>
+                  <span className="text-[10px] bg-emerald-200/70 text-emerald-900 px-1.5 py-0.2 rounded-full">
+                    {scopedItems.length} items • {currentTotalStock.toLocaleString()} units
+                  </span>
+                  {onSelectTag && (
+                    <button
+                      type="button"
+                      onClick={() => onSelectTag(null)}
+                      className="text-emerald-700 hover:text-emerald-950 ml-1 text-[11px] underline font-semibold cursor-pointer"
+                      title="Reset visualizer to show whole stock"
+                    >
+                      Show All Stock
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200/70">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 inline-block" />
+                  Live Whole Stock ({safeItems.length} items)
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Bar chart of stock movement activity, inbound & outbound flow, and live inventory levels across products.
+              {isTagActive
+                ? `Real-time activity and stock volume filtered for tag #${selectedTag} (${scopedItems.length} SKUs).`
+                : 'Bar chart of stock movement activity, inbound & outbound flow, and live inventory levels across products.'}
             </p>
           </div>
         </div>
