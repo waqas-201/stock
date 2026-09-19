@@ -309,16 +309,28 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               )}
 
-              {/* Add Item Desktop Button */}
+              {/* Add Item Desktop Button with Alt + N shortcut */}
               <button
                 id="btn-navbar-add-item"
                 type="button"
-                onClick={onAddNewItem}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors cursor-pointer"
-                title="Add new stock item"
+                onClick={() => {
+                  const input = document.getElementById('quick-add-stock-input') as HTMLInputElement | null;
+                  if (input) {
+                    input.focus();
+                    input.select();
+                    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  } else {
+                    onAddNewItem();
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors cursor-pointer"
+                title="Focus Quick Add Stock input (Shortcut: Alt + N)"
               >
                 <Plus className="w-4 h-4" />
                 <span>Add Item</span>
+                <kbd className="hidden lg:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-semibold text-emerald-100 bg-emerald-700/80 rounded border border-emerald-500/50">
+                  Alt+N
+                </kbd>
               </button>
             </div>
 

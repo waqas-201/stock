@@ -32,6 +32,7 @@ import {
 import { StockItem, ItemAuditEntry, StockTag, StockLabel } from '../types';
 import { GlobalAuditRecord } from '../lib/stockStorage';
 import { getTagStyle } from '../lib/tagUtils';
+import { ItemActivityVisualizer } from './ItemActivityVisualizer';
 
 interface ItemDetailsModalProps {
   isOpen: boolean;
@@ -78,6 +79,7 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
   const [filterAction, setFilterAction] = useState<TrailFilterType>('all');
   const [selectedOperator, setSelectedOperator] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc'); // desc = newest first
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
   // Direct audit logging form state
   const [isAddingNote, setIsAddingNote] = useState(false);
@@ -712,69 +714,20 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
                 </div>
               </div>
 
-              {/* 2. Visual Stock Level Progression (Step Chart / Timeline Graph) */}
-              {comprehensiveTrail.length > 1 && (
-                <div className="p-4 bg-slate-50/80 border border-slate-200 rounded-2xl">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 uppercase tracking-wide">
-                      <BarChart3 className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Stock Level Trajectory Over Time</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-[11px] text-slate-500">
-                      <span className="flex items-center gap-1">
-                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
-                        <span>Stock Level</span>
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <span className="w-2.5 h-0.5 border-b-2 border-dashed border-amber-500 inline-block" />
-                        <span>Alert Limit (≤{threshold})</span>
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Visual Bar/Step Strip */}
-                  <div className="flex items-end gap-1.5 h-20 pt-2 pb-1 overflow-x-auto">
-                    {comprehensiveTrail.map((ev, idx) => {
-                      const balance = ev.balanceAfter ?? item.quantity;
-                      const maxVal = Math.max(lifetimeStats.peakStock, threshold * 1.5, 1);
-                      const heightPercent = Math.max(12, Math.min(100, Math.round((balance / maxVal) * 100)));
-                      const isBelowThreshold = balance <= threshold;
-
-                      return (
-                        <div
-                          key={ev.id || idx}
-                          className="flex-1 min-w-[28px] max-w-[50px] flex flex-col items-center justify-end h-full group relative"
-                        >
-                          {/* Tooltip on hover */}
-                          <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-full mb-1.5 z-20 pointer-events-none bg-slate-900 text-white text-[10px] p-2 rounded-lg shadow-lg whitespace-nowrap min-w-[120px]">
-                            <p className="font-bold text-emerald-300">
-                              Balance: {balance} {item.unit}
-                            </p>
-                            <p className="text-slate-300 truncate">{ev.summary}</p>
-                            <p className="text-slate-400 text-[9px] mt-0.5">
-                              {formatDateTime(ev.timestamp)}
-                            </p>
-                            <p className="text-slate-400 text-[9px]">By: {ev.performedBy}</p>
-                          </div>
-
-                          {/* Bar */}
-                          <div
-                            style={{ height: `${heightPercent}%` }}
-                            className={`w-full rounded-t-md transition-all ${
-                              isBelowThreshold
-                                ? 'bg-amber-400 hover:bg-amber-500'
-                                : 'bg-emerald-500 hover:bg-emerald-600'
-                            }`}
-                          />
-                          <span className="text-[9px] font-mono text-slate-400 mt-1 block">
-                            #{idx + 1}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+              {/* 2. Interactive Product Stock Trajectory & Activity Data Viz */}
+              <ItemActivityVisualizer
+                item={item}
+                trail={comprehensiveTrail}
+                selectedEventId={selectedEventId}
+                onSelectEvent={(ev) => {
+                  setSelectedEventId(ev.id);
+                  // Optionally scroll to event card
+                  const el = document.getElementById(`trail-event-${ev.id}`);
+                  if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                  }
+                }}
+              />
 
               {/* 3. Trail Action Bar: Search, Filters, Log Note, Export */}
               <div className="space-y-2.5">
@@ -1097,13 +1050,25 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
                           </div>
 
                           {/* Event Card */}
-                          <div className="bg-white p-3.5 rounded-2xl border border-slate-200/90 shadow-2xs hover:border-slate-300 transition-colors">
+                          <div
+                            id={`trail-event-${entry.id}`}
+                            className={`p-3.5 rounded-2xl border transition-all ${
+                              selectedEventId === entry.id
+                                ? 'bg-emerald-50/50 border-emerald-400 ring-2 ring-emerald-500/20 shadow-xs'
+                                : 'bg-white border-slate-200/90 shadow-2xs hover:border-slate-300'
+                            }`}
+                          >
                             {/* Card Top Row: Summary & Timestamps */}
                             <div className="flex items-start justify-between gap-2 flex-wrap sm:flex-nowrap">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-xs sm:text-sm font-bold text-slate-900 leading-tight">
                                   {entry.summary}
                                 </span>
+                                {selectedEventId === entry.id && (
+                                  <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded-md border border-emerald-300">
+                                    Selected on Data Viz
+                                  </span>
+                                )}
 
                                 {/* Category Badge */}
                                 <span

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { StockItem, StockUnit, StockFilter, OperatorProfile, GeminiAgentAction, StockTag, StockTagColor } from './types';
 import {
   loadStoredStock,
@@ -57,6 +57,7 @@ import {
 // Components
 import { Navbar } from './components/Navbar';
 import { StockSummary } from './components/StockSummary';
+import { GlobalStockVisualizer } from './components/GlobalStockVisualizer';
 import { StockTable } from './components/StockTable';
 import { AddItemModal } from './components/AddItemModal';
 import { EditItemModal } from './components/EditItemModal';
@@ -135,6 +136,7 @@ export function App() {
 
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [addModalInitialTab, setAddModalInitialTab] = useState<'restock' | 'new_item'>('new_item');
   const [restockTargetItem, setRestockTargetItem] = useState<StockItem | null>(null);
   const [editingItem, setEditingItem] = useState<StockItem | null>(null);
   const [selectedItemForDetails, setSelectedItemForDetails] =
@@ -147,6 +149,21 @@ export function App() {
   const [isDomainModalOpen, setIsDomainModalOpen] = useState(false);
   const [currentDomain, setCurrentDomain] = useState('');
   const [isExportExcelModalOpen, setIsExportExcelModalOpen] = useState(false);
+
+  // Open Add Item modal directly on the "Register New Catalog SKU" tab and land inside its input box
+  const openRegisterNewSKUModal = useCallback(() => {
+    setRestockTargetItem(null);
+    setAddModalInitialTab('new_item');
+    setIsAddModalOpen(true);
+    // Direct focus landing inside Register New Catalog SKU input
+    setTimeout(() => {
+      const input = document.getElementById('new-item-name') as HTMLInputElement | null;
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    }, 60);
+  }, []);
 
   // Notification Toast with optional Action (e.g. Undo)
   const [toast, setToast] = useState<{
@@ -172,6 +189,69 @@ export function App() {
     const timer = setTimeout(() => setToast(null), duration);
     return () => clearTimeout(timer);
   }, [toast]);
+
+  // Dedicated keyboard shortcut: A + N or Alt + N lands directly inside "Register New Catalog SKU" input box
+  const lastKeySequenceRef = useRef<{ key: string; time: number }>({ key: '', time: 0 });
+  const activePressedKeysRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeElement = document.activeElement;
+      const isTypingInField =
+        activeElement &&
+        (activeElement.tagName === 'INPUT' ||
+          activeElement.tagName === 'TEXTAREA' ||
+          (activeElement as HTMLElement).isContentEditable);
+
+      activePressedKeysRef.current.add(e.key.toLowerCase());
+
+      // 1. Alt + N (Windows/Linux) or Option + N (macOS), or Alt + A
+      const isAltShortcut =
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        (e.key === 'n' || e.key === 'N' || e.code === 'KeyN' || e.key === 'a' || e.key === 'A' || e.code === 'KeyA');
+
+      // 2. Chord: Holding 'A' and pressing 'N' (or vice-versa) when not inside an editable field
+      const isChordAN =
+        !isTypingInField &&
+        ((activePressedKeysRef.current.has('a') && (e.key === 'n' || e.key === 'N')) ||
+          (activePressedKeysRef.current.has('n') && (e.key === 'a' || e.key === 'A')));
+
+      // 3. Sequence: Pressing 'a' then 'n' within 1.2s when not inside an editable field
+      let isSequenceAN = false;
+      if (!isTypingInField && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const lower = e.key.toLowerCase();
+        if (lower === 'a') {
+          lastKeySequenceRef.current = { key: 'a', time: Date.now() };
+        } else if (lower === 'n') {
+          if (
+            lastKeySequenceRef.current.key === 'a' &&
+            Date.now() - lastKeySequenceRef.current.time < 1200
+          ) {
+            isSequenceAN = true;
+            lastKeySequenceRef.current = { key: '', time: 0 };
+          }
+        }
+      }
+
+      if (isAltShortcut || isChordAN || isSequenceAN) {
+        e.preventDefault();
+        openRegisterNewSKUModal();
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      activePressedKeysRef.current.delete(e.key.toLowerCase());
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [openRegisterNewSKUModal]);
 
   // Auth state listener
   useEffect(() => {
@@ -1557,19 +1637,32 @@ export function App() {
           onSelectFilter={setActiveFilter}
         />
 
+        {/* Global Stock Activity & Interactive Timeline Visualizer */}
+        <GlobalStockVisualizer
+          items={items}
+          globalLogs={globalLogs}
+          onViewItemDetails={(item) => setSelectedItemForDetails(item)}
+          onReceiveStock={(item) => {
+            setRestockTargetItem(item);
+            setIsAddModalOpen(true);
+          }}
+        />
+
         {/* Stock Inventory List & Table with Metadata, Voice Search & Trail view */}
         <StockTable
           items={items}
+          units={units}
           activeFilter={activeFilter}
           confirmOnDelete={confirmOnDelete}
           onToggleConfirmOnDelete={handleToggleConfirmOnDelete}
           onFilterChange={setActiveFilter}
-          onAddItem={() => setIsAddModalOpen(true)}
+          onAddItem={openRegisterNewSKUModal}
           onEditItem={(item) => setEditingItem(item)}
           onDeleteItem={handleDeleteItemClick}
           onQuickQuantityChange={handleQuickQuantityChange}
           onReceiveStock={(item) => {
             setRestockTargetItem(item);
+            setAddModalInitialTab('restock');
             setIsAddModalOpen(true);
           }}
           onExportExcel={handleExportExcel}
@@ -1603,9 +1696,9 @@ export function App() {
         <button
           id="btn-mobile-fab-add"
           type="button"
-          onClick={() => setIsAddModalOpen(true)}
+          onClick={openRegisterNewSKUModal}
           className="pointer-events-auto min-h-[48px] px-4 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold shadow-lg shadow-emerald-950/25 flex items-center justify-center gap-1.5 transition-transform active:scale-95 cursor-pointer border border-emerald-500"
-          aria-label="Add new item"
+          aria-label="Register new catalog SKU"
         >
           <Plus className="w-4 h-4 shrink-0" />
           <span className="text-xs font-bold">Add Item</span>
@@ -1619,6 +1712,7 @@ export function App() {
         units={units}
         items={items}
         preSelectedItem={restockTargetItem}
+        initialTab={addModalInitialTab}
         availableTags={availableTags}
         managedTags={tags}
         onClose={() => {

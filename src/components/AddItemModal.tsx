@@ -22,6 +22,7 @@ export interface AddItemModalProps {
   units: StockUnit[];
   items?: StockItem[];
   preSelectedItem?: StockItem | null;
+  initialTab?: 'restock' | 'new_item';
   availableTags?: string[];
   managedTags?: StockTag[];
   managedLabels?: StockLabel[];
@@ -48,6 +49,7 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
   units,
   items = [],
   preSelectedItem = null,
+  initialTab = 'new_item',
   availableTags = [],
   managedTags,
   managedLabels = [],
@@ -58,7 +60,8 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
 }) => {
   const effectiveTags: StockTag[] = managedTags || (managedLabels as unknown as StockTag[]) || [];
   // Mode: 'restock' (add more to existing) vs 'new_item' (register new SKU)
-  const [activeTab, setActiveTab] = useState<'restock' | 'new_item'>('restock');
+  const [activeTab, setActiveTab] = useState<'restock' | 'new_item'>(initialTab);
+  const newItemNameRef = React.useRef<HTMLInputElement>(null);
 
   // Restock existing item state
   const [selectedItemId, setSelectedItemId] = useState<string>('');
@@ -82,14 +85,20 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
     if (isOpen) {
       setError(null);
 
-      if (preSelectedItem) {
+      if (initialTab) {
+        setActiveTab(initialTab);
+      } else if (preSelectedItem) {
         setActiveTab('restock');
         setSelectedItemId(preSelectedItem.id);
-      } else if (items && items.length > 0) {
-        setActiveTab('restock');
-        setSelectedItemId(items[0].id);
       } else {
         setActiveTab('new_item');
+      }
+
+      if (preSelectedItem) {
+        setSelectedItemId(preSelectedItem.id);
+      } else if (items && items.length > 0) {
+        setSelectedItemId(items[0].id);
+      } else {
         setSelectedItemId('');
       }
 
@@ -109,7 +118,28 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
         setUnit(units[0].name);
       }
     }
-  }, [isOpen, preSelectedItem, items, units]);
+  }, [isOpen, initialTab, preSelectedItem, items, units]);
+
+  // Land directly inside the input box when Register New Catalog SKU tab is active
+  useEffect(() => {
+    if (isOpen && activeTab === 'new_item') {
+      const timer = setTimeout(() => {
+        newItemNameRef.current?.focus();
+        newItemNameRef.current?.select();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, activeTab]);
+
+  // Close modal on Escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [isOpen, onClose]);
 
   // Selected item reference for Restock mode
   const selectedItem = useMemo(() => {
@@ -259,12 +289,12 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
               <Package className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <h3
-                id="add-item-modal-title"
-                className="text-base sm:text-lg font-bold text-slate-900 leading-tight truncate"
-              >
-                {activeTab === 'restock' ? 'Add Stock to Inventory' : 'Register New Catalog SKU'}
-              </h3>
+                <h3
+                  id="add-item-modal-title"
+                  className="text-base sm:text-lg font-bold text-slate-900 leading-tight truncate"
+                >
+                  {activeTab === 'restock' ? 'Add Stock to Inventory' : 'Register New Catalog SKU'}
+                </h3>
               <p className="text-xs text-slate-500 truncate">
                 {activeTab === 'restock'
                   ? 'Receive shipment & update verified stock baseline'
@@ -321,7 +351,10 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
               }`}
             >
               <Plus className="w-3.5 h-3.5 text-slate-600" />
-              <span>New Product SKU</span>
+              <span>Register New Catalog SKU</span>
+              <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.2 text-[9px] font-mono font-bold text-slate-500 bg-slate-100 rounded border border-slate-300">
+                A+N
+              </kbd>
             </button>
           </div>
         </div>
@@ -648,6 +681,7 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
                 Product / Item Name <span className="text-rose-500">*</span>
               </label>
               <input
+                ref={newItemNameRef}
                 id="new-item-name"
                 type="text"
                 required

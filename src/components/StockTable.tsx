@@ -26,12 +26,15 @@ import {
   ChevronUp,
   Check,
   Layers,
+  Activity,
 } from 'lucide-react';
-import { StockItem, StockFilter, SortField, SortOrder, StockTag, StockLabel } from '../types';
+import { StockItem, StockFilter, SortField, SortOrder, StockTag, StockLabel, StockUnit } from '../types';
 import { getTagStyle, getUniqueTagsWithCounts } from '../lib/tagUtils';
+import { ItemMiniActivitySparkline } from './ItemActivityVisualizer';
 
 interface StockTableProps {
   items: StockItem[];
+  units?: StockUnit[];
   activeFilter: StockFilter;
   confirmOnDelete: boolean;
   onToggleConfirmOnDelete: () => void;
@@ -57,6 +60,7 @@ interface StockTableProps {
 
 export const StockTable: React.FC<StockTableProps> = ({
   items = [],
+  units = [],
   activeFilter,
   confirmOnDelete,
   onToggleConfirmOnDelete,
@@ -343,16 +347,20 @@ export const StockTable: React.FC<StockTableProps> = ({
             <span>Audit Trail</span>
           </button>
 
-          {/* Add Item Button */}
+          {/* Add Item Button with A + N / Alt + N shortcut */}
           <button
             id="btn-add-stock-item"
             type="button"
             onClick={onAddItem}
             className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 sm:px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl shadow-xs transition-colors cursor-pointer shrink-0"
+            title="Register New Catalog SKU (Shortcut: A + N or Alt + N)"
           >
             <Plus className="w-4 h-4" />
             <span className="hidden xs:inline">Add Item</span>
             <span className="xs:hidden">Add</span>
+            <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-semibold text-emerald-100 bg-emerald-700/80 rounded border border-emerald-500/50">
+              A + N
+            </kbd>
           </button>
         </div>
 
@@ -892,9 +900,13 @@ export const StockTable: React.FC<StockTableProps> = ({
                 type="button"
                 onClick={onAddItem}
                 className="mt-2 min-h-[44px] inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl shadow-xs cursor-pointer"
+                title="Register New Catalog SKU (Shortcut: A + N or Alt + N)"
               >
                 <Plus className="w-4 h-4" />
                 <span>Add First Item</span>
+                <kbd className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-semibold text-emerald-100 bg-emerald-700/80 rounded border border-emerald-500/50">
+                  A + N
+                </kbd>
               </button>
             )}
           </div>
@@ -1226,6 +1238,9 @@ export const StockTable: React.FC<StockTableProps> = ({
                     <span className="text-xs font-semibold text-slate-400">
                       {item.unit}
                     </span>
+                    <div className="ml-2">
+                      <ItemMiniActivitySparkline item={item} onClick={() => onViewItemDetails(item)} />
+                    </div>
                   </div>
 
                   {/* Touch Stepper Controls (Min 44px x 44px hit targets) */}
@@ -1358,6 +1373,12 @@ export const StockTable: React.FC<StockTableProps> = ({
                 </th>
                 <th className="py-3 px-2 sm:px-4 w-20 sm:w-28 font-bold uppercase">
                   <span>Unit</span>
+                </th>
+                <th className="py-3 px-3 sm:px-4 min-w-[125px] font-bold uppercase text-slate-600 hidden md:table-cell">
+                  <div className="flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Activity Viz</span>
+                  </div>
                 </th>
                 <th className="py-3 px-3 sm:px-4 min-w-[120px]">
                   <button
@@ -1507,6 +1528,11 @@ export const StockTable: React.FC<StockTableProps> = ({
                       <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200/80">
                         {item.unit}
                       </span>
+                    </td>
+
+                    {/* Activity Viz Column */}
+                    <td className="py-3 px-3 sm:px-4 hidden md:table-cell">
+                      <ItemMiniActivitySparkline item={item} onClick={() => onViewItemDetails(item)} />
                     </td>
 
                     {/* Low Stock Threshold Column */}
