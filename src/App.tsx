@@ -1715,6 +1715,7 @@ export function App() {
         initialTab={addModalInitialTab}
         availableTags={availableTags}
         managedTags={tags}
+        onCreateTag={handleCreateTag}
         onClose={() => {
           setIsAddModalOpen(false);
           setRestockTargetItem(null);
@@ -1731,6 +1732,7 @@ export function App() {
         units={units}
         availableTags={availableTags}
         managedTags={tags}
+        onCreateTag={handleCreateTag}
         onClose={() => setEditingItem(null)}
         onSave={handleSaveEditItem}
         onOpenUnitModal={() => setIsUnitModalOpen(true)}

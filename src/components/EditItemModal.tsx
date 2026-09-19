@@ -14,7 +14,7 @@ import {
   RefreshCw,
   Sliders,
 } from 'lucide-react';
-import { StockItem, StockUnit, StockTag, StockLabel } from '../types';
+import { StockItem, StockUnit, StockTag, StockLabel, StockTagColor } from '../types';
 import { TagInput } from './TagInput';
 
 interface EditItemModalProps {
@@ -36,6 +36,7 @@ interface EditItemModalProps {
     tags?: string[]
   ) => void;
   onOpenUnitModal: () => void;
+  onCreateTag?: (name: string, color: StockTagColor, description?: string) => void;
 }
 
 export const EditItemModal: React.FC<EditItemModalProps> = ({
@@ -48,6 +49,7 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
   onClose,
   onSave,
   onOpenUnitModal,
+  onCreateTag,
 }) => {
   const effectiveTags: StockTag[] = managedTags || (managedLabels as unknown as StockTag[]) || [];
   const [itemName, setItemName] = useState('');
@@ -84,9 +86,7 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
     }
   }, [item, isOpen]);
 
-  if (!isOpen || !item) return null;
-
-  const baselineQuantity = item.quantity || 0;
+  const baselineQuantity = item ? item.quantity || 0 : 0;
 
   // Calculate resulting quantity
   let calculatedQuantity = baselineQuantity;
@@ -116,6 +116,8 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!item) return;
+
     const cleanName = itemName.trim();
     if (!cleanName) {
       setError('Item name is required');
@@ -148,7 +150,7 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
 
   // Keyboard shortcut: Alt + S (or Option + S / Cmd + S) to save / submit item edits
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !item) return;
     const handleSaveKeyDown = (e: KeyboardEvent) => {
       const isAltS =
         e.altKey &&
@@ -181,6 +183,8 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
     window.addEventListener('keydown', handleSaveKeyDown, true);
     return () => window.removeEventListener('keydown', handleSaveKeyDown, true);
   }, [isOpen, itemName, calculatedQuantity, threshold, unit, item, productionDate, notes, tags]);
+
+  if (!isOpen || !item) return null;
 
   return (
     <div
@@ -570,6 +574,7 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
               availableTags={availableTags}
               managedTags={effectiveTags}
               placeholder="Add tags (e.g. Office, Food, Fragile)..."
+              onCreateTag={onCreateTag}
             />
           </div>
 

@@ -14,7 +14,7 @@ import {
   TrendingUp,
   Search,
 } from 'lucide-react';
-import { StockItem, StockUnit, StockTag, StockLabel } from '../types';
+import { StockItem, StockUnit, StockTag, StockLabel, StockTagColor } from '../types';
 import { TagInput } from './TagInput';
 
 export interface AddItemModalProps {
@@ -42,6 +42,7 @@ export interface AddItemModalProps {
     reason?: string
   ) => void;
   onOpenUnitModal: () => void;
+  onCreateTag?: (name: string, color: StockTagColor, description?: string) => void;
 }
 
 export const AddItemModal: React.FC<AddItemModalProps> = ({
@@ -57,6 +58,7 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
   onAdd,
   onAddMoreStock,
   onOpenUnitModal,
+  onCreateTag,
 }) => {
   const effectiveTags: StockTag[] = managedTags || (managedLabels as unknown as StockTag[]) || [];
   // Mode: 'restock' (add more to existing) vs 'new_item' (register new SKU)
@@ -164,8 +166,6 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
     const clean = itemName.trim().toLowerCase();
     return items.find((i) => i.itemName.toLowerCase() === clean) || null;
   }, [itemName, activeTab, items]);
-
-  if (!isOpen) return null;
 
   // Steppers for Restock mode
   const handleStepAddQuantity = (step: number) => {
@@ -318,6 +318,8 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
     0,
     currentBaselineStock + (isDeduction ? -parsedInboundAmount : parsedInboundAmount)
   );
+
+  if (!isOpen) return null;
 
   return (
     <div
@@ -943,6 +945,7 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
                 availableTags={availableTags}
                 managedTags={effectiveTags}
                 placeholder="Add tags (e.g., Office, Warehouse, Perishable)..."
+                onCreateTag={onCreateTag}
               />
             </div>
 
