@@ -563,6 +563,32 @@ export const Navbar: React.FC<NavbarProps> = ({
                           </div>
                         </button>
                       </div>
+
+                      {/* 4. Keyboard Shortcuts Reference */}
+                      <div className="pt-2 border-t border-slate-100">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2 mb-1.5 flex items-center justify-between">
+                          <span>Keyboard Shortcuts</span>
+                          <span className="text-[10px] text-emerald-700 font-semibold">100% mouse-free</span>
+                        </div>
+                        <div className="space-y-1 bg-slate-50 p-2 rounded-xl border border-slate-200/80 text-xs">
+                          <div className="flex items-center justify-between py-0.5">
+                            <span className="text-slate-600 font-medium">Instant Search</span>
+                            <kbd className="px-1.5 py-0.5 text-[10px] font-mono font-bold bg-white text-slate-800 rounded border border-slate-300 shadow-2xs">Alt + K</kbd>
+                          </div>
+                          <div className="flex items-center justify-between py-0.5">
+                            <span className="text-slate-600 font-medium">Quick Sale / Modify</span>
+                            <kbd className="px-1.5 py-0.5 text-[10px] font-mono font-bold bg-amber-50 text-amber-900 rounded border border-amber-300 shadow-2xs">Alt + B</kbd>
+                          </div>
+                          <div className="flex items-center justify-between py-0.5">
+                            <span className="text-slate-600 font-medium">Register New SKU</span>
+                            <kbd className="px-1.5 py-0.5 text-[10px] font-mono font-bold bg-emerald-50 text-emerald-900 rounded border border-emerald-300 shadow-2xs">Alt + N</kbd>
+                          </div>
+                          <div className="flex items-center justify-between py-0.5">
+                            <span className="text-slate-600 font-medium">Navigate Results</span>
+                            <span className="text-[10px] font-mono text-slate-500 font-semibold">↑ / ↓ Arrows</span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}

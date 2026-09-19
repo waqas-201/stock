@@ -69,6 +69,7 @@ import { GeminiStockChatModal } from './components/GeminiStockChatModal';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { UnauthorizedDomainModal } from './components/UnauthorizedDomainModal';
 import { ExportExcelModal } from './components/ExportExcelModal';
+import { QuickSaleModal } from './components/QuickSaleModal';
 import {
   CheckCircle2,
   AlertCircle,
@@ -149,6 +150,24 @@ export function App() {
   const [currentDomain, setCurrentDomain] = useState('');
   const [isExportExcelModalOpen, setIsExportExcelModalOpen] = useState(false);
 
+  // Quick Sale / Rapid Stock Deduction (Alt + B shortcut)
+  const [isQuickSaleModalOpen, setIsQuickSaleModalOpen] = useState(false);
+  const [quickSaleTargetItem, setQuickSaleTargetItem] = useState<StockItem | null>(null);
+  const [activeKeyboardItem, setActiveKeyboardItem] = useState<StockItem | null>(null);
+
+  const handleOpenQuickSale = useCallback(
+    (item?: StockItem | null) => {
+      const target = item || activeKeyboardItem || (items.length > 0 ? items[0] : null);
+      if (!target) {
+        showToast('No stock items available to modify or sell.', 'info');
+        return;
+      }
+      setQuickSaleTargetItem(target);
+      setIsQuickSaleModalOpen(true);
+    },
+    [activeKeyboardItem, items]
+  );
+
   // Open Add Item modal directly on the "Register New Catalog SKU" tab and land inside its input box
   const openRegisterNewSKUModal = useCallback(() => {
     setRestockTargetItem(null);
@@ -189,12 +208,40 @@ export function App() {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  // Dedicated keyboard shortcut: A + N or Alt + N lands directly inside "Register New Catalog SKU" input box
+  // Dedicated keyboard shortcuts: Alt+K (Search), Alt+B (Quick Sale), A+N / Alt+N (Add Item)
   const lastKeySequenceRef = useRef<{ key: string; time: number }>({ key: '', time: 0 });
   const activePressedKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 1. Alt + K (Windows/Linux/macOS) -> Focus search bar instantly
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        (e.key === 'k' || e.key === 'K' || e.code === 'KeyK')
+      ) {
+        e.preventDefault();
+        const searchInput = document.getElementById('search-stock-input') as HTMLInputElement | null;
+        if (searchInput) {
+          searchInput.focus();
+          searchInput.select();
+        }
+        return;
+      }
+
+      // 2. Alt + B (Windows/Linux/macOS) -> Rapid Quick Sale / Modify Active Item
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        (e.key === 'b' || e.key === 'B' || e.code === 'KeyB')
+      ) {
+        e.preventDefault();
+        handleOpenQuickSale();
+        return;
+      }
+
       const activeElement = document.activeElement;
       const isTypingInField =
         activeElement &&
@@ -204,20 +251,20 @@ export function App() {
 
       activePressedKeysRef.current.add(e.key.toLowerCase());
 
-      // 1. Alt + N (Windows/Linux) or Option + N (macOS), or Alt + A
+      // 3. Alt + N or Alt + A -> Open Register New Catalog SKU
       const isAltShortcut =
         e.altKey &&
         !e.ctrlKey &&
         !e.metaKey &&
         (e.key === 'n' || e.key === 'N' || e.code === 'KeyN' || e.key === 'a' || e.key === 'A' || e.code === 'KeyA');
 
-      // 2. Chord: Holding 'A' and pressing 'N' (or vice-versa) when not inside an editable field
+      // 4. Chord: Holding 'A' and pressing 'N' (or vice-versa) when not inside an editable field
       const isChordAN =
         !isTypingInField &&
         ((activePressedKeysRef.current.has('a') && (e.key === 'n' || e.key === 'N')) ||
           (activePressedKeysRef.current.has('n') && (e.key === 'a' || e.key === 'A')));
 
-      // 3. Sequence: Pressing 'a' then 'n' within 1.2s when not inside an editable field
+      // 5. Sequence: Pressing 'a' then 'n' within 1.2s when not inside an editable field
       let isSequenceAN = false;
       if (!isTypingInField && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const lower = e.key.toLowerCase();
@@ -250,7 +297,7 @@ export function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [openRegisterNewSKUModal]);
+  }, [handleOpenQuickSale, openRegisterNewSKUModal]);
 
   // Auth state listener
   useEffect(() => {
@@ -1096,6 +1143,80 @@ export function App() {
     return { previousQuantity, newQuantity: newQty, undo };
   };
 
+  // Dedicated Rapid Point-of-Sale / Stock Modification Handler (Alt + B)
+  const handleConfirmQuickSale = (
+    item: StockItem,
+    quantitySold: number,
+    notes?: string,
+    customerOrRef?: string
+  ) => {
+    if (quantitySold <= 0) return;
+    const previousQuantity = item.quantity || 0;
+    const newQty = Math.max(0, previousQuantity - quantitySold);
+
+    const refNote = customerOrRef ? `Ref: ${customerOrRef}` : '';
+    const notePart = notes ? `Note: ${notes}` : '';
+    const details =
+      [refNote, notePart].filter(Boolean).join(' • ') || 'Rapid counter sale / stock deduction';
+
+    const auditEntry = createAuditEntry(
+      'quantity_changed',
+      `Sale / Outbound (-${quantitySold} ${item.unit})`,
+      `Sold ${quantitySold} ${item.unit}. Baseline was ${previousQuantity}, remaining: ${newQty} ${item.unit}.${
+        details ? ` (${details})` : ''
+      }`,
+      previousQuantity,
+      newQty,
+      operator.name,
+      operator.email
+    );
+
+    const updatedTrail = [auditEntry, ...(item.auditTrail || [])];
+
+    const updatedItem: StockItem = {
+      ...item,
+      quantity: newQty,
+      updatedAt: new Date().toISOString(),
+      userId: currentUser?.uid || item.userId,
+      lastModifiedByName: operator.name,
+      lastModifiedByEmail: operator.email,
+      auditTrail: updatedTrail,
+    };
+
+    const next = items.map((i) => (i.id === item.id ? updatedItem : i));
+    updateItems(next);
+
+    const globalEntry = appendGlobalAuditLog({
+      ...auditEntry,
+      itemId: item.id,
+      itemName: item.itemName,
+      unit: item.unit,
+      performedBy: operator.name,
+      userEmail: operator.email,
+    });
+    setGlobalLogs((prev) => [globalEntry, ...prev]);
+
+    if (currentUser) {
+      saveStockItemToFirestore(updatedItem, operator, currentUser.uid).catch(console.error);
+      saveAuditLogToFirestore(globalEntry, currentUser.uid).catch(console.error);
+    }
+
+    if (selectedItemForDetails && selectedItemForDetails.id === item.id) {
+      setSelectedItemForDetails(updatedItem);
+    }
+
+    showToast(
+      `Sold ${quantitySold} ${item.unit} of "${item.itemName}". Balance: ${newQty} ${item.unit}`,
+      'success',
+      {
+        label: 'Undo Sale',
+        onClick: () => {
+          handleInboundStock(updatedItem, quantitySold, `Undo sale of ${quantitySold} ${item.unit}`);
+        },
+      }
+    );
+  };
+
   const handleAddAuditNote = (
     item: StockItem,
     note: string,
@@ -1668,6 +1789,8 @@ export function App() {
           onSelectTag={setSelectedTag}
           managedTags={tags}
           onOpenTagModal={() => setIsTagModalOpen(true)}
+          onOpenQuickSale={handleOpenQuickSale}
+          onActiveItemChange={setActiveKeyboardItem}
         />
       </main>
 
@@ -1855,6 +1978,17 @@ export function App() {
         onExecuteAgentAction={handleExecuteGeminiAction}
         onApplyFilter={(f) => setActiveFilter(f)}
         onSearchItem={(q) => setSearchQuery(q)}
+      />
+
+      {/* 10. Rapid Quick Sale & Item Modification Modal (Shortcut: Alt + B) */}
+      <QuickSaleModal
+        isOpen={isQuickSaleModalOpen}
+        item={quickSaleTargetItem}
+        onClose={() => {
+          setIsQuickSaleModalOpen(false);
+          setQuickSaleTargetItem(null);
+        }}
+        onConfirmSale={handleConfirmQuickSale}
       />
     </div>
   );
