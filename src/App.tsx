@@ -1152,6 +1152,25 @@ export function App() {
   ) => {
     if (quantitySold <= 0) return;
     const previousQuantity = item.quantity || 0;
+
+    // Strict validation: Stock is already 0 -> cannot record sale
+    if (previousQuantity <= 0) {
+      showToast(
+        `Cannot record sale: "${item.itemName}" is already out of stock (0 ${item.unit}). Please restock before selling.`,
+        'error'
+      );
+      return;
+    }
+
+    // Strict validation: Cannot sell more than available inventory
+    if (quantitySold > previousQuantity) {
+      showToast(
+        `Cannot record sale: Attempted to sell ${quantitySold} ${item.unit}, but only ${previousQuantity} ${item.unit} available in stock.`,
+        'error'
+      );
+      return;
+    }
+
     const newQty = Math.max(0, previousQuantity - quantitySold);
 
     const refNote = customerOrRef ? `Ref: ${customerOrRef}` : '';
@@ -1989,6 +2008,8 @@ export function App() {
           setQuickSaleTargetItem(null);
         }}
         onConfirmSale={handleConfirmQuickSale}
+        onSwitchToEdit={(item) => setEditingItem(item)}
+        onRestockItem={(item) => setRestockTargetItem(item)}
       />
     </div>
   );

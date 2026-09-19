@@ -21,6 +21,7 @@ interface QuickSaleModalProps {
   onClose: () => void;
   onConfirmSale: (item: StockItem, quantitySold: number, note?: string) => void;
   onSwitchToEdit?: (item: StockItem) => void;
+  onRestockItem?: (item: StockItem) => void;
 }
 
 export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
@@ -29,25 +30,29 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
   onClose,
   onConfirmSale,
   onSwitchToEdit,
+  onRestockItem,
 }) => {
   const [quantitySold, setQuantitySold] = useState<number>(1);
   const [quantityInputStr, setQuantityInputStr] = useState<string>('1');
   const [note, setNote] = useState<string>('');
-  const [showNoteInput, setShowNoteInput] = useState<boolean>(false);
   const quantityInputRef = useRef<HTMLInputElement>(null);
 
   // Reset and auto-focus when modal opens with an item
   useEffect(() => {
     if (isOpen && item) {
-      setQuantitySold(1);
-      setQuantityInputStr('1');
+      const stock = item.quantity || 0;
+      if (stock <= 0) {
+        setQuantitySold(0);
+        setQuantityInputStr('0');
+      } else {
+        setQuantitySold(1);
+        setQuantityInputStr('1');
+      }
       setNote('');
-      setShowNoteInput(false);
 
-      // Auto-focus and auto-select quantity input so pressing Enter immediately sells 1,
-      // or typing a number immediately replaces it
+      // Auto-focus and auto-select quantity input only if item has positive stock
       const timer = setTimeout(() => {
-        if (quantityInputRef.current) {
+        if (quantityInputRef.current && stock > 0) {
           quantityInputRef.current.focus();
           quantityInputRef.current.select();
         }
@@ -56,7 +61,7 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
     }
   }, [isOpen, item]);
 
-  // Keyboard shortcut listener inside the modal: Enter to confirm, Esc to close
+  // Keyboard shortcut listener inside the modal: Enter to confirm (if valid), Esc to close
   useEffect(() => {
     if (!isOpen) return;
 
@@ -68,6 +73,13 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
         // Submit if not in a textarea with shift key
         const activeTag = (document.activeElement as HTMLElement)?.tagName;
         if (activeTag === 'TEXTAREA' && e.shiftKey) return;
+
+        // Block if stock is 0 or exceeding
+        const availableStock = item?.quantity || 0;
+        if (availableStock <= 0 || quantitySold <= 0 || quantitySold > availableStock) {
+          e.preventDefault();
+          return;
+        }
 
         e.preventDefault();
         handleConfirm();
@@ -85,10 +97,11 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
   const isExceeding = quantitySold > currentQty;
   const isZeroStock = currentQty <= 0;
   const lowThreshold = item.lowStockThreshold ?? 5;
-  const willBeLowStock = remainingQty > 0 && remainingQty <= lowThreshold;
-  const willBeOutOfStock = remainingQty <= 0;
+  const willBeLowStock = !isZeroStock && remainingQty > 0 && remainingQty <= lowThreshold;
+  const willBeOutOfStock = !isZeroStock && remainingQty <= 0;
 
   const handleQuantityChange = (valStr: string) => {
+    if (isZeroStock) return;
     setQuantityInputStr(valStr);
     const parsed = parseInt(valStr, 10);
     if (!isNaN(parsed) && parsed > 0) {
@@ -99,7 +112,8 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
   };
 
   const handleAdjustStep = (delta: number) => {
-    const next = Math.max(1, quantitySold + delta);
+    if (isZeroStock) return;
+    const next = Math.max(1, Math.min(currentQty, quantitySold + delta));
     setQuantitySold(next);
     setQuantityInputStr(String(next));
     if (quantityInputRef.current) {
@@ -108,7 +122,8 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
   };
 
   const handlePresetSelect = (presetQty: number) => {
-    const finalQty = Math.max(1, presetQty);
+    if (isZeroStock) return;
+    const finalQty = Math.max(1, Math.min(currentQty, presetQty));
     setQuantitySold(finalQty);
     setQuantityInputStr(String(finalQty));
     if (quantityInputRef.current) {
@@ -119,8 +134,9 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
 
   const handleConfirm = () => {
     if (!item) return;
-    const finalQty = quantitySold > 0 ? quantitySold : 1;
-    onConfirmSale(item, finalQty, note.trim() || undefined);
+    if (currentQty <= 0) return; // Strict guard: stock is already 0 -> cannot record sale
+    if (quantitySold <= 0 || quantitySold > currentQty) return; // Cannot exceed available stock
+    onConfirmSale(item, quantitySold, note.trim() || undefined);
     onClose();
   };
 
@@ -212,6 +228,32 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
             </div>
           </div>
 
+          {/* Zero Stock Alert Banner */}
+          {isZeroStock && (
+            <div className="p-3.5 rounded-xl bg-rose-50 border-2 border-rose-200 text-rose-900 flex items-start gap-2.5 animate-in fade-in duration-150">
+              <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div className="flex-1 text-xs">
+                <p className="font-bold text-rose-900 text-sm">Cannot Record Sale: Item Out of Stock</p>
+                <p className="text-rose-700 mt-0.5 leading-relaxed">
+                  This item currently has <strong className="font-mono">0 {item.unit}</strong> in inventory. Sales cannot be recorded until stock is added.
+                </p>
+                {onRestockItem && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onRestockItem(item);
+                    }}
+                    className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-rose-700 hover:bg-rose-800 active:bg-rose-900 rounded-lg shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Restock / Receive Inventory</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Quantity Input with Steppers & Quick Chips */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
@@ -223,7 +265,7 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
                 <span className="text-rose-500">*</span>
               </label>
               <span className="text-[11px] text-slate-400 font-medium">
-                Type number or use + / -
+                {isZeroStock ? 'Stock is 0' : 'Type number or use + / -'}
               </span>
             </div>
 
@@ -231,7 +273,7 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
               <button
                 type="button"
                 onClick={() => handleAdjustStep(-1)}
-                disabled={quantitySold <= 1}
+                disabled={isZeroStock || quantitySold <= 1}
                 className="min-w-[44px] min-h-[44px] rounded-xl bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center font-bold text-lg transition-colors cursor-pointer border border-slate-200"
                 title="Subtract 1 unit"
               >
@@ -243,18 +285,27 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
                 ref={quantityInputRef}
                 type="number"
                 min="1"
+                max={currentQty > 0 ? currentQty : 0}
                 step="1"
                 value={quantityInputStr}
                 onChange={(e) => handleQuantityChange(e.target.value)}
-                className="flex-1 min-h-[44px] text-center text-xl font-bold font-mono text-slate-900 bg-white border-2 border-emerald-600 rounded-xl focus:outline-hidden focus:ring-4 focus:ring-emerald-500/20 shadow-xs"
-                placeholder="1"
+                disabled={isZeroStock}
+                className={`flex-1 min-h-[44px] text-center text-xl font-bold font-mono rounded-xl focus:outline-hidden shadow-xs transition-colors ${
+                  isZeroStock
+                    ? 'bg-slate-100 text-slate-400 border border-slate-300 cursor-not-allowed'
+                    : isExceeding
+                    ? 'bg-rose-50/50 text-rose-900 border-2 border-rose-500 focus:ring-4 focus:ring-rose-500/20'
+                    : 'bg-white text-slate-900 border-2 border-emerald-600 focus:ring-4 focus:ring-emerald-500/20'
+                }`}
+                placeholder="0"
                 required
               />
 
               <button
                 type="button"
                 onClick={() => handleAdjustStep(1)}
-                className="min-w-[44px] min-h-[44px] rounded-xl bg-emerald-100 hover:bg-emerald-200 active:bg-emerald-300 text-emerald-800 flex items-center justify-center font-bold text-lg transition-colors cursor-pointer border border-emerald-200"
+                disabled={isZeroStock || quantitySold >= currentQty}
+                className="min-w-[44px] min-h-[44px] rounded-xl bg-emerald-100 hover:bg-emerald-200 active:bg-emerald-300 text-emerald-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center font-bold text-lg transition-colors cursor-pointer border border-emerald-200"
                 title="Add 1 unit"
               >
                 <Plus className="w-4 h-4" />
@@ -269,10 +320,13 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
                   key={preset}
                   type="button"
                   onClick={() => handlePresetSelect(preset)}
-                  className={`min-h-[28px] px-2.5 py-1 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
-                    quantitySold === preset
-                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
-                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                  disabled={isZeroStock || preset > currentQty}
+                  className={`min-h-[28px] px-2.5 py-1 text-xs font-semibold rounded-lg border transition-colors ${
+                    isZeroStock || preset > currentQty
+                      ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-50'
+                      : quantitySold === preset
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs cursor-pointer'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 cursor-pointer'
                   }`}
                 >
                   {preset} {item.unit}
@@ -298,7 +352,9 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
           {/* Dynamic Stock Impact Calculation */}
           <div
             className={`p-3 rounded-xl border transition-colors ${
-              isExceeding
+              isZeroStock
+                ? 'bg-slate-100 border-slate-200 text-slate-600'
+                : isExceeding
                 ? 'bg-rose-50 border-rose-200 text-rose-900'
                 : willBeOutOfStock
                 ? 'bg-rose-50/70 border-rose-200 text-rose-800'
@@ -309,10 +365,15 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
           >
             <div className="flex items-center justify-between text-xs font-medium">
               <div className="flex items-center gap-1">
-                {isExceeding ? (
+                {isZeroStock ? (
                   <>
                     <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                    <span className="font-bold">Notice: Exceeds recorded inventory</span>
+                    <span className="font-bold text-rose-800">Stock is already 0 • Sale blocked</span>
+                  </>
+                ) : isExceeding ? (
+                  <>
+                    <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                    <span className="font-bold">Notice: Exceeds available stock</span>
                   </>
                 ) : willBeOutOfStock ? (
                   <>
@@ -333,39 +394,36 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
               </div>
 
               <div className="font-mono font-bold text-xs">
-                {currentQty} - {quantitySold} = {remainingQty} {item.unit}
+                {isZeroStock ? (
+                  <span className="text-rose-700">0 {item.unit} available</span>
+                ) : (
+                  <span>{currentQty} - {quantitySold} = {remainingQty} {item.unit}</span>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Optional Sale Note Toggle */}
+          {/* Sale Note / Reference - Always visible with zero extra clicks */}
           <div>
-            {!showNoteInput ? (
-              <button
-                type="button"
-                onClick={() => setShowNoteInput(true)}
-                className="text-xs text-slate-500 hover:text-emerald-700 font-medium underline cursor-pointer flex items-center gap-1"
+            <div className="flex items-center justify-between mb-1.5">
+              <label
+                htmlFor="quick-sale-note-input"
+                className="text-xs font-bold text-slate-700"
               >
-                <span>+ Add sale note or customer name (optional)</span>
-              </button>
-            ) : (
-              <div>
-                <label
-                  htmlFor="quick-sale-note-input"
-                  className="block text-xs font-bold text-slate-700 mb-1"
-                >
-                  Sale Reference / Note
-                </label>
-                <input
-                  id="quick-sale-note-input"
-                  type="text"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="e.g., Counter sale, Customer order #..."
-                  className="w-full px-3 py-1.5 text-xs text-slate-900 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-600 focus:border-transparent"
-                />
-              </div>
-            )}
+                Sale Note / Reference
+              </label>
+              <span className="text-[11px] text-slate-400 font-medium">
+                Optional • Press Tab to reach
+              </span>
+            </div>
+            <input
+              id="quick-sale-note-input"
+              type="text"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g., Counter sale, Customer name, Invoice #..."
+              className="w-full px-3 py-2 text-xs sm:text-sm text-slate-900 bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent placeholder:text-slate-400 shadow-2xs transition-colors"
+            />
           </div>
         </div>
 
@@ -402,13 +460,32 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
               id="btn-confirm-quick-sale"
               type="button"
               onClick={handleConfirm}
-              className="min-h-[40px] inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl shadow-xs transition-colors cursor-pointer"
-              title="Record sale (Press Enter)"
+              disabled={isZeroStock || quantitySold <= 0 || isExceeding}
+              className={`min-h-[40px] inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl shadow-xs transition-colors ${
+                isZeroStock || quantitySold <= 0 || isExceeding
+                  ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed'
+                  : 'text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 cursor-pointer'
+              }`}
+              title={
+                isZeroStock
+                  ? 'Item is out of stock (0) - cannot record sale'
+                  : isExceeding
+                  ? 'Quantity exceeds available stock'
+                  : 'Record sale (Press Enter)'
+              }
             >
-              <span>Record Sale</span>
-              <kbd className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-bold text-emerald-100 bg-emerald-800/80 rounded border border-emerald-500/50">
-                Enter
-              </kbd>
+              {isZeroStock ? (
+                <span>Out of Stock (Sale Blocked)</span>
+              ) : isExceeding ? (
+                <span>Exceeds Stock ({currentQty})</span>
+              ) : (
+                <>
+                  <span>Record Sale</span>
+                  <kbd className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-bold text-emerald-100 bg-emerald-800/80 rounded border border-emerald-500/50">
+                    Enter
+                  </kbd>
+                </>
+              )}
             </button>
           </div>
         </div>

@@ -472,14 +472,25 @@ export const StockTable: React.FC<StockTableProps> = ({
                 <button
                   type="button"
                   onClick={() => onOpenQuickSale(activeItem)}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 rounded-lg shadow-2xs cursor-pointer transition-colors"
-                  title="Quick Sale / Bill this item (Alt + B or Enter)"
+                  disabled={activeItem.quantity <= 0}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg shadow-2xs transition-colors ${
+                    activeItem.quantity <= 0
+                      ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                      : 'text-white bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 cursor-pointer'
+                  }`}
+                  title={
+                    activeItem.quantity <= 0
+                      ? `Cannot sell "${activeItem.itemName}": Stock is already 0`
+                      : 'Quick Sale / Bill this item (Alt + B or Enter)'
+                  }
                 >
                   <Receipt className="w-3.5 h-3.5" />
-                  <span>Sell</span>
-                  <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-800 text-emerald-100 border border-emerald-600/50">
-                    Alt + B
-                  </kbd>
+                  <span>{activeItem.quantity <= 0 ? 'Out of Stock' : 'Sell'}</span>
+                  {activeItem.quantity > 0 && (
+                    <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-800 text-emerald-100 border border-emerald-600/50">
+                      Alt + B
+                    </kbd>
+                  )}
                 </button>
               )}
               <button
@@ -1222,15 +1233,26 @@ export const StockTable: React.FC<StockTableProps> = ({
                     {onOpenQuickSale && (
                       <button
                         type="button"
-                        onClick={() => onOpenQuickSale(item)}
-                        className="min-h-[34px] px-2 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 rounded-lg flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
-                        title={`Record sale for "${item.itemName}" (Shortcut: Alt + B)`}
+                        onClick={() => item.quantity > 0 && onOpenQuickSale(item)}
+                        disabled={item.quantity <= 0}
+                        className={`min-h-[34px] px-2 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-2xs ${
+                          item.quantity <= 0
+                            ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                            : 'text-white bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 cursor-pointer'
+                        }`}
+                        title={
+                          item.quantity <= 0
+                            ? `Cannot record sale for "${item.itemName}": stock is already 0`
+                            : `Record sale for "${item.itemName}" (Shortcut: Alt + B)`
+                        }
                       >
                         <Receipt className="w-3.5 h-3.5" />
                         <span className="hidden xs:inline">Sell</span>
-                        <kbd className="hidden md:inline-flex text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-800 text-emerald-100 border border-emerald-600/50">
-                          Alt+B
-                        </kbd>
+                        {item.quantity > 0 && (
+                          <kbd className="hidden md:inline-flex text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-800 text-emerald-100 border border-emerald-600/50">
+                            Alt+B
+                          </kbd>
+                        )}
                       </button>
                     )}
                     {onReceiveStock && (
@@ -1497,15 +1519,26 @@ export const StockTable: React.FC<StockTableProps> = ({
                     {onOpenQuickSale && (
                       <button
                         type="button"
-                        onClick={() => onOpenQuickSale(item)}
-                        className="min-h-[44px] px-3 py-2 inline-flex items-center gap-1 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 rounded-xl transition-colors cursor-pointer shadow-xs"
-                        title={`Record sale for "${item.itemName}" (Shortcut: Alt + B)`}
+                        onClick={() => item.quantity > 0 && onOpenQuickSale(item)}
+                        disabled={item.quantity <= 0}
+                        className={`min-h-[44px] px-3 py-2 inline-flex items-center gap-1 text-xs font-bold rounded-xl transition-colors shadow-xs ${
+                          item.quantity <= 0
+                            ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                            : 'text-white bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 cursor-pointer'
+                        }`}
+                        title={
+                          item.quantity <= 0
+                            ? `Cannot record sale for "${item.itemName}": stock is already 0`
+                            : `Record sale for "${item.itemName}" (Shortcut: Alt + B)`
+                        }
                       >
                         <Receipt className="w-3.5 h-3.5" />
-                        <span>Sell</span>
-                        <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-800 text-emerald-100 border border-emerald-600/50">
-                          Alt+B
-                        </kbd>
+                        <span>{item.quantity <= 0 ? 'Out of Stock' : 'Sell'}</span>
+                        {item.quantity > 0 && (
+                          <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-800 text-emerald-100 border border-emerald-600/50">
+                            Alt+B
+                          </kbd>
+                        )}
                       </button>
                     )}
                     {onReceiveStock && (
@@ -1851,15 +1884,26 @@ export const StockTable: React.FC<StockTableProps> = ({
                         {onOpenQuickSale && (
                           <button
                             type="button"
-                            onClick={() => onOpenQuickSale(item)}
-                            className="min-h-[34px] px-2 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 rounded-lg flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
-                            title={`Quick sale for "${item.itemName}" (Shortcut: Alt + B)`}
+                            onClick={() => item.quantity > 0 && onOpenQuickSale(item)}
+                            disabled={item.quantity <= 0}
+                            className={`min-h-[34px] px-2 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-2xs ${
+                              item.quantity <= 0
+                                ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                                : 'text-white bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 cursor-pointer'
+                            }`}
+                            title={
+                              item.quantity <= 0
+                                ? `Cannot record sale for "${item.itemName}": stock is already 0`
+                                : `Quick sale for "${item.itemName}" (Shortcut: Alt + B)`
+                            }
                           >
                             <Receipt className="w-3.5 h-3.5" />
                             <span>Sell</span>
-                            <kbd className="hidden lg:inline-flex text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-800 text-emerald-100 border border-emerald-600/50">
-                              Alt+B
-                            </kbd>
+                            {item.quantity > 0 && (
+                              <kbd className="hidden lg:inline-flex text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-800 text-emerald-100 border border-emerald-600/50">
+                                Alt+B
+                              </kbd>
+                            )}
                           </button>
                         )}
                         {onReceiveStock && (
