@@ -146,6 +146,42 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
     onClose();
   };
 
+  // Keyboard shortcut: Alt + S (or Option + S / Cmd + S) to save / submit item edits
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleSaveKeyDown = (e: KeyboardEvent) => {
+      const isAltS =
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        (e.code === 'KeyS' || e.key === 's' || e.key === 'S' || e.key === 'ß');
+      const isCtrlOrCmdS =
+        (e.ctrlKey || e.metaKey) &&
+        !e.altKey &&
+        (e.code === 'KeyS' || e.key === 's' || e.key === 'S');
+
+      if (isAltS || isCtrlOrCmdS) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const form = document.getElementById('edit-item-form') as HTMLFormElement | null;
+        if (form) {
+          if (form.reportValidity && !form.reportValidity()) {
+            return;
+          }
+          if (form.requestSubmit) {
+            form.requestSubmit();
+          } else {
+            handleSubmit({ preventDefault: () => {} } as React.FormEvent);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleSaveKeyDown, true);
+    return () => window.removeEventListener('keydown', handleSaveKeyDown, true);
+  }, [isOpen, itemName, calculatedQuantity, threshold, unit, item, productionDate, notes, tags]);
+
   return (
     <div
       id="edit-item-modal-backdrop"
@@ -567,10 +603,14 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
             <button
               type="submit"
               id="save-edit-item-btn"
-              className="min-h-[44px] px-6 text-sm font-bold text-white bg-slate-900 hover:bg-slate-800 active:bg-slate-950 rounded-xl shadow-sm flex items-center gap-2 cursor-pointer transition-all"
+              className="min-h-[44px] px-5 sm:px-6 text-sm font-bold text-white bg-slate-900 hover:bg-slate-800 active:bg-slate-950 rounded-xl shadow-sm flex items-center gap-2 cursor-pointer transition-all"
+              title="Save & update item (Shortcut: Alt + S)"
             >
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
               <span>Save & Update ({calculatedQuantity} {unit || item.unit})</span>
+              <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-bold text-slate-300 bg-slate-800 rounded border border-slate-700">
+                Alt+S
+              </kbd>
             </button>
           </div>
         </form>

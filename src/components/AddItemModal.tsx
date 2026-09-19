@@ -260,6 +260,57 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
     onClose();
   };
 
+  // Keyboard shortcut: Alt + S (or Option + S / Cmd + S) to save / confirm item
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleSaveKeyDown = (e: KeyboardEvent) => {
+      // Catch Alt + S (Windows/Linux) or Option + S (macOS: produces 'ß' or code 'KeyS') or Cmd/Ctrl + S
+      const isAltS =
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        (e.code === 'KeyS' || e.key === 's' || e.key === 'S' || e.key === 'ß');
+      const isCtrlOrCmdS =
+        (e.ctrlKey || e.metaKey) &&
+        !e.altKey &&
+        (e.code === 'KeyS' || e.key === 's' || e.key === 'S');
+
+      if (isAltS || isCtrlOrCmdS) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (activeTab === 'restock') {
+          const form = document.getElementById('restock-item-form') as HTMLFormElement | null;
+          if (form) {
+            if (form.reportValidity && !form.reportValidity()) {
+              return;
+            }
+            if (form.requestSubmit) {
+              form.requestSubmit();
+            } else {
+              handleRestockSubmit({ preventDefault: () => {} } as React.FormEvent);
+            }
+          }
+        } else {
+          const form = document.getElementById('new-item-form') as HTMLFormElement | null;
+          if (form) {
+            if (form.reportValidity && !form.reportValidity()) {
+              return;
+            }
+            if (form.requestSubmit) {
+              form.requestSubmit();
+            } else {
+              handleNewItemSubmit({ preventDefault: () => {} } as React.FormEvent);
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleSaveKeyDown, true);
+    return () => window.removeEventListener('keydown', handleSaveKeyDown, true);
+  }, [isOpen, activeTab, selectedItem, addQuantity, isDeduction, restockReason, itemName, initialQuantity, threshold, unit, units, productionDate, notes, tags]);
+
   // Mathematical live calculation for Restock Mode
   const currentBaselineStock = selectedItem ? selectedItem.quantity || 0 : 0;
   const parsedInboundAmount = parseFloat(addQuantity) || 0;
@@ -652,7 +703,8 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
                 type="submit"
                 id="confirm-restock-btn"
                 disabled={!selectedItem || parsedInboundAmount <= 0}
-                className="min-h-[44px] px-6 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-40 disabled:pointer-events-none rounded-xl shadow-sm flex items-center gap-2 cursor-pointer transition-all"
+                className="min-h-[44px] px-5 sm:px-6 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-40 disabled:pointer-events-none rounded-xl shadow-sm flex items-center gap-2 cursor-pointer transition-all"
+                title="Save & confirm stock changes (Shortcut: Alt + S)"
               >
                 <Plus className="w-4 h-4" />
                 <span>
@@ -660,6 +712,9 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
                     ? `Confirm Deduct (−${parsedInboundAmount} ${selectedItem?.unit || ''})`
                     : `Confirm Add More (+${parsedInboundAmount} ${selectedItem?.unit || ''})`}
                 </span>
+                <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-bold text-emerald-100 bg-emerald-700/80 rounded border border-emerald-500/60">
+                  Alt+S
+                </kbd>
               </button>
             </div>
           </form>
@@ -921,10 +976,14 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
               <button
                 type="submit"
                 id="submit-new-item-btn"
-                className="min-h-[44px] px-6 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl shadow-sm flex items-center gap-2 cursor-pointer transition-all"
+                className="min-h-[44px] px-5 sm:px-6 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl shadow-sm flex items-center gap-2 cursor-pointer transition-all"
+                title="Register product SKU (Shortcut: Alt + S)"
               >
                 <Plus className="w-4 h-4" />
                 <span>Register Product SKU</span>
+                <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-bold text-emerald-100 bg-emerald-700/80 rounded border border-emerald-500/60">
+                  Alt+S
+                </kbd>
               </button>
             </div>
           </form>
