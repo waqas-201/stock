@@ -1381,49 +1381,13 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
           )}
         </div>
 
-        {/* Footer with Quick Adjustments & Actions */}
+        {/* Footer with Actions */}
         <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
-          {/* Quick Adjustment buttons */}
-          <div className="flex items-center gap-1 flex-wrap">
-            <span className="text-xs font-semibold text-slate-500 mr-1 hidden sm:inline">
-              Adjust:
-            </span>
-            <button
-              type="button"
-              onClick={() => onQuickQuantityChange(item, -5)}
-              disabled={item.quantity < 5}
-              className="min-h-[36px] px-2 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
-              title="Decrease quantity by 5"
-            >
-              -5
-            </button>
-            <button
-              type="button"
-              onClick={() => onQuickQuantityChange(item, -1)}
-              disabled={item.quantity <= 0}
-              className="min-h-[36px] px-2.5 inline-flex items-center gap-1 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
-              title="Decrease quantity by 1"
-            >
-              <Minus className="w-3.5 h-3.5" />
-              <span>-1</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onQuickQuantityChange(item, 1)}
-              className="min-h-[36px] px-2.5 inline-flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 rounded-lg hover:bg-emerald-100 cursor-pointer"
-              title="Increase quantity by 1"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>+1</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onQuickQuantityChange(item, 5)}
-              className="min-h-[36px] px-2 text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 rounded-lg hover:bg-emerald-100 cursor-pointer"
-              title="Increase quantity by 5"
-            >
-              +5
-            </button>
+          {/* Audit Protection notice */}
+          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="font-medium text-slate-600">Audit Enforced:</span>
+            <span className="hidden sm:inline text-slate-500">All modifications require approval notes</span>
           </div>
 
           <div className="flex items-center gap-2 ml-auto">

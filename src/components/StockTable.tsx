@@ -28,6 +28,8 @@ import {
   Layers,
   Activity,
   Receipt,
+  Keyboard,
+  ShieldCheck,
 } from 'lucide-react';
 import { StockItem, StockFilter, SortField, SortOrder, StockTag, StockLabel, StockUnit } from '../types';
 import { getTagStyle, getUniqueTagsWithCounts } from '../lib/tagUtils';
@@ -218,64 +220,68 @@ export const StockTable: React.FC<StockTableProps> = ({
   }, [uniqueTags, tagSearchTerm]);
 
   // Filter items
-  const filteredItems = safeItems.filter((item) => {
-    // 1. Tag Filter
-    if (selectedTag && (!Array.isArray(item.tags) || !item.tags.includes(selectedTag))) {
-      return false;
-    }
-
-    // 2. Search query (matches item name, unit, notes, batch/date, and tags)
-    const query = searchQuery.toLowerCase().trim();
-    if (query) {
-      const cleanQ = query.replace(/^#+/, '');
-      const matchName = item.itemName.toLowerCase().includes(query);
-      const matchUnit = item.unit.toLowerCase().includes(query);
-      const matchNotes = item.notes?.toLowerCase().includes(query) ?? false;
-      const matchProdDate = item.productionDate?.includes(query) ?? false;
-      const matchTags = Array.isArray(item.tags) && item.tags.some((t) => t.toLowerCase().includes(cleanQ));
-      if (!matchName && !matchUnit && !matchNotes && !matchProdDate && !matchTags) {
+  const filteredItems = useMemo(() => {
+    return safeItems.filter((item) => {
+      // 1. Tag Filter
+      if (selectedTag && (!Array.isArray(item.tags) || !item.tags.includes(selectedTag))) {
         return false;
       }
-    }
 
-    // 3. Status filter tab
-    if (activeFilter === 'in_stock') return isItemInStock(item);
-    if (activeFilter === 'low_stock') return isItemLowStock(item);
-    if (activeFilter === 'out_of_stock') return (item.quantity || 0) <= 0;
-    return true;
-  });
+      // 2. Search query (matches item name, unit, notes, batch/date, and tags)
+      const query = searchQuery.toLowerCase().trim();
+      if (query) {
+        const cleanQ = query.replace(/^#+/, '');
+        const matchName = item.itemName.toLowerCase().includes(query);
+        const matchUnit = item.unit.toLowerCase().includes(query);
+        const matchNotes = item.notes?.toLowerCase().includes(query) ?? false;
+        const matchProdDate = item.productionDate?.includes(query) ?? false;
+        const matchTags = Array.isArray(item.tags) && item.tags.some((t) => t.toLowerCase().includes(cleanQ));
+        if (!matchName && !matchUnit && !matchNotes && !matchProdDate && !matchTags) {
+          return false;
+        }
+      }
+
+      // 3. Status filter tab
+      if (activeFilter === 'in_stock') return isItemInStock(item);
+      if (activeFilter === 'low_stock') return isItemLowStock(item);
+      if (activeFilter === 'out_of_stock') return (item.quantity || 0) <= 0;
+      return true;
+    });
+  }, [safeItems, selectedTag, searchQuery, activeFilter]);
 
   // Sort items
-  const sortedItems = [...filteredItems].sort((a, b) => {
-    if (sortField === 'name') {
-      const cmp = a.itemName.localeCompare(b.itemName);
-      return sortOrder === 'asc' ? cmp : -cmp;
-    }
-    if (sortField === 'quantity') {
-      const diff = a.quantity - b.quantity;
-      return sortOrder === 'asc' ? diff : -diff;
-    }
-    if (sortField === 'threshold') {
-      const diff = (a.lowStockThreshold ?? 5) - (b.lowStockThreshold ?? 5);
-      return sortOrder === 'asc' ? diff : -diff;
-    }
-    if (sortField === 'production_date') {
-      const aDate = a.productionDate || '';
-      const bDate = b.productionDate || '';
-      const cmp = aDate.localeCompare(bDate);
-      return sortOrder === 'asc' ? cmp : -cmp;
-    }
-    if (sortField === 'tags') {
-      const aTags = Array.isArray(a.tags) && a.tags.length > 0 ? a.tags.join(', ') : '';
-      const bTags = Array.isArray(b.tags) && b.tags.length > 0 ? b.tags.join(', ') : '';
-      if (!aTags && !bTags) return 0;
-      if (!aTags) return 1;
-      if (!bTags) return -1;
-      const cmp = aTags.localeCompare(bTags);
-      return sortOrder === 'asc' ? cmp : -cmp;
-    }
-    return 0;
-  });
+  const sortedItems = useMemo(() => {
+    return [...filteredItems].sort((a, b) => {
+      if (sortField === 'name') {
+        const cmp = a.itemName.localeCompare(b.itemName);
+        return sortOrder === 'asc' ? cmp : -cmp;
+      }
+      if (sortField === 'quantity') {
+        const diff = a.quantity - b.quantity;
+        return sortOrder === 'asc' ? diff : -diff;
+      }
+      if (sortField === 'threshold') {
+        const diff = (a.lowStockThreshold ?? 5) - (b.lowStockThreshold ?? 5);
+        return sortOrder === 'asc' ? diff : -diff;
+      }
+      if (sortField === 'production_date') {
+        const aDate = a.productionDate || '';
+        const bDate = b.productionDate || '';
+        const cmp = aDate.localeCompare(bDate);
+        return sortOrder === 'asc' ? cmp : -cmp;
+      }
+      if (sortField === 'tags') {
+        const aTags = Array.isArray(a.tags) && a.tags.length > 0 ? a.tags.join(', ') : '';
+        const bTags = Array.isArray(b.tags) && b.tags.length > 0 ? b.tags.join(', ') : '';
+        if (!aTags && !bTags) return 0;
+        if (!aTags) return 1;
+        if (!bTags) return -1;
+        const cmp = aTags.localeCompare(bTags);
+        return sortOrder === 'asc' ? cmp : -cmp;
+      }
+      return 0;
+    });
+  }, [filteredItems, sortField, sortOrder]);
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
@@ -286,59 +292,83 @@ export const StockTable: React.FC<StockTableProps> = ({
     }
   };
 
-  // Active / selected item index for keyboard-driven navigation (Alt+K -> Search -> Arrow keys -> Alt+B)
+  // Active / selected item index for keyboard-driven navigation (Alt+K -> Search -> Arrow keys -> Alt+S/B)
   const [activeIndex, setActiveIndex] = useState<number>(0);
+  const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
+  const lastReportedItemIdRef = useRef<string | null | undefined>(undefined);
 
-  // Synchronize activeIndex with sortedItems and notify parent
+  // Synchronize activeIndex with sortedItems and safely notify parent
   useEffect(() => {
     if (sortedItems.length === 0) {
       setActiveIndex(0);
-      onActiveItemChange?.(null);
+      if (lastReportedItemIdRef.current !== null) {
+        lastReportedItemIdRef.current = null;
+        onActiveItemChange?.(null);
+      }
     } else {
-      setActiveIndex((prev) => {
-        const next = Math.min(Math.max(0, prev), sortedItems.length - 1);
-        onActiveItemChange?.(sortedItems[next] || null);
-        return next;
-      });
+      const clampedIndex = Math.min(Math.max(0, activeIndex), sortedItems.length - 1);
+      if (clampedIndex !== activeIndex) {
+        setActiveIndex(clampedIndex);
+      }
+      const targetItem = sortedItems[clampedIndex] || null;
+      const targetId = targetItem ? targetItem.id : null;
+      if (lastReportedItemIdRef.current !== targetId) {
+        lastReportedItemIdRef.current = targetId;
+        onActiveItemChange?.(targetItem);
+      }
     }
-  }, [sortedItems, onActiveItemChange]);
+  }, [sortedItems, activeIndex, onActiveItemChange]);
 
-  const activeItem = sortedItems.length > 0 ? sortedItems[activeIndex] : null;
+  const activeItem = sortedItems.length > 0
+    ? sortedItems[Math.min(Math.max(0, activeIndex), sortedItems.length - 1)] || null
+    : null;
 
   // Search input keyboard shortcuts handler
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       if (sortedItems.length > 0) {
-        setActiveIndex((prev) => {
-          const next = prev < sortedItems.length - 1 ? prev + 1 : 0;
-          onActiveItemChange?.(sortedItems[next] || null);
-          return next;
-        });
+        const next = activeIndex < sortedItems.length - 1 ? activeIndex + 1 : 0;
+        setActiveIndex(next);
+        const nextItem = sortedItems[next] || null;
+        lastReportedItemIdRef.current = nextItem ? nextItem.id : null;
+        onActiveItemChange?.(nextItem);
       }
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       if (sortedItems.length > 0) {
-        setActiveIndex((prev) => {
-          const next = prev > 0 ? prev - 1 : sortedItems.length - 1;
-          onActiveItemChange?.(sortedItems[next] || null);
-          return next;
-        });
+        const next = activeIndex > 0 ? activeIndex - 1 : sortedItems.length - 1;
+        setActiveIndex(next);
+        const nextItem = sortedItems[next] || null;
+        lastReportedItemIdRef.current = nextItem ? nextItem.id : null;
+        onActiveItemChange?.(nextItem);
       }
     } else if (
-      (e.altKey && (e.key === 'b' || e.key === 'B' || e.code === 'KeyB')) ||
+      (e.altKey && (e.key === 'b' || e.key === 'B' || e.code === 'KeyB' || e.key === 's' || e.key === 'S' || e.code === 'KeyS')) ||
       (e.key === 'Enter' && !e.shiftKey)
     ) {
-      // Direct Quick Sale shortcut: Alt + B or Enter in search box!
+      // Direct Quick Sale shortcut: Alt + S / Alt + B or Enter in search box!
       e.preventDefault();
-      if (activeItem && onOpenQuickSale) {
+      if (activeItem && onOpenQuickSale && activeItem.quantity > 0) {
         onOpenQuickSale(activeItem);
+      }
+    } else if (e.altKey && (e.key === 'r' || e.key === 'R' || e.code === 'KeyR')) {
+      // Direct Add Stock shortcut: Alt + R
+      e.preventDefault();
+      if (activeItem && onReceiveStock) {
+        onReceiveStock(activeItem);
       }
     } else if (e.altKey && (e.key === 'e' || e.key === 'E' || e.code === 'KeyE')) {
       // Direct Edit shortcut: Alt + E
       e.preventDefault();
       if (activeItem) {
         onEditItem(activeItem);
+      }
+    } else if (e.altKey && (e.key === 'd' || e.key === 'D' || e.code === 'KeyD')) {
+      // Direct Delete shortcut: Alt + D
+      e.preventDefault();
+      if (activeItem) {
+        onDeleteItem(activeItem);
       }
     } else if (e.key === 'Escape') {
       if (searchQuery) {
@@ -348,6 +378,131 @@ export const StockTable: React.FC<StockTableProps> = ({
       }
     }
   };
+
+  // Global keyboard shortcuts listener for fast audit-protected inventory operations
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl &&
+        (activeEl.tagName === 'INPUT' ||
+          activeEl.tagName === 'TEXTAREA' ||
+          (activeEl as HTMLElement).isContentEditable);
+
+      // Open / Close Shortcuts modal with '?' or Alt + / (when not typing in field)
+      if (
+        (!isInput && e.key === '?') ||
+        (e.altKey && (e.key === '/' || e.code === 'Slash'))
+      ) {
+        e.preventDefault();
+        setShowShortcutsModal((prev) => !prev);
+        return;
+      }
+
+      // Quick Search: Alt + K or '/' (when not typing in field)
+      if (
+        (e.altKey && (e.key === 'k' || e.key === 'K' || e.code === 'KeyK')) ||
+        (!isInput && !e.ctrlKey && !e.metaKey && !e.altKey && e.key === '/')
+      ) {
+        e.preventDefault();
+        const searchInput = document.getElementById('search-stock-input') as HTMLInputElement | null;
+        searchInput?.focus();
+        searchInput?.select();
+        return;
+      }
+
+      // Add New SKU Item: Alt + N
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        (e.key === 'n' || e.key === 'N' || e.code === 'KeyN')
+      ) {
+        e.preventDefault();
+        onAddItem();
+        return;
+      }
+
+      // If typing in any other input, do not capture table shortcuts
+      if (isInput && activeEl?.id !== 'search-stock-input') {
+        return;
+      }
+
+      // Sell Active Item: Alt + S or Alt + B
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        (e.key === 's' || e.key === 'S' || e.code === 'KeyS' || e.key === 'b' || e.key === 'B' || e.code === 'KeyB')
+      ) {
+        if (activeItem && onOpenQuickSale && activeItem.quantity > 0) {
+          e.preventDefault();
+          onOpenQuickSale(activeItem);
+        }
+        return;
+      }
+
+      // Restock / Add Stock to Active Item: Alt + R
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        (e.key === 'r' || e.key === 'R' || e.code === 'KeyR')
+      ) {
+        if (activeItem && onReceiveStock) {
+          e.preventDefault();
+          onReceiveStock(activeItem);
+        }
+        return;
+      }
+
+      // Edit Active Item: Alt + E
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        (e.key === 'e' || e.key === 'E' || e.code === 'KeyE')
+      ) {
+        if (activeItem) {
+          e.preventDefault();
+          onEditItem(activeItem);
+        }
+        return;
+      }
+
+      // Delete Active Item: Alt + D or Delete (when not typing in field)
+      if (
+        (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'd' || e.key === 'D' || e.code === 'KeyD')) ||
+        (!isInput && e.key === 'Delete')
+      ) {
+        if (activeItem) {
+          e.preventDefault();
+          onDeleteItem(activeItem);
+        }
+        return;
+      }
+
+      // Arrow navigation when not in an input
+      if (!isInput) {
+        if (e.key === 'ArrowDown' || e.key === 'j') {
+          e.preventDefault();
+          if (sortedItems.length > 0) {
+            const next = activeIndex < sortedItems.length - 1 ? activeIndex + 1 : 0;
+            setActiveIndex(next);
+          }
+        } else if (e.key === 'ArrowUp' || e.key === 'k') {
+          e.preventDefault();
+          if (sortedItems.length > 0) {
+            const prev = activeIndex > 0 ? activeIndex - 1 : sortedItems.length - 1;
+            setActiveIndex(prev);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalShortcuts);
+    return () => window.removeEventListener('keydown', handleGlobalShortcuts);
+  }, [activeItem, activeIndex, sortedItems, onAddItem, onOpenQuickSale, onReceiveStock, onEditItem, onDeleteItem]);
 
   // Count items by category for filter tabs (interconnected with active tag filter)
   const tagScopedItems = selectedTag
@@ -467,7 +622,7 @@ export const StockTable: React.FC<StockTableProps> = ({
               </span>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
               {onOpenQuickSale && (
                 <button
                   type="button"
@@ -481,18 +636,34 @@ export const StockTable: React.FC<StockTableProps> = ({
                   title={
                     activeItem.quantity <= 0
                       ? `Cannot sell "${activeItem.itemName}": Stock is already 0`
-                      : 'Quick Sale / Bill this item (Alt + B or Enter)'
+                      : 'Quick Sale / Bill this item (Alt + S or Alt + B)'
                   }
                 >
                   <Receipt className="w-3.5 h-3.5" />
                   <span>{activeItem.quantity <= 0 ? 'Out of Stock' : 'Sell'}</span>
                   {activeItem.quantity > 0 && (
                     <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-800 text-emerald-100 border border-emerald-600/50">
-                      Alt + B
+                      Alt+S
                     </kbd>
                   )}
                 </button>
               )}
+
+              {onReceiveStock && (
+                <button
+                  type="button"
+                  onClick={() => onReceiveStock(activeItem)}
+                  className="hidden sm:inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg cursor-pointer transition-colors shadow-2xs"
+                  title="Add inbound stock to this item (Alt + R)"
+                >
+                  <Plus className="w-3 h-3 text-emerald-700" />
+                  <span>Restock</span>
+                  <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    Alt+R
+                  </kbd>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => onEditItem(activeItem)}
@@ -502,7 +673,20 @@ export const StockTable: React.FC<StockTableProps> = ({
                 <Edit2 className="w-3 h-3 text-slate-400" />
                 <span>Edit</span>
                 <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-slate-100 text-slate-500 border border-slate-200">
-                  Alt + E
+                  Alt+E
+                </kbd>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onDeleteItem(activeItem)}
+                className="hidden md:inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-rose-700 hover:text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg cursor-pointer transition-colors shadow-2xs"
+                title="Delete this item with required note (Alt + D)"
+              >
+                <Trash2 className="w-3 h-3 text-rose-500" />
+                <span>Delete</span>
+                <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-300">
+                  Alt+D
                 </kbd>
               </button>
             </div>
@@ -548,37 +732,32 @@ export const StockTable: React.FC<StockTableProps> = ({
             })}
           </div>
 
-          {/* Right Side: View Toggle (Compact vs Cards vs Table), Sort & Delete Mode Toggle */}
+          {/* Right Side: Notes Enforced Badge, Shortcuts Guide, Sort & View Toggle */}
           <div className="flex items-center gap-1.5 shrink-0 ml-auto flex-wrap sm:flex-nowrap">
-            {/* Quick Delete / Confirm Toggle */}
-            <button
-              id="btn-toggle-delete-mode"
-              type="button"
-              onClick={onToggleConfirmOnDelete}
-              title={
-                confirmOnDelete
-                  ? 'Confirm popup is currently ON. Click to switch to Quick Delete (no popup).'
-                  : 'Quick Delete is ON (No popup, 1-tap delete with Undo). Click to turn on confirmation popup.'
-              }
-              className={`min-h-[38px] px-2.5 py-1.5 inline-flex items-center gap-1.5 text-xs font-semibold rounded-xl border transition-colors cursor-pointer ${
-                confirmOnDelete
-                  ? 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 active:bg-slate-100'
-                  : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100 active:bg-amber-200'
-              }`}
+            {/* Notes Mandatory Status Badge */}
+            <span
+              id="audit-protection-badge"
+              className="min-h-[38px] px-2.5 py-1.5 inline-flex items-center gap-1.5 text-xs font-semibold rounded-xl bg-emerald-50 text-emerald-900 border border-emerald-200/90 select-none shadow-2xs"
+              title="Audit Enforced: Notes are strictly required for adding, updating, selling, and deleting items."
             >
-              {confirmOnDelete ? (
-                <>
-                  <ShieldAlert className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                  <span className="hidden sm:inline">Confirm:</span>
-                  <span className="font-bold">Ask</span>
-                </>
-              ) : (
-                <>
-                  <Zap className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                  <span className="hidden sm:inline">Delete:</span>
-                  <span className="font-bold">Fast</span>
-                </>
-              )}
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span className="hidden sm:inline">Notes:</span>
+              <span className="font-bold text-emerald-800">Required</span>
+            </span>
+
+            {/* Keyboard Shortcuts Helper Button */}
+            <button
+              id="btn-open-shortcuts-guide"
+              type="button"
+              onClick={() => setShowShortcutsModal(true)}
+              className="min-h-[38px] px-2.5 py-1.5 inline-flex items-center gap-1.5 text-xs font-semibold rounded-xl bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 active:bg-slate-100 cursor-pointer shadow-2xs transition-colors"
+              title="View all Keyboard Shortcuts (?)"
+            >
+              <Keyboard className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+              <span className="hidden sm:inline">Shortcuts</span>
+              <kbd className="hidden sm:inline-flex text-[9px] font-mono px-1 py-0.2 rounded bg-slate-100 text-slate-500 border border-slate-200 font-bold">
+                ?
+              </kbd>
             </button>
 
             {/* Sort Toggle for Mobile & Compact */}
@@ -1074,6 +1253,7 @@ export const StockTable: React.FC<StockTableProps> = ({
                 id={`compact-stock-row-${item.id}`}
                 onClick={() => {
                   setActiveIndex(index);
+                  lastReportedItemIdRef.current = item.id;
                   onActiveItemChange?.(item);
                 }}
                 className={`p-3 sm:p-4 hover:bg-slate-50/90 transition-all flex items-center justify-between gap-2.5 sm:gap-4 ${
@@ -1185,7 +1365,7 @@ export const StockTable: React.FC<StockTableProps> = ({
                   </div>
                 </div>
 
-                {/* Right Side: Stock Quantity, Steppers (+ / -), and Quick Edit (Zero horizontal scroll) */}
+                {/* Right Side: Stock Quantity, and Audit-Protected Actions with Shortcuts */}
                 <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                   {/* Stock Quantity */}
                   <div className="text-right">
@@ -1205,30 +1385,7 @@ export const StockTable: React.FC<StockTableProps> = ({
                     </div>
                   </div>
 
-                  {/* Touch Stepper (+ / -) */}
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => onQuickQuantityChange(item, -1)}
-                      disabled={item.quantity <= 0}
-                      className="min-w-[34px] min-h-[34px] rounded-lg bg-slate-100 hover:bg-slate-200 active:bg-slate-300 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center font-bold cursor-pointer"
-                      title="Decrease by 1"
-                      aria-label="Decrease quantity"
-                    >
-                      <Minus className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onQuickQuantityChange(item, 1)}
-                      className="min-w-[34px] min-h-[34px] rounded-lg bg-emerald-100 hover:bg-emerald-200 active:bg-emerald-300 text-emerald-800 flex items-center justify-center font-bold cursor-pointer"
-                      title="Increase by 1"
-                      aria-label="Increase quantity"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  {/* Actions: Quick Sell / Add Stock / View Details / Edit */}
+                  {/* Actions: Quick Sell / Add Stock / Edit / Delete (Notes mandatory on all) */}
                   <div className="flex items-center gap-1">
                     {onOpenQuickSale && (
                       <button
@@ -1243,14 +1400,14 @@ export const StockTable: React.FC<StockTableProps> = ({
                         title={
                           item.quantity <= 0
                             ? `Cannot record sale for "${item.itemName}": stock is already 0`
-                            : `Record sale for "${item.itemName}" (Shortcut: Alt + B)`
+                            : `Record sale for "${item.itemName}" (Shortcut: Alt + S)`
                         }
                       >
                         <Receipt className="w-3.5 h-3.5" />
                         <span className="hidden xs:inline">Sell</span>
                         {item.quantity > 0 && (
                           <kbd className="hidden md:inline-flex text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-800 text-emerald-100 border border-emerald-600/50">
-                            Alt+B
+                            Alt+S
                           </kbd>
                         )}
                       </button>
@@ -1260,20 +1417,32 @@ export const StockTable: React.FC<StockTableProps> = ({
                         type="button"
                         onClick={() => onReceiveStock(item)}
                         className="min-h-[34px] px-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 border border-emerald-200 rounded-lg flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
-                        title={`Add inbound stock to ${item.itemName}`}
+                        title={`Add inbound stock to ${item.itemName} (Shortcut: Alt + R)`}
                       >
                         <Plus className="w-3.5 h-3.5 text-emerald-700" />
                         <span className="hidden xs:inline">Add Stock</span>
+                        <kbd className="hidden md:inline-flex text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          Alt+R
+                        </kbd>
                       </button>
                     )}
                     <button
                       type="button"
                       onClick={() => onEditItem(item)}
-                      className="min-w-[34px] min-h-[34px] text-slate-400 hover:text-slate-700 hover:bg-slate-100 active:bg-slate-200 rounded-lg flex items-center justify-center transition-colors cursor-pointer"
-                      title="Edit item"
+                      className="min-w-[34px] min-h-[34px] text-slate-500 hover:text-slate-800 hover:bg-slate-100 active:bg-slate-200 rounded-lg flex items-center justify-center transition-colors cursor-pointer"
+                      title="Edit item (Shortcut: Alt + E)"
                       aria-label="Edit item"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteItem(item)}
+                      className="min-w-[34px] min-h-[34px] text-rose-500 hover:text-rose-700 hover:bg-rose-50 active:bg-rose-100 rounded-lg flex items-center justify-center transition-colors cursor-pointer"
+                      title="Delete item (Requires note) (Shortcut: Alt + D)"
+                      aria-label="Delete item"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
@@ -1299,6 +1468,7 @@ export const StockTable: React.FC<StockTableProps> = ({
                 id={`stock-card-${item.id}`}
                 onClick={() => {
                   setActiveIndex(index);
+                  lastReportedItemIdRef.current = item.id;
                   onActiveItemChange?.(item);
                 }}
                 className={`bg-white rounded-2xl p-4 border transition-all flex flex-col justify-between gap-3 select-none cursor-pointer ${
@@ -1438,7 +1608,7 @@ export const StockTable: React.FC<StockTableProps> = ({
                   )}
                 </div>
 
-                {/* Card Middle: Quantity Display & 44px+ Quick Touch Stepper */}
+                {/* Card Middle: Quantity Display */}
                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-3">
                   <div className="flex items-baseline gap-1.5">
                     <span
@@ -1460,28 +1630,21 @@ export const StockTable: React.FC<StockTableProps> = ({
                     </div>
                   </div>
 
-                  {/* Touch Stepper Controls (Min 44px x 44px hit targets) */}
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => onQuickQuantityChange(item, -1)}
-                      disabled={item.quantity <= 0}
-                      title="Decrease quantity by 1"
-                      className="min-h-[44px] min-w-[44px] rounded-xl bg-slate-100 hover:bg-slate-200 active:bg-slate-300 active:scale-95 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center font-bold transition-transform cursor-pointer border border-slate-200/80"
-                      aria-label="Decrease quantity"
-                    >
-                      <Minus className="w-5 h-5" />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => onQuickQuantityChange(item, 1)}
-                      title="Increase quantity by 1"
-                      className="min-h-[44px] min-w-[44px] rounded-xl bg-emerald-100 hover:bg-emerald-200 active:bg-emerald-300 active:scale-95 text-emerald-800 flex items-center justify-center font-bold transition-transform cursor-pointer border border-emerald-200"
-                      aria-label="Increase quantity"
-                    >
-                      <Plus className="w-5 h-5" />
-                    </button>
+                  {/* Stock Status Badge */}
+                  <div>
+                    {isOutOfStock ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200">
+                        Out of Stock
+                      </span>
+                    ) : isLowStock ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200">
+                        Low Stock
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200">
+                        In Stock
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -1504,24 +1667,24 @@ export const StockTable: React.FC<StockTableProps> = ({
                 </div>
 
                 {/* Card Bottom: View Trail, Edit & Delete (Min 44px touch targets) */}
-                <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5">
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5 flex-wrap sm:flex-nowrap">
                   <button
                     type="button"
                     onClick={() => onViewItemDetails(item)}
-                    className="min-h-[44px] px-3 py-2 inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100 active:bg-indigo-200 border border-indigo-200 rounded-xl transition-colors cursor-pointer"
+                    className="min-h-[40px] px-2.5 py-1.5 inline-flex items-center gap-1 text-xs font-bold text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100 active:bg-indigo-200 border border-indigo-200 rounded-xl transition-colors cursor-pointer"
                     title="View complete item details & activity trail"
                   >
                     <History className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Trail & Info</span>
+                    <span>Trail</span>
                   </button>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 ml-auto flex-wrap">
                     {onOpenQuickSale && (
                       <button
                         type="button"
                         onClick={() => item.quantity > 0 && onOpenQuickSale(item)}
                         disabled={item.quantity <= 0}
-                        className={`min-h-[44px] px-3 py-2 inline-flex items-center gap-1 text-xs font-bold rounded-xl transition-colors shadow-xs ${
+                        className={`min-h-[40px] px-2.5 py-1.5 inline-flex items-center gap-1 text-xs font-bold rounded-xl transition-colors shadow-xs ${
                           item.quantity <= 0
                             ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
                             : 'text-white bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 cursor-pointer'
@@ -1529,14 +1692,14 @@ export const StockTable: React.FC<StockTableProps> = ({
                         title={
                           item.quantity <= 0
                             ? `Cannot record sale for "${item.itemName}": stock is already 0`
-                            : `Record sale for "${item.itemName}" (Shortcut: Alt + B)`
+                            : `Record sale for "${item.itemName}" (Shortcut: Alt + S)`
                         }
                       >
                         <Receipt className="w-3.5 h-3.5" />
-                        <span>{item.quantity <= 0 ? 'Out of Stock' : 'Sell'}</span>
+                        <span>{item.quantity <= 0 ? 'Out' : 'Sell'}</span>
                         {item.quantity > 0 && (
                           <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-800 text-emerald-100 border border-emerald-600/50">
-                            Alt+B
+                            Alt+S
                           </kbd>
                         )}
                       </button>
@@ -1545,19 +1708,22 @@ export const StockTable: React.FC<StockTableProps> = ({
                       <button
                         type="button"
                         onClick={() => onReceiveStock(item)}
-                        className="min-h-[44px] px-3 py-2 inline-flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 border border-emerald-200 rounded-xl transition-colors cursor-pointer shadow-2xs"
-                        title="Add inbound stock to this product"
+                        className="min-h-[40px] px-2.5 py-1.5 inline-flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 border border-emerald-200 rounded-xl transition-colors cursor-pointer shadow-2xs"
+                        title="Add inbound stock with required note (Shortcut: Alt + R)"
                       >
                         <Plus className="w-3.5 h-3.5 text-emerald-700" />
-                        <span>Add Stock</span>
+                        <span>Add</span>
+                        <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          Alt+R
+                        </kbd>
                       </button>
                     )}
 
                     <button
                       type="button"
                       onClick={() => onEditItem(item)}
-                      className="min-h-[44px] px-3 py-2 inline-flex items-center gap-1 text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 active:bg-slate-200 border border-slate-200 rounded-xl transition-colors cursor-pointer"
-                      title="Edit Item details & threshold"
+                      className="min-h-[40px] px-2.5 py-1.5 inline-flex items-center gap-1 text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 active:bg-slate-200 border border-slate-200 rounded-xl transition-colors cursor-pointer"
+                      title="Edit Item details & threshold (Requires note) (Shortcut: Alt + E)"
                     >
                       <Edit2 className="w-3.5 h-3.5 text-slate-500" />
                       <span>Edit</span>
@@ -1566,12 +1732,8 @@ export const StockTable: React.FC<StockTableProps> = ({
                     <button
                       type="button"
                       onClick={() => onDeleteItem(item)}
-                      title={
-                        confirmOnDelete
-                          ? `Delete "${item.itemName}" (Confirm popup)`
-                          : `Delete "${item.itemName}" directly (Undo available)`
-                      }
-                      className="min-h-[44px] px-3 py-2 inline-flex items-center gap-1 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 border border-rose-200 rounded-xl transition-colors cursor-pointer"
+                      title={`Delete "${item.itemName}" (Requires approval note) (Shortcut: Alt + D)`}
+                      className="min-h-[40px] px-2.5 py-1.5 inline-flex items-center gap-1 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 border border-rose-200 rounded-xl transition-colors cursor-pointer"
                     >
                       <Trash2 className="w-3.5 h-3.5 text-rose-600" />
                       <span>Delete</span>
@@ -1676,6 +1838,7 @@ export const StockTable: React.FC<StockTableProps> = ({
                     id={`stock-row-${item.id}`}
                     onClick={() => {
                       setActiveIndex(index);
+                      lastReportedItemIdRef.current = item.id;
                       onActiveItemChange?.(item);
                     }}
                     className={`hover:bg-slate-50/80 transition-colors cursor-pointer ${
@@ -1754,26 +1917,6 @@ export const StockTable: React.FC<StockTableProps> = ({
                         <span className="text-xs text-slate-400 font-medium">
                           {item.unit}
                         </span>
-
-                        <div className="ml-auto flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => onQuickQuantityChange(item, -1)}
-                            disabled={item.quantity <= 0}
-                            className="min-w-[32px] min-h-[32px] rounded-lg bg-slate-100 hover:bg-slate-200 active:bg-slate-300 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center font-bold cursor-pointer"
-                            aria-label="Decrease quantity"
-                          >
-                            <Minus className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onQuickQuantityChange(item, 1)}
-                            className="min-w-[32px] min-h-[32px] rounded-lg bg-emerald-100 hover:bg-emerald-200 active:bg-emerald-300 text-emerald-800 flex items-center justify-center font-bold cursor-pointer"
-                            aria-label="Increase quantity"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
                       </div>
                     </td>
 
@@ -1894,14 +2037,14 @@ export const StockTable: React.FC<StockTableProps> = ({
                             title={
                               item.quantity <= 0
                                 ? `Cannot record sale for "${item.itemName}": stock is already 0`
-                                : `Quick sale for "${item.itemName}" (Shortcut: Alt + B)`
+                                : `Quick sale for "${item.itemName}" (Shortcut: Alt + S)`
                             }
                           >
                             <Receipt className="w-3.5 h-3.5" />
                             <span>Sell</span>
                             {item.quantity > 0 && (
                               <kbd className="hidden lg:inline-flex text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-800 text-emerald-100 border border-emerald-600/50">
-                                Alt+B
+                                Alt+S
                               </kbd>
                             )}
                           </button>
@@ -1911,10 +2054,13 @@ export const StockTable: React.FC<StockTableProps> = ({
                             type="button"
                             onClick={() => onReceiveStock(item)}
                             className="min-h-[34px] px-2.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
-                            title="Add inbound stock"
+                            title="Add inbound stock with required note (Shortcut: Alt + R)"
                           >
                             <Plus className="w-3.5 h-3.5 text-emerald-700" />
                             <span>Add Stock</span>
+                            <kbd className="hidden lg:inline-flex text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
+                              Alt+R
+                            </kbd>
                           </button>
                         )}
                         <button
@@ -1929,7 +2075,7 @@ export const StockTable: React.FC<StockTableProps> = ({
                           type="button"
                           onClick={() => onEditItem(item)}
                           className="min-w-[34px] min-h-[34px] flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg cursor-pointer"
-                          title="Edit Item"
+                          title="Edit Item details (Requires note) (Shortcut: Alt + E)"
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
@@ -1937,11 +2083,7 @@ export const StockTable: React.FC<StockTableProps> = ({
                           type="button"
                           onClick={() => onDeleteItem(item)}
                           className="min-w-[34px] min-h-[34px] flex items-center justify-center text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg cursor-pointer"
-                          title={
-                            confirmOnDelete
-                              ? `Delete "${item.itemName}" (Confirm popup)`
-                              : `Delete "${item.itemName}" directly (Undo available)`
-                          }
+                          title={`Delete "${item.itemName}" (Requires approval note) (Shortcut: Alt + D)`}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -1952,6 +2094,149 @@ export const StockTable: React.FC<StockTableProps> = ({
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Keyboard Shortcuts Guide Modal */}
+      {showShortcutsModal && (
+        <div
+          id="shortcuts-guide-modal-backdrop"
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setShowShortcutsModal(false)}
+        >
+          <div
+            id="shortcuts-guide-modal-content"
+            className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Keyboard className="w-5 h-5 text-indigo-400" />
+                <div>
+                  <h3 className="font-bold text-base">Keyboard Shortcuts</h3>
+                  <p className="text-xs text-slate-400">Fast, audit-protected inventory controls</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowShortcutsModal(false)}
+                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer transition-colors"
+                aria-label="Close modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+              {/* Audit Mandatory Notice */}
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-2.5">
+                <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                <div className="text-xs text-emerald-900">
+                  <span className="font-bold">Mandatory Audit Rule:</span> Every stock addition, update, sale, or deletion strictly requires an explanation note before approval.
+                </div>
+              </div>
+
+              {/* Shortcuts List */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Inventory Operations
+                </h4>
+                <div className="grid grid-cols-1 gap-2 text-sm">
+                  <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
+                    <span className="font-medium text-slate-700">Add New SKU Item</span>
+                    <div className="flex items-center gap-1 font-mono">
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">Alt</kbd>
+                      <span className="text-slate-400">+</span>
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">N</kbd>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
+                    <span className="font-medium text-slate-700">Quick Sale / Bill Active Item</span>
+                    <div className="flex items-center gap-1 font-mono">
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">Alt</kbd>
+                      <span className="text-slate-400">+</span>
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">S</kbd>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
+                    <span className="font-medium text-slate-700">Add Stock / Inbound Active Item</span>
+                    <div className="flex items-center gap-1 font-mono">
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">Alt</kbd>
+                      <span className="text-slate-400">+</span>
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">R</kbd>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
+                    <span className="font-medium text-slate-700">Edit Active Item Details</span>
+                    <div className="flex items-center gap-1 font-mono">
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">Alt</kbd>
+                      <span className="text-slate-400">+</span>
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">E</kbd>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
+                    <span className="font-medium text-slate-700">Delete Active Item</span>
+                    <div className="flex items-center gap-1 font-mono">
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">Alt</kbd>
+                      <span className="text-slate-400">+</span>
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">D</kbd>
+                    </div>
+                  </div>
+                </div>
+
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 pt-2">
+                  Navigation & Modal Controls
+                </h4>
+                <div className="grid grid-cols-1 gap-2 text-sm">
+                  <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
+                    <span className="font-medium text-slate-700">Focus Search Bar</span>
+                    <div className="flex items-center gap-1 font-mono">
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">Alt</kbd>
+                      <span className="text-slate-400">+</span>
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">K</kbd>
+                      <span className="text-slate-400 font-sans text-xs">or</span>
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">/</kbd>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
+                    <span className="font-medium text-slate-700">Select Next / Previous Item</span>
+                    <div className="flex items-center gap-1 font-mono">
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">↑</kbd>
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">↓</kbd>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
+                    <span className="font-medium text-slate-700">Approve / Submit in Dialogs</span>
+                    <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800 font-mono">Enter</kbd>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
+                    <span className="font-medium text-slate-700">Close / Cancel</span>
+                    <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800 font-mono">Esc</kbd>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowShortcutsModal(false)}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl cursor-pointer"
+              >
+                Got It
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -217,8 +217,13 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
       return;
     }
 
+    if (!restockReason.trim()) {
+      setError('A note or reason is strictly required to approve this stock adjustment.');
+      return;
+    }
+
     if (onAddMoreStock) {
-      onAddMoreStock(selectedItem, effectiveDelta, restockReason.trim() || undefined);
+      onAddMoreStock(selectedItem, effectiveDelta, restockReason.trim());
     }
     onClose();
   };
@@ -246,6 +251,11 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
       return;
     }
 
+    if (!notes.trim()) {
+      setError('A note (e.g. location, supplier, or purpose) is strictly required to approve registering this item.');
+      return;
+    }
+
     const cleanUnit = unit || (units && units[0]?.name ? units[0].name : 'Pieces');
 
     onAdd(
@@ -254,7 +264,7 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
       parsedQty,
       parsedThreshold,
       productionDate.trim() || undefined,
-      notes.trim() || undefined,
+      notes.trim(),
       tags.length > 0 ? tags : undefined
     );
     onClose();
@@ -658,21 +668,30 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
                   </div>
                 </div>
 
-                {/* 5. Reference / Transaction Reason (Optional) */}
+                {/* 5. Reference / Transaction Reason (Required) */}
                 <div>
                   <label
                     htmlFor="restock-reason"
                     className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1"
                   >
-                    Reason / Reference Note (Optional)
+                    <span>Reason / Reference Note</span>
+                    <span className="text-rose-600 font-bold ml-1">* (Required to approve)</span>
                   </label>
                   <input
                     id="restock-reason"
                     type="text"
+                    required
                     placeholder="e.g., Supplier Restock, Inbound Delivery, Transfer, Return"
                     value={restockReason}
-                    onChange={(e) => setRestockReason(e.target.value)}
-                    className="w-full px-3 py-2 text-xs sm:text-sm bg-white border border-slate-300 rounded-xl text-slate-800 focus:outline-hidden focus:ring-1 focus:ring-emerald-600"
+                    onChange={(e) => {
+                      setRestockReason(e.target.value);
+                      if (error) setError(null);
+                    }}
+                    className={`w-full px-3 py-2 text-xs sm:text-sm bg-white border rounded-xl text-slate-800 focus:outline-hidden ${
+                      error && !restockReason.trim()
+                        ? 'border-rose-500 ring-2 ring-rose-500/20'
+                        : 'border-slate-300 focus:ring-1 focus:ring-emerald-600'
+                    }`}
                   />
                   <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                     {['Supplier Restock', 'PO Delivery', 'Customer Return', 'Stock Adjustment'].map(
@@ -680,7 +699,10 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
                         <button
                           key={tag}
                           type="button"
-                          onClick={() => setRestockReason(tag)}
+                          onClick={() => {
+                            setRestockReason(tag);
+                            if (error) setError(null);
+                          }}
                           className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 cursor-pointer"
                         >
                           + {tag}
@@ -688,6 +710,9 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
                       )
                     )}
                   </div>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    A note or reason is strictly required before this stock adjustment can be approved.
+                  </p>
                 </div>
               </>
             )}
@@ -704,15 +729,23 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
               <button
                 type="submit"
                 id="confirm-restock-btn"
-                disabled={!selectedItem || parsedInboundAmount <= 0}
-                className="min-h-[44px] px-5 sm:px-6 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-40 disabled:pointer-events-none rounded-xl shadow-sm flex items-center gap-2 cursor-pointer transition-all"
-                title="Save & confirm stock changes (Shortcut: Alt + S)"
+                disabled={!selectedItem || parsedInboundAmount <= 0 || !restockReason.trim()}
+                className={`min-h-[44px] px-5 sm:px-6 text-sm font-bold rounded-xl shadow-sm flex items-center gap-2 cursor-pointer transition-all ${
+                  !selectedItem || parsedInboundAmount <= 0 || !restockReason.trim()
+                    ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed'
+                    : 'text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800'
+                }`}
+                title={
+                  !restockReason.trim()
+                    ? 'A note is required to approve stock adjustment'
+                    : 'Approve & confirm stock changes (Shortcut: Alt + S or Enter)'
+                }
               >
                 <Plus className="w-4 h-4" />
                 <span>
                   {isDeduction
-                    ? `Confirm Deduct (−${parsedInboundAmount} ${selectedItem?.unit || ''})`
-                    : `Confirm Add More (+${parsedInboundAmount} ${selectedItem?.unit || ''})`}
+                    ? `Approve Deduct (−${parsedInboundAmount} ${selectedItem?.unit || ''})`
+                    : `Approve Add More (+${parsedInboundAmount} ${selectedItem?.unit || ''})`}
                 </span>
                 <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-bold text-emerald-100 bg-emerald-700/80 rounded border border-emerald-500/60">
                   Alt+S
@@ -949,22 +982,34 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
               />
             </div>
 
-            {/* 7. Notes & Location Remarks */}
+            {/* 7. Notes & Location Remarks (Required) */}
             <div>
               <label
                 htmlFor="new-item-notes"
                 className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1"
               >
-                Notes, Supplier & Shelf Location (Optional)
+                <span>Notes, Purpose & Shelf Location</span>
+                <span className="text-rose-600 font-bold ml-1">* (Required to approve)</span>
               </label>
               <textarea
                 id="new-item-notes"
                 rows={2}
-                placeholder="e.g., Shelf B-12, Supplier ABC Ltd, Batch #4092"
+                required
+                placeholder="e.g., Shelf B-12, Supplier ABC Ltd, Initial batch arrival note..."
                 value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="w-full px-3.5 py-2 text-sm bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 text-slate-900 placeholder:text-slate-400"
+                onChange={(e) => {
+                  setNotes(e.target.value);
+                  if (error) setError(null);
+                }}
+                className={`w-full px-3.5 py-2 text-sm bg-white border rounded-xl focus:outline-hidden text-slate-900 placeholder:text-slate-400 ${
+                  error && !notes.trim()
+                    ? 'border-rose-500 ring-2 ring-rose-500/20'
+                    : 'border-slate-300 focus:ring-2 focus:ring-emerald-600'
+                }`}
               />
+              <p className="mt-1 text-[11px] text-slate-400">
+                A note is strictly required to register any new SKU in the inventory ledger.
+              </p>
             </div>
 
             {/* Footer Buttons */}
@@ -979,11 +1024,20 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
               <button
                 type="submit"
                 id="submit-new-item-btn"
-                className="min-h-[44px] px-5 sm:px-6 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl shadow-sm flex items-center gap-2 cursor-pointer transition-all"
-                title="Register product SKU (Shortcut: Alt + S)"
+                disabled={!itemName.trim() || !notes.trim()}
+                className={`min-h-[44px] px-5 sm:px-6 text-sm font-bold rounded-xl shadow-sm flex items-center gap-2 cursor-pointer transition-all ${
+                  !itemName.trim() || !notes.trim()
+                    ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed'
+                    : 'text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800'
+                }`}
+                title={
+                  !notes.trim()
+                    ? 'A note is required to approve registering this product'
+                    : 'Approve & register product SKU (Shortcut: Alt + S or Enter)'
+                }
               >
                 <Plus className="w-4 h-4" />
-                <span>Register Product SKU</span>
+                <span>Approve Product SKU</span>
                 <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-bold text-emerald-100 bg-emerald-700/80 rounded border border-emerald-500/60">
                   Alt+S
                 </kbd>

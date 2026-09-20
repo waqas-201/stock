@@ -35,7 +35,9 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
   const [quantitySold, setQuantitySold] = useState<number>(1);
   const [quantityInputStr, setQuantityInputStr] = useState<string>('1');
   const [note, setNote] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
   const quantityInputRef = useRef<HTMLInputElement>(null);
+  const noteInputRef = useRef<HTMLInputElement>(null);
 
   // Reset and auto-focus when modal opens with an item
   useEffect(() => {
@@ -49,6 +51,7 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
         setQuantityInputStr('1');
       }
       setNote('');
+      setError(null);
 
       // Auto-focus and auto-select quantity input only if item has positive stock
       const timer = setTimeout(() => {
@@ -102,6 +105,7 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
 
   const handleQuantityChange = (valStr: string) => {
     if (isZeroStock) return;
+    setError(null);
     setQuantityInputStr(valStr);
     const parsed = parseInt(valStr, 10);
     if (!isNaN(parsed) && parsed > 0) {
@@ -113,6 +117,7 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
 
   const handleAdjustStep = (delta: number) => {
     if (isZeroStock) return;
+    setError(null);
     const next = Math.max(1, Math.min(currentQty, quantitySold + delta));
     setQuantitySold(next);
     setQuantityInputStr(String(next));
@@ -123,6 +128,7 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
 
   const handlePresetSelect = (presetQty: number) => {
     if (isZeroStock) return;
+    setError(null);
     const finalQty = Math.max(1, Math.min(currentQty, presetQty));
     setQuantitySold(finalQty);
     setQuantityInputStr(String(finalQty));
@@ -136,7 +142,14 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
     if (!item) return;
     if (currentQty <= 0) return; // Strict guard: stock is already 0 -> cannot record sale
     if (quantitySold <= 0 || quantitySold > currentQty) return; // Cannot exceed available stock
-    onConfirmSale(item, quantitySold, note.trim() || undefined);
+    
+    if (!note.trim()) {
+      setError('A sale note or reference is required to approve this sale.');
+      noteInputRef.current?.focus();
+      return;
+    }
+
+    onConfirmSale(item, quantitySold, note.trim());
     onClose();
   };
 
@@ -403,27 +416,46 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
             </div>
           </div>
 
-          {/* Sale Note / Reference - Always visible with zero extra clicks */}
+          {/* Sale Note / Reference - Mandatory for approval */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label
                 htmlFor="quick-sale-note-input"
-                className="text-xs font-bold text-slate-700"
+                className="text-xs font-bold text-slate-700 flex items-center gap-1"
               >
-                Sale Note / Reference
+                <span>Sale Note / Reference</span>
+                <span className="text-rose-600 font-bold">* (Required to approve)</span>
               </label>
               <span className="text-[11px] text-slate-400 font-medium">
-                Optional • Press Tab to reach
+                Mandatory • Tab to reach
               </span>
             </div>
             <input
+              ref={noteInputRef}
               id="quick-sale-note-input"
               type="text"
               value={note}
-              onChange={(e) => setNote(e.target.value)}
+              onChange={(e) => {
+                setNote(e.target.value);
+                if (error) setError(null);
+              }}
               placeholder="e.g., Counter sale, Customer name, Invoice #..."
-              className="w-full px-3 py-2 text-xs sm:text-sm text-slate-900 bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 focus:border-transparent placeholder:text-slate-400 shadow-2xs transition-colors"
+              className={`w-full px-3 py-2 text-xs sm:text-sm text-slate-900 bg-white border rounded-xl focus:outline-hidden shadow-2xs transition-colors ${
+                error
+                  ? 'border-rose-500 ring-2 ring-rose-500/20'
+                  : 'border-slate-300 focus:ring-2 focus:ring-emerald-600 focus:border-transparent placeholder:text-slate-400'
+              }`}
             />
+            {error ? (
+              <p className="mt-1.5 text-xs text-rose-600 font-semibold flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span>{error}</span>
+              </p>
+            ) : (
+              <p className="mt-1 text-[11px] text-slate-400">
+                A note is strictly required to approve this sale and log it in the audit trail.
+              </p>
+            )}
           </div>
         </div>
 
@@ -460,9 +492,9 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
               id="btn-confirm-quick-sale"
               type="button"
               onClick={handleConfirm}
-              disabled={isZeroStock || quantitySold <= 0 || isExceeding}
+              disabled={isZeroStock || quantitySold <= 0 || isExceeding || !note.trim()}
               className={`min-h-[40px] inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl shadow-xs transition-colors ${
-                isZeroStock || quantitySold <= 0 || isExceeding
+                isZeroStock || quantitySold <= 0 || isExceeding || !note.trim()
                   ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed'
                   : 'text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 cursor-pointer'
               }`}
@@ -471,6 +503,8 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
                   ? 'Item is out of stock (0) - cannot record sale'
                   : isExceeding
                   ? 'Quantity exceeds available stock'
+                  : !note.trim()
+                  ? 'A sale note is required to approve'
                   : 'Record sale (Press Enter)'
               }
             >
@@ -480,7 +514,7 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
                 <span>Exceeds Stock ({currentQty})</span>
               ) : (
                 <>
-                  <span>Record Sale</span>
+                  <span>Approve Sale</span>
                   <kbd className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-bold text-emerald-100 bg-emerald-800/80 rounded border border-emerald-500/50">
                     Enter
                   </kbd>

@@ -135,6 +135,11 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
       return;
     }
 
+    if (!notes.trim()) {
+      setError('A note or reason for modification is strictly required to approve updating this item.');
+      return;
+    }
+
     onSave(
       item.id,
       cleanName,
@@ -142,7 +147,7 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
       calculatedQuantity,
       parsedThreshold,
       productionDate.trim() || undefined,
-      notes.trim() || undefined,
+      notes.trim(),
       tags
     );
     onClose();
@@ -578,22 +583,34 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
             />
           </div>
 
-          {/* 7. Notes */}
+          {/* 7. Notes (Required for approval) */}
           <div>
             <label
               htmlFor="edit-item-notes"
               className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1"
             >
-              Notes, Remarks & Shelf Location
+              <span>Update Note / Reason for Modification</span>
+              <span className="text-rose-600 font-bold ml-1">* (Required to approve)</span>
             </label>
             <textarea
               id="edit-item-notes"
               rows={2}
-              placeholder="e.g., Shelf C-4, Supplier contact, Batch notes..."
+              required
+              placeholder="e.g., Stock count audit, changed supplier, updated threshold, Shelf location moved..."
               value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="w-full px-3.5 py-2 text-sm bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 text-slate-900 placeholder:text-slate-400"
+              onChange={(e) => {
+                setNotes(e.target.value);
+                if (error) setError(null);
+              }}
+              className={`w-full px-3.5 py-2 text-sm bg-white border rounded-xl focus:outline-hidden text-slate-900 placeholder:text-slate-400 ${
+                error && !notes.trim()
+                  ? 'border-rose-500 ring-2 ring-rose-500/20'
+                  : 'border-slate-300 focus:ring-2 focus:ring-emerald-600'
+              }`}
             />
+            <p className="mt-1 text-[11px] text-slate-400">
+              An update note is strictly required to approve modifications and preserve audit integrity.
+            </p>
           </div>
 
           {/* Footer Buttons */}
@@ -608,11 +625,20 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
             <button
               type="submit"
               id="save-edit-item-btn"
-              className="min-h-[44px] px-5 sm:px-6 text-sm font-bold text-white bg-slate-900 hover:bg-slate-800 active:bg-slate-950 rounded-xl shadow-sm flex items-center gap-2 cursor-pointer transition-all"
-              title="Save & update item (Shortcut: Alt + S)"
+              disabled={!itemName.trim() || !notes.trim()}
+              className={`min-h-[44px] px-5 sm:px-6 text-sm font-bold rounded-xl shadow-sm flex items-center gap-2 cursor-pointer transition-all ${
+                !itemName.trim() || !notes.trim()
+                  ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed'
+                  : 'text-white bg-slate-900 hover:bg-slate-800 active:bg-slate-950'
+              }`}
+              title={
+                !notes.trim()
+                  ? 'A note is required to approve updates'
+                  : 'Approve & update item (Shortcut: Alt + S or Enter)'
+              }
             >
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>Save & Update ({calculatedQuantity} {unit || item.unit})</span>
+              <span>Approve Update ({calculatedQuantity} {unit || item.unit})</span>
               <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-bold text-slate-300 bg-slate-800 rounded border border-slate-700">
                 Alt+S
               </kbd>

@@ -154,10 +154,16 @@ export function App() {
   const [isQuickSaleModalOpen, setIsQuickSaleModalOpen] = useState(false);
   const [quickSaleTargetItem, setQuickSaleTargetItem] = useState<StockItem | null>(null);
   const [activeKeyboardItem, setActiveKeyboardItem] = useState<StockItem | null>(null);
+  const activeKeyboardItemRef = useRef<StockItem | null>(null);
+
+  const handleActiveKeyboardItemChange = useCallback((item: StockItem | null) => {
+    activeKeyboardItemRef.current = item;
+    setActiveKeyboardItem(item);
+  }, []);
 
   const handleOpenQuickSale = useCallback(
     (item?: StockItem | null) => {
-      const target = item || activeKeyboardItem || (items.length > 0 ? items[0] : null);
+      const target = item || activeKeyboardItemRef.current || activeKeyboardItem || (items.length > 0 ? items[0] : null);
       if (!target) {
         showToast('No stock items available to modify or sell.', 'info');
         return;
@@ -1809,7 +1815,7 @@ export function App() {
           managedTags={tags}
           onOpenTagModal={() => setIsTagModalOpen(true)}
           onOpenQuickSale={handleOpenQuickSale}
-          onActiveItemChange={setActiveKeyboardItem}
+          onActiveItemChange={handleActiveKeyboardItemChange}
         />
       </main>
 
