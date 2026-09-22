@@ -16,11 +16,14 @@ import { GlobalAuditRecord } from '../lib/stockStorage';
 import {
   getAffectedItems,
   exportToExcelAdvanced,
+  isTimestampInRange,
 } from '../lib/excelExport';
 import {
   getLocalDateRange,
   useActiveTimezone,
   formatLocalDate,
+  parseLocalDateBoundary,
+  isDateMatchingToday,
 } from '../lib/dateUtils';
 
 export interface ExportExcelModalProps {
@@ -83,8 +86,8 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
     }
 
     if (selectedPreset === 'custom') {
-      const start = customStartDate ? new Date(`${customStartDate}T00:00:00.000`) : null;
-      const end = customEndDate ? new Date(`${customEndDate}T23:59:59.999`) : null;
+      const start = customStartDate ? parseLocalDateBoundary(customStartDate, false, timezone) : null;
+      const end = customEndDate ? parseLocalDateBoundary(customEndDate, true, timezone) : null;
       return {
         startDate: start,
         endDate: end,
@@ -116,13 +119,12 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
     if (!startDate && !endDate) return safeLogs.length;
     return safeLogs.filter((log) => {
       if (!log.timestamp) return false;
-      const t = new Date(log.timestamp).getTime();
-      if (isNaN(t)) return false;
-      if (startDate && t < startDate.getTime()) return false;
-      if (endDate && t > endDate.getTime()) return false;
-      return true;
+      if (selectedPreset === 'today') {
+        return isDateMatchingToday(log.timestamp, timezone);
+      }
+      return isTimestampInRange(log.timestamp, startDate, endDate, timezone);
     }).length;
-  }, [safeLogs, startDate, endDate]);
+  }, [safeLogs, startDate, endDate, selectedPreset, timezone]);
 
   if (!isOpen) return null;
 

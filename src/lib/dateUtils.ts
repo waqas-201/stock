@@ -287,8 +287,85 @@ export function formatCalendarRelativeTime(
 }
 
 /**
+ * Computes an exact Date representing the boundary of a calendar date in the active timezone.
+ * When isEndOfDay is false: 00:00:00.000 in the target timezone.
+ * When isEndOfDay is true:  23:59:59.999 in the target timezone.
+ */
+export function getTimezoneBoundaryDate(
+  dateStr: string,
+  isEndOfDay: boolean = false,
+  tz?: string
+): Date {
+  const resolved = getResolvedTimezone(tz);
+  const cleanStr = (dateStr || '').trim();
+  if (!cleanStr.includes('-')) {
+    const fallback = new Date();
+    if (isEndOfDay) fallback.setHours(23, 59, 59, 999);
+    else fallback.setHours(0, 0, 0, 0);
+    return fallback;
+  }
+
+  const [yStr, mStr, dStr] = cleanStr.split('-');
+  const y = parseInt(yStr, 10);
+  const m = parseInt(mStr, 10);
+  const d = parseInt(dStr, 10);
+
+  if (isNaN(y) || isNaN(m) || isNaN(d)) {
+    const fallback = new Date();
+    if (isEndOfDay) fallback.setHours(23, 59, 59, 999);
+    else fallback.setHours(0, 0, 0, 0);
+    return fallback;
+  }
+
+  // If auto or system timezone, use local Date constructor
+  if (tz === 'auto' || resolved === Intl.DateTimeFormat().resolvedOptions().timeZone) {
+    const localD = new Date(y, m - 1, d);
+    if (isEndOfDay) localD.setHours(23, 59, 59, 999);
+    else localD.setHours(0, 0, 0, 0);
+    return localD;
+  }
+
+  // For specific timezone: extract GMT offset for this date in resolved timezone
+  try {
+    const testDate = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: resolved,
+      timeZoneName: 'longOffset',
+    }).formatToParts(testDate);
+    const tzPart = parts.find((p) => p.type === 'timeZoneName')?.value;
+
+    let offset = '+00:00';
+    if (tzPart) {
+      const match = tzPart.match(/GMT([+-]\d{1,2})(?::(\d{2}))?/);
+      if (match) {
+        const sign = match[1][0];
+        const hours = Math.abs(parseInt(match[1], 10)).toString().padStart(2, '0');
+        const mins = match[2] || '00';
+        offset = `${sign}${hours}:${mins}`;
+      }
+    }
+
+    const timePart = isEndOfDay ? '23:59:59.999' : '00:00:00.000';
+    const isoString = `${cleanStr}T${timePart}${offset}`;
+    const parsed = new Date(isoString);
+    if (!isNaN(parsed.getTime())) {
+      return parsed;
+    }
+  } catch (err) {
+    console.warn('Error calculating timezone boundary:', err);
+  }
+
+  // Fallback
+  const fallback = new Date(y, m - 1, d);
+  if (isEndOfDay) fallback.setHours(23, 59, 59, 999);
+  else fallback.setHours(0, 0, 0, 0);
+  return fallback;
+}
+
+/**
  * Returns a date range spanning `days` past days up to Today in the active timezone.
  * Both `startStr` and `endStr` are returned as 'YYYY-MM-DD' strings in local time.
+ * `startDate` and `endDate` are exact Date timestamps bounded to 00:00:00.000 and 23:59:59.999 in that timezone.
  */
 export function getLocalDateRange(
   days: number,
@@ -300,30 +377,28 @@ export function getLocalDateRange(
   endStr: string;
 } {
   const resolved = getResolvedTimezone(tz);
-  const now = new Date();
+  
+  // 1. Get today's calendar date string strictly in the user's active timezone
+  const todayStr = getTodayDateString(resolved); // 'YYYY-MM-DD'
+  const [y, m, d] = todayStr.split('-').map(Number);
 
-  // End date is today at 23:59:59.999
-  const end = new Date(now);
-  end.setHours(23, 59, 59, 999);
-
-  // Start date is `days - 1` days ago at 00:00:00.000
-  const start = new Date(now);
-  start.setDate(start.getDate() - (Math.max(1, days) - 1));
-  start.setHours(0, 0, 0, 0);
-
-  const dateFormatter = new Intl.DateTimeFormat('en-CA', {
+  // 2. Compute start calendar date `days - 1` days prior using UTC date math
+  const pastUtc = new Date(Date.UTC(y, m - 1, d - (Math.max(1, days) - 1), 12, 0, 0));
+  const startFormatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: resolved,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   });
+  const startStr = startFormatter.format(pastUtc);
+  const endStr = todayStr;
 
-  const endStr = dateFormatter.format(end);
-  const startStr = dateFormatter.format(start);
+  const startDate = getTimezoneBoundaryDate(startStr, false, resolved);
+  const endDate = getTimezoneBoundaryDate(endStr, true, resolved);
 
   return {
-    startDate: start,
-    endDate: end,
+    startDate,
+    endDate,
     startStr,
     endStr,
   };
@@ -331,33 +406,63 @@ export function getLocalDateRange(
 
 /**
  * Safely parses a 'YYYY-MM-DD' date string into a Date object representing
- * the start of day (00:00:00.000) or end of day (23:59:59.999).
- * Prevents UTC string parsing shifts (which cause dates to show 1 day before).
+ * the start of day (00:00:00.000) or end of day (23:59:59.999) in the active timezone.
  */
 export function parseLocalDateBoundary(
   dateStr: string,
   isEndOfDay: boolean = false,
-  _tz?: string
+  tz?: string
 ): Date {
-  if (!dateStr || !dateStr.includes('-')) {
-    const fallback = new Date();
-    if (isEndOfDay) fallback.setHours(23, 59, 59, 999);
-    else fallback.setHours(0, 0, 0, 0);
-    return fallback;
-  }
+  return getTimezoneBoundaryDate(dateStr, isEndOfDay, tz);
+}
 
-  const parts = dateStr.trim().split('-');
-  const year = parseInt(parts[0], 10);
-  const month = parseInt(parts[1], 10) - 1;
-  const day = parseInt(parts[2], 10);
-
-  const d = new Date(year, month, day);
-  if (isEndOfDay) {
-    d.setHours(23, 59, 59, 999);
-  } else {
-    d.setHours(0, 0, 0, 0);
+/**
+ * Returns a given date formatted strictly as 'YYYY-MM-DD' in the active timezone.
+ */
+export function getLocalDateString(date?: string | Date | null, tz?: string): string {
+  if (!date) return '';
+  try {
+    const d = typeof date === 'string' ? new Date(date) : date;
+    if (isNaN(d.getTime())) return '';
+    const resolved = getResolvedTimezone(tz);
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: resolved,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d);
+  } catch {
+    return '';
   }
-  return d;
+}
+
+/**
+ * Checks if an event timestamp matches "Today" in the specified timezone.
+ * Completely immune to UTC midnight rollover discrepancies.
+ */
+export function isDateMatchingToday(timestamp?: string | null, tz?: string): boolean {
+  if (!timestamp) return false;
+  const eventDate = getLocalDateString(timestamp, tz);
+  const todayDate = getTodayDateString(tz);
+  return Boolean(eventDate && todayDate && eventDate === todayDate);
+}
+
+/**
+ * Checks if an event timestamp falls within [startStr, endStr] in the specified timezone.
+ */
+export function isDateInLocalRange(
+  timestamp?: string | null,
+  startStr?: string | null,
+  endStr?: string | null,
+  tz?: string
+): boolean {
+  if (!timestamp) return false;
+  if (!startStr && !endStr) return true;
+  const eventDate = getLocalDateString(timestamp, tz);
+  if (!eventDate) return false;
+  if (startStr && eventDate < startStr) return false;
+  if (endStr && eventDate > endStr) return false;
+  return true;
 }
 
 /**

@@ -29,6 +29,9 @@ import {
   formatLocalDateTime,
   formatCalendarRelativeTime,
   useActiveTimezone,
+  isDateMatchingToday,
+  isDateInLocalRange,
+  parseLocalDateBoundary,
 } from '../lib/dateUtils';
 
 interface AuditTrailModalProps {
@@ -66,36 +69,38 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
   );
 
   // Compute date range
-  const { startDate, endDate, dateSpanLabel } = useMemo(() => {
+  const { startDate, endDate, dateSpanLabel, startStr, endStr } = useMemo(() => {
     if (datePreset === 'all') {
-      return { startDate: null, endDate: null, dateSpanLabel: 'All Time' };
+      return { startDate: null, endDate: null, dateSpanLabel: 'All Time', startStr: null, endStr: null };
     }
     if (datePreset === 'today') {
       const r = getLocalDateRange(1, timezone);
-      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Today' };
+      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Today', startStr: r.startStr, endStr: r.endStr };
     }
     if (datePreset === '7d') {
       const r = getLocalDateRange(7, timezone);
-      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 7 Days' };
+      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 7 Days', startStr: r.startStr, endStr: r.endStr };
     }
     if (datePreset === '20d') {
       const r = getLocalDateRange(20, timezone);
-      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 20 Days' };
+      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 20 Days', startStr: r.startStr, endStr: r.endStr };
     }
     if (datePreset === '30d') {
       const r = getLocalDateRange(30, timezone);
-      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 30 Days' };
+      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 30 Days', startStr: r.startStr, endStr: r.endStr };
     }
     if (datePreset === 'custom') {
-      const start = customStartDate ? new Date(`${customStartDate}T00:00:00.000`) : null;
-      const end = customEndDate ? new Date(`${customEndDate}T23:59:59.999`) : null;
+      const start = customStartDate ? parseLocalDateBoundary(customStartDate, false, timezone) : null;
+      const end = customEndDate ? parseLocalDateBoundary(customEndDate, true, timezone) : null;
       return {
         startDate: start,
         endDate: end,
         dateSpanLabel: `${customStartDate || 'Start'} to ${customEndDate || 'Now'}`,
+        startStr: customStartDate || null,
+        endStr: customEndDate || null,
       };
     }
-    return { startDate: null, endDate: null, dateSpanLabel: 'All Time' };
+    return { startDate: null, endDate: null, dateSpanLabel: 'All Time', startStr: null, endStr: null };
   }, [datePreset, customStartDate, customEndDate, timezone]);
 
   // Extract unique staff members
@@ -131,7 +136,23 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
       selectedStaff === 'all' ||
       (log.performedBy && log.performedBy.trim() === selectedStaff);
 
-    const matchesDate = isTimestampInRange(log.timestamp, startDate, endDate);
+    const matchesDate = (() => {
+      if (datePreset === 'all') return true;
+      if (!log.timestamp) return false;
+
+      // Primary check for 'today': match calendar date in active timezone
+      if (datePreset === 'today') {
+        return isDateMatchingToday(log.timestamp, timezone);
+      }
+
+      // Check range using local calendar date strings if available
+      if (startStr && endStr) {
+        return isDateInLocalRange(log.timestamp, startStr, endStr, timezone);
+      }
+
+      // Fallback to exact timestamp range check
+      return isTimestampInRange(log.timestamp, startDate, endDate, timezone);
+    })();
 
     return matchesSearch && matchesAction && matchesStaff && matchesDate;
   });

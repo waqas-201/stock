@@ -368,8 +368,33 @@ export function App() {
             return;
           }
         }
-        setItems(firestoreItems);
-        saveStoredStock(firestoreItems);
+        setItems((prevItems) => {
+          const prevMap = new Map<string, StockItem>(prevItems.map((i) => [i.id, i]));
+          const localStoredItems: StockItem[] = loadStoredStock();
+          const localStoredMap = new Map<string, StockItem>(localStoredItems.map((i) => [i.id, i]));
+
+          const merged = firestoreItems.map((fi) => {
+            const existing = prevMap.get(fi.id) || localStoredMap.get(fi.id);
+            return {
+              ...fi,
+              auditTrail:
+                fi.auditTrail && fi.auditTrail.length > 0
+                  ? fi.auditTrail
+                  : existing?.auditTrail || [],
+            };
+          });
+
+          // Retain local items that haven't synced to Firestore yet
+          const firestoreIds = new Set(firestoreItems.map((i) => i.id));
+          prevItems.forEach((pi) => {
+            if (!firestoreIds.has(pi.id)) {
+              merged.push(pi);
+            }
+          });
+
+          saveStoredStock(merged);
+          return merged;
+        });
       },
       (err) => {
         console.error('Firestore items subscription error:', err);
@@ -403,14 +428,47 @@ export function App() {
     return () => unsubscribe();
   }, [currentUser]);
 
-  // Real-time Firestore synchronizer for audit logs
+  // Real-time Firestore synchronizer for audit logs with lossless merging
   useEffect(() => {
     if (!currentUser) return;
     const unsubscribe = subscribeAuditLogs((firestoreLogs) => {
-      if (firestoreLogs.length > 0) {
-        setGlobalLogs(firestoreLogs);
-        saveGlobalAuditLog(firestoreLogs);
-      }
+      setGlobalLogs((prevLogs) => {
+        const logMap = new Map<string, GlobalAuditRecord>();
+
+        // 1. Retain all existing local logs in memory
+        prevLogs.forEach((l) => {
+          if (l.id) logMap.set(l.id, l);
+        });
+
+        // 2. Retain any persisted logs from local storage
+        const localStoredLogs = loadGlobalAuditLog();
+        localStoredLogs.forEach((l) => {
+          if (l.id) logMap.set(l.id, l);
+        });
+
+        // 3. Merge incoming Firestore logs
+        firestoreLogs.forEach((l) => {
+          if (l.id) logMap.set(l.id, l);
+        });
+
+        const combined = Array.from(logMap.values()).sort((a, b) =>
+          b.timestamp.localeCompare(a.timestamp)
+        );
+        saveGlobalAuditLog(combined);
+
+        // 4. Background-sync any local-only logs to Firestore
+        const firestoreIds = new Set(firestoreLogs.map((l) => l.id));
+        const unsyncedLogs = combined.filter((l) => !firestoreIds.has(l.id));
+        if (unsyncedLogs.length > 0 && currentUser?.uid) {
+          unsyncedLogs.slice(0, 15).forEach((log) => {
+            saveAuditLogToFirestore(log, currentUser.uid).catch((err) => {
+              console.warn('Background sync audit log error:', err);
+            });
+          });
+        }
+
+        return combined;
+      });
     });
     return () => unsubscribe();
   }, [currentUser]);

@@ -9,19 +9,24 @@ import {
 } from './dateUtils';
 
 /**
- * Checks if an ISO timestamp string falls within [startDate, endDate] inclusive
+ * Checks if an ISO timestamp string falls within [startDate, endDate] inclusive.
+ * Handles exact millisecond comparisons as well as optional timezone boundary checks.
  */
 export function isTimestampInRange(
   timestamp?: string | null,
   startDate?: Date | null,
-  endDate?: Date | null
+  endDate?: Date | null,
+  tz?: string
 ): boolean {
   if (!timestamp) return false;
   const d = new Date(timestamp);
   const time = d.getTime();
   if (isNaN(time)) return false;
+
+  // Direct millisecond boundary comparison
   if (startDate && time < startDate.getTime()) return false;
   if (endDate && time > endDate.getTime()) return false;
+
   return true;
 }
 
@@ -29,8 +34,8 @@ export function isTimestampInRange(
  * Computes start/end dates for a given number of past days (e.g. 20 days)
  * aligned to the user's active timezone boundaries.
  */
-export function getDateRangeFromDays(days: number): { startDate: Date; endDate: Date } {
-  const range = getLocalDateRange(days);
+export function getDateRangeFromDays(days: number, tz?: string): { startDate: Date; endDate: Date } {
+  const range = getLocalDateRange(days, tz);
   return { startDate: range.startDate, endDate: range.endDate };
 }
 

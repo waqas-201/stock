@@ -30,6 +30,7 @@ import {
   getLocalDateRange,
   parseLocalDateBoundary,
   useActiveTimezone,
+  isDateMatchingToday,
 } from '../lib/dateUtils';
 
 export type TimePeriodPreset = 'today' | '7d' | '20d' | '30d' | '60d' | 'all' | 'custom';
@@ -203,7 +204,8 @@ export const GlobalStockVisualizer: React.FC<GlobalStockVisualizerProps> = ({
       if (isTagActive && !scopedItemIds.has(log.itemId)) return;
       const d = new Date(log.timestamp);
       if (isNaN(d.getTime())) return;
-      if (d >= startDate && d <= endDate) {
+      const inRange = periodPreset === 'today' ? isDateMatchingToday(log.timestamp, timezone) : (d >= startDate && d <= endDate);
+      if (inRange) {
         const deltaVal = log.delta !== undefined ? log.delta : 0;
         let type: 'inbound' | 'outbound' | 'neutral' = 'neutral';
         if (deltaVal > 0 || log.action === 'created' || log.action === 'restocked') {
@@ -242,7 +244,8 @@ export const GlobalStockVisualizer: React.FC<GlobalStockVisualizerProps> = ({
         item.auditTrail.forEach((entry) => {
           const d = new Date(entry.timestamp);
           if (isNaN(d.getTime())) return;
-          if (d >= startDate && d <= endDate) {
+          const inRange = periodPreset === 'today' ? isDateMatchingToday(entry.timestamp, timezone) : (d >= startDate && d <= endDate);
+          if (inRange) {
             const id = entry.id || `item_${item.id}_${entry.timestamp}`;
             if (!seenIds.has(id)) {
               seenIds.add(id);
