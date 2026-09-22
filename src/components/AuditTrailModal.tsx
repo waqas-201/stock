@@ -29,6 +29,7 @@ import {
   getRecentHoursRange,
   formatLocalDateTime,
   formatCalendarRelativeTime,
+  formatAuditTrailElapsedTime,
   useActiveTimezone,
   isDateMatchingToday,
   isDateInLocalRange,
@@ -147,11 +148,46 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
       (log.userEmail && log.userEmail.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (log.details && log.details.toLowerCase().includes(searchTerm.toLowerCase()));
 
+    const isDel = log.action === 'deleted';
+    const isCreate = log.action === 'created';
+    const isRestored = log.action === 'restored';
+    const isQty = log.action === 'quantity_changed';
+    const delta = log.delta;
+    const summaryLower = (log.summary || '').toLowerCase();
+    const detailsLower = (log.details || '').toLowerCase();
+
+    const isSoldOrOutbound =
+      !isDel &&
+      ((typeof delta === 'number' && delta < 0) ||
+        summaryLower.includes('sale') ||
+        summaryLower.includes('sold') ||
+        summaryLower.includes('outbound') ||
+        summaryLower.includes('dispatch') ||
+        summaryLower.includes('issued') ||
+        summaryLower.includes('deduct') ||
+        detailsLower.includes('sold') ||
+        detailsLower.includes('sale'));
+
+    const isReceivedOrInbound =
+      !isDel &&
+      !isSoldOrOutbound &&
+      (isCreate ||
+        isRestored ||
+        (typeof delta === 'number' && delta > 0) ||
+        summaryLower.includes('inbound') ||
+        summaryLower.includes('received') ||
+        summaryLower.includes('restock') ||
+        summaryLower.includes('added') ||
+        detailsLower.includes('inbound') ||
+        detailsLower.includes('received'));
+
     const matchesAction =
       filterAction === 'all' ||
-      (filterAction === 'deleted' && log.action === 'deleted') ||
-      (filterAction === 'created' && log.action === 'created') ||
-      (filterAction === 'quantity' && log.action === 'quantity_changed') ||
+      (filterAction === 'sold' && isSoldOrOutbound) ||
+      (filterAction === 'received' && isReceivedOrInbound) ||
+      (filterAction === 'deleted' && isDel) ||
+      (filterAction === 'created' && isCreate) ||
+      (filterAction === 'quantity' && isQty) ||
       (filterAction === 'edited' && log.action === 'edited');
 
     const matchesStaff =
@@ -283,7 +319,8 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                 </span>
                 {[
                   { id: 'all', label: 'All Events' },
-                  { id: 'created', label: 'Added' },
+                  { id: 'sold', label: 'What We Sold' },
+                  { id: 'received', label: 'What We Received' },
                   { id: 'quantity', label: 'Stock Changes' },
                   { id: 'edited', label: 'Edits' },
                   { id: 'deleted', label: 'Removed' },
@@ -292,12 +329,18 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                     key={tab.id}
                     type="button"
                     onClick={() => setFilterAction(tab.id)}
-                    className={`min-h-[28px] px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-colors cursor-pointer ${
+                    className={`min-h-[28px] px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
                       filterAction === tab.id
                         ? 'bg-indigo-600 text-white shadow-2xs'
                         : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
                     }`}
                   >
+                    {tab.id === 'sold' && (
+                      <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
+                    )}
+                    {tab.id === 'received' && (
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+                    )}
                     {tab.label}
                   </button>
                 ))}
@@ -416,6 +459,26 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
           </div>
         </div>
 
+        {/* Differential Color Guide Legend */}
+        <div className="px-5 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3 text-xs shrink-0 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-slate-500 font-bold uppercase tracking-wider text-[10px]">
+              Visual Guide:
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg font-bold text-[11px] bg-amber-100/90 text-amber-950 border border-amber-300 shadow-2xs">
+              <span className="w-2 h-2 rounded-full bg-amber-500" />
+              What We Sold (Outbound / Sales)
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg font-bold text-[11px] bg-emerald-100/90 text-emerald-950 border border-emerald-300 shadow-2xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              What We Received (Inbound / Restock)
+            </span>
+          </div>
+          <span className="text-[11px] text-slate-500 font-medium">
+            Time elapsed in exact hours
+          </span>
+        </div>
+
         {/* Scrollable Trail Log */}
         <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-3">
           {filteredLogs.length === 0 ? (
@@ -438,45 +501,70 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
               const isEdit = log.action === 'edited';
               const isRestored = log.action === 'restored';
               const delta = log.delta;
+              const summaryLower = (log.summary || '').toLowerCase();
+              const detailsLower = (log.details || '').toLowerCase();
+
+              // Explicit check for what was sold / outbound stock reduction
+              const isSoldOrOutbound =
+                !isDel &&
+                ((typeof delta === 'number' && delta < 0) ||
+                  summaryLower.includes('sale') ||
+                  summaryLower.includes('sold') ||
+                  summaryLower.includes('outbound') ||
+                  summaryLower.includes('dispatch') ||
+                  summaryLower.includes('issued') ||
+                  summaryLower.includes('deduct') ||
+                  detailsLower.includes('sold') ||
+                  detailsLower.includes('sale'));
+
+              // Explicit check for what was received / restocked / inbound addition
+              const isReceivedOrInbound =
+                !isDel &&
+                !isSoldOrOutbound &&
+                (isCreate ||
+                  isRestored ||
+                  (typeof delta === 'number' && delta > 0) ||
+                  summaryLower.includes('inbound') ||
+                  summaryLower.includes('received') ||
+                  summaryLower.includes('restock') ||
+                  summaryLower.includes('added') ||
+                  detailsLower.includes('inbound') ||
+                  detailsLower.includes('received'));
 
               return (
                 <div
                   key={log.id}
-                  className={`p-3 sm:p-4 rounded-xl border transition-all ${
+                  className={`p-3.5 sm:p-4 rounded-xl border transition-all ${
                     isDel
-                      ? 'bg-rose-50/40 border-rose-200'
-                      : isCreate
-                      ? 'bg-emerald-50/40 border-emerald-200'
+                      ? 'bg-rose-50/60 border-rose-200/90 hover:border-rose-300 shadow-2xs'
+                      : isSoldOrOutbound
+                      ? 'bg-amber-50/70 border-amber-300/80 hover:bg-amber-50/90 hover:border-amber-400 shadow-2xs'
+                      : isReceivedOrInbound
+                      ? 'bg-emerald-50/60 border-emerald-300/80 hover:bg-emerald-50/80 hover:border-emerald-400 shadow-2xs'
                       : 'bg-white border-slate-200 hover:border-slate-300 shadow-2xs'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-2.5 min-w-0">
                       <div
-                        className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5 border ${
                           isDel
-                            ? 'bg-rose-100 text-rose-700'
-                            : isCreate
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : isRestored
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : delta && delta > 0
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : delta && delta < 0
-                            ? 'bg-amber-100 text-amber-700'
-                            : 'bg-indigo-100 text-indigo-700'
+                            ? 'bg-rose-100 text-rose-700 border-rose-200'
+                            : isSoldOrOutbound
+                            ? 'bg-amber-100 text-amber-800 border-amber-300'
+                            : isReceivedOrInbound
+                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                            : 'bg-indigo-100 text-indigo-700 border-indigo-200'
                         }`}
                       >
                         {isDel ? (
                           <Trash2 className="w-4 h-4" />
-                        ) : isCreate ? (
-                          <Plus className="w-4 h-4" />
+                        ) : isSoldOrOutbound ? (
+                          <ArrowDownRight className="w-4 h-4" />
+                        ) : isReceivedOrInbound ? (
+                          <ArrowUpRight className="w-4 h-4" />
                         ) : isRestored ? (
                           <RotateCcw className="w-4 h-4" />
-                        ) : delta && delta > 0 ? (
-                          <ArrowUpRight className="w-4 h-4" />
-                        ) : delta && delta < 0 ? (
-                          <ArrowDownRight className="w-4 h-4" />
                         ) : (
                           <Edit2 className="w-4 h-4" />
                         )}
@@ -491,11 +579,25 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                                 onClose();
                                 onSelectItem(log.itemId);
                               }}
-                              className="text-xs sm:text-sm font-bold text-emerald-800 hover:text-emerald-900 hover:underline cursor-pointer text-left flex items-center gap-1"
+                              className={`text-xs sm:text-sm font-bold hover:underline cursor-pointer text-left flex items-center gap-1 ${
+                                isSoldOrOutbound
+                                  ? 'text-amber-950 hover:text-amber-900'
+                                  : isReceivedOrInbound
+                                  ? 'text-emerald-950 hover:text-emerald-900'
+                                  : 'text-indigo-900 hover:text-indigo-950'
+                              }`}
                               title={`View comprehensive trail for "${log.itemName}"`}
                             >
                               <span>{log.itemName}</span>
-                              <span className="text-[10px] text-emerald-600 font-semibold">
+                              <span
+                                className={`text-[10px] font-semibold ${
+                                  isSoldOrOutbound
+                                    ? 'text-amber-700'
+                                    : isReceivedOrInbound
+                                    ? 'text-emerald-700'
+                                    : 'text-indigo-600'
+                                }`}
+                              >
                                 (View Trail ↗)
                               </span>
                             </button>
@@ -505,22 +607,28 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                             </span>
                           )}
                           <span
-                            className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md ${
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
                               isDel
-                                ? 'bg-rose-100 text-rose-800'
-                                : isCreate
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : isRestored
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-slate-100 text-slate-700'
+                                ? 'bg-rose-100 text-rose-800 border-rose-300'
+                                : isSoldOrOutbound
+                                ? 'bg-amber-100 text-amber-900 border-amber-300 font-extrabold'
+                                : isReceivedOrInbound
+                                ? 'bg-emerald-100 text-emerald-900 border-emerald-300 font-extrabold'
+                                : 'bg-slate-100 text-slate-700 border-slate-200'
                             }`}
                           >
                             {isDel
                               ? 'REMOVED'
+                              : isSoldOrOutbound
+                              ? summaryLower.includes('sale') || summaryLower.includes('sold')
+                                ? 'SOLD / OUTBOUND'
+                                : 'OUTBOUND DISPATCH'
                               : isCreate
-                              ? 'ADDED'
+                              ? 'ITEM ADDED'
                               : isRestored
                               ? 'RESTORED'
+                              : isReceivedOrInbound
+                              ? 'RECEIVED / RESTOCK'
                               : isQty
                               ? 'STOCK ADJUST'
                               : 'EDITED'}
@@ -529,9 +637,32 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
 
                         {/* Who did this modification attribution banner */}
                         <div className="mt-1 flex items-center gap-2 flex-wrap">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-900 border border-emerald-200/80">
-                            <User className="w-3 h-3 text-emerald-600 shrink-0" />
-                            <span>Staff: <strong className="text-emerald-950 font-extrabold">{log.performedBy || 'Staff Member'}</strong></span>
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold border ${
+                              isSoldOrOutbound
+                                ? 'bg-amber-100/70 text-amber-950 border-amber-200'
+                                : isReceivedOrInbound
+                                ? 'bg-emerald-100/70 text-emerald-950 border-emerald-200'
+                                : isDel
+                                ? 'bg-rose-100/70 text-rose-950 border-rose-200'
+                                : 'bg-slate-100 text-slate-800 border-slate-200'
+                            }`}
+                          >
+                            <User
+                              className={`w-3 h-3 shrink-0 ${
+                                isSoldOrOutbound
+                                  ? 'text-amber-700'
+                                  : isReceivedOrInbound
+                                  ? 'text-emerald-700'
+                                  : 'text-slate-500'
+                              }`}
+                            />
+                            <span>
+                              Staff:{' '}
+                              <strong className="font-extrabold">
+                                {log.performedBy || 'Staff Member'}
+                              </strong>
+                            </span>
                           </span>
                           {log.userEmail && (
                             <span className="text-[10px] text-slate-400">
@@ -540,12 +671,28 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                           )}
                         </div>
 
-                        <p className="text-xs text-slate-700 font-medium mt-1">
+                        <p
+                          className={`text-xs font-semibold mt-1 ${
+                            isSoldOrOutbound
+                              ? 'text-amber-950'
+                              : isReceivedOrInbound
+                              ? 'text-emerald-950'
+                              : 'text-slate-700'
+                          }`}
+                        >
                           {log.summary}
                         </p>
 
                         {log.details && (
-                          <p className="text-xs text-slate-500 mt-0.5">
+                          <p
+                            className={`text-xs mt-0.5 ${
+                              isSoldOrOutbound
+                                ? 'text-amber-800/90'
+                                : isReceivedOrInbound
+                                ? 'text-emerald-800/90'
+                                : 'text-slate-500'
+                            }`}
+                          >
                             {log.details}
                           </p>
                         )}
@@ -553,15 +700,15 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                         {log.previousQuantity !== undefined &&
                           log.newQuantity !== undefined && (
                             <div className="mt-1.5 flex items-center gap-2">
-                              <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                              <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded bg-white/80 border border-slate-200 text-slate-700">
                                 {log.previousQuantity} → {log.newQuantity} {log.unit}
                               </span>
                               {delta !== undefined && delta !== 0 && (
                                 <span
-                                  className={`text-[11px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                                  className={`text-[11px] font-mono font-bold px-1.5 py-0.5 rounded border ${
                                     delta > 0
-                                      ? 'bg-emerald-100 text-emerald-800'
-                                      : 'bg-amber-100 text-amber-800'
+                                      ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                      : 'bg-amber-100 text-amber-900 border-amber-300'
                                   }`}
                                 >
                                   {delta > 0 ? `+${delta}` : delta} {log.unit}
@@ -573,10 +720,18 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                     </div>
 
                     <div className="text-right whitespace-nowrap shrink-0">
-                      <span className="text-xs font-bold text-slate-700 block">
-                        {formatCalendarRelativeTime(log.timestamp, timezone)}
+                      <span
+                        className={`text-xs font-bold block ${
+                          isSoldOrOutbound
+                            ? 'text-amber-950'
+                            : isReceivedOrInbound
+                            ? 'text-emerald-950'
+                            : 'text-slate-700'
+                        }`}
+                      >
+                        {formatAuditTrailElapsedTime(log.timestamp)}
                       </span>
-                      <span className="text-[10px] text-slate-400 block font-mono">
+                      <span className="text-[10px] text-slate-500 block font-mono">
                         {formatDateTime(log.timestamp)}
                       </span>
                     </div>

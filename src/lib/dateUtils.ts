@@ -287,6 +287,44 @@ export function formatCalendarRelativeTime(
 }
 
 /**
+ * Audit Trail Elapsed Time Formatter:
+ * Computes exact hours elapsed (or "minutes ago" if under 1 hour).
+ * Never formats as "yesterday", "X days ago", or calendar dates,
+ * preventing redundancy with the explicit timestamp shown directly below it in audit trail boxes.
+ *
+ * Output examples:
+ * - Event within the last hour: "minutes ago"
+ * - Event 1 hr ago: "1 hour ago"
+ * - Event 2 hrs ago: "2 hours ago"
+ * - Event 10 hrs ago: "10 hours ago"
+ * - Event 50 hrs ago: "50 hours ago"
+ * - Event 100 hrs ago: "100 hours ago"
+ * - Event 1000 hrs ago: "1000 hours ago"
+ */
+export function formatAuditTrailElapsedTime(
+  dateInput: Date | string | number | undefined | null
+): string {
+  if (!dateInput) return '';
+  try {
+    const d = dateInput instanceof Date ? dateInput : new Date(dateInput);
+    if (isNaN(d.getTime())) return '';
+
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+
+    // If less than 1 hour (including very recent actions)
+    if (diffMs < 3600000) {
+      return 'minutes ago';
+    }
+
+    const diffHours = Math.floor(diffMs / 3600000);
+    return `${diffHours} ${diffHours === 1 ? 'hour' : 'hours'} ago`;
+  } catch {
+    return '';
+  }
+}
+
+/**
  * Computes an exact Date representing the boundary of a calendar date in the active timezone.
  * When isEndOfDay is false: 00:00:00.000 in the target timezone.
  * When isEndOfDay is true:  23:59:59.999 in the target timezone.

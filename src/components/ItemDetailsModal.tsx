@@ -37,6 +37,7 @@ import {
   formatLocalDate,
   formatLocalDateTime,
   formatCalendarRelativeTime,
+  formatAuditTrailElapsedTime,
   getTodayDateString,
   useActiveTimezone,
 } from '../lib/dateUtils';
@@ -112,7 +113,7 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
   };
 
   const formatRelativeTime = (dateStr?: string) => {
-    return formatCalendarRelativeTime(dateStr, timezone);
+    return formatAuditTrailElapsedTime(dateStr);
   };
 
   // 1. Comprehensive Trail Synthesis & Deduplication
@@ -950,6 +951,26 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
                   </span>
                 </div>
 
+                {/* Differential Color Guide Legend */}
+                <div className="px-3.5 py-2 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between gap-2 text-xs shrink-0 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-slate-500 font-bold uppercase tracking-wider text-[10px]">
+                      Visual Guide:
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md font-bold text-[11px] bg-amber-100/90 text-amber-950 border border-amber-300 shadow-2xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                      What We Sold (Outbound / Sales)
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md font-bold text-[11px] bg-emerald-100/90 text-emerald-950 border border-emerald-300 shadow-2xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      What We Received (Inbound / Restock)
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400">
+                    Exact hours elapsed
+                  </span>
+                </div>
+
                 {displayedTrail.length === 0 ? (
                   <div className="text-center py-10 px-4 bg-slate-50 border border-slate-200 rounded-2xl">
                     <History className="w-8 h-8 text-slate-300 mx-auto mb-2" />
@@ -981,39 +1002,62 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
                       const balance = entry.balanceAfter;
                       const wasLowStock = balance !== undefined && balance <= threshold && balance > 0;
                       const wasDepleted = balance !== undefined && balance <= 0;
+                      const summaryLower = (entry.summary || '').toLowerCase();
+                      const detailsLower = (entry.details || '').toLowerCase();
+
+                      // What was sold / outbound
+                      const isSoldOrOutbound =
+                        !isDel &&
+                        ((typeof delta === 'number' && delta < 0) ||
+                          summaryLower.includes('sale') ||
+                          summaryLower.includes('sold') ||
+                          summaryLower.includes('outbound') ||
+                          summaryLower.includes('dispatch') ||
+                          summaryLower.includes('issued') ||
+                          summaryLower.includes('deduct') ||
+                          detailsLower.includes('sold') ||
+                          detailsLower.includes('sale'));
+
+                      // What was received / restocked
+                      const isReceivedOrInbound =
+                        !isDel &&
+                        !isSoldOrOutbound &&
+                        (isCreate ||
+                          isRestored ||
+                          (typeof delta === 'number' && delta > 0) ||
+                          summaryLower.includes('inbound') ||
+                          summaryLower.includes('received') ||
+                          summaryLower.includes('restock') ||
+                          summaryLower.includes('added') ||
+                          detailsLower.includes('inbound') ||
+                          detailsLower.includes('received'));
 
                       return (
                         <div key={entry.id || idx} className="relative group">
                           {/* Timeline node badge icon */}
                           <div
                             className={`absolute -left-[31px] top-1.5 w-6 h-6 rounded-full border-2 border-white flex items-center justify-center shadow-2xs ${
-                              isCreate
-                                ? 'bg-emerald-600 text-white'
+                              isDel
+                                ? 'bg-rose-500 text-white'
+                                : isSoldOrOutbound
+                                ? 'bg-amber-500 text-white'
+                                : isReceivedOrInbound
+                                ? 'bg-emerald-500 text-white'
                                 : isNote
                                 ? 'bg-violet-600 text-white'
-                                : isDel
-                                ? 'bg-rose-500 text-white'
-                                : isRestored
-                                ? 'bg-teal-600 text-white'
-                                : delta && delta > 0
-                                ? 'bg-emerald-500 text-white'
-                                : delta && delta < 0
-                                ? 'bg-amber-500 text-white'
                                 : isEdit
                                 ? 'bg-indigo-500 text-white'
                                 : 'bg-slate-400 text-white'
                             }`}
                           >
-                            {isCreate ? (
-                              <Sparkles className="w-3 h-3" />
+                            {isDel ? (
+                              <X className="w-3 h-3" />
+                            ) : isSoldOrOutbound ? (
+                              <ArrowDownRight className="w-3 h-3" />
+                            ) : isReceivedOrInbound ? (
+                              isCreate ? <Sparkles className="w-3 h-3" /> : <ArrowUpRight className="w-3 h-3" />
                             ) : isNote ? (
                               <ClipboardCheck className="w-3 h-3" />
-                            ) : isDel ? (
-                              <X className="w-3 h-3" />
-                            ) : delta && delta > 0 ? (
-                              <ArrowUpRight className="w-3 h-3" />
-                            ) : delta && delta < 0 ? (
-                              <ArrowDownRight className="w-3 h-3" />
                             ) : (
                               <Edit2 className="w-3 h-3" />
                             )}
@@ -1024,14 +1068,24 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
                             id={`trail-event-${entry.id}`}
                             className={`p-3.5 rounded-2xl border transition-all ${
                               selectedEventId === entry.id
-                                ? 'bg-emerald-50/50 border-emerald-400 ring-2 ring-emerald-500/20 shadow-xs'
+                                ? isSoldOrOutbound
+                                  ? 'bg-amber-50/90 border-amber-400 ring-2 ring-amber-500/30 shadow-xs'
+                                  : 'bg-emerald-50/90 border-emerald-400 ring-2 ring-emerald-500/30 shadow-xs'
+                                : isSoldOrOutbound
+                                ? 'bg-amber-50/70 border-amber-300/80 hover:bg-amber-50/90 hover:border-amber-400 shadow-2xs'
+                                : isReceivedOrInbound
+                                ? 'bg-emerald-50/60 border-emerald-300/80 hover:bg-emerald-50/80 hover:border-emerald-400 shadow-2xs'
+                                : isNote
+                                ? 'bg-violet-50/40 border-violet-200/80 hover:border-violet-300 shadow-2xs'
                                 : 'bg-white border-slate-200/90 shadow-2xs hover:border-slate-300'
                             }`}
                           >
                             {/* Card Top Row: Summary & Timestamps */}
                             <div className="flex items-start justify-between gap-2 flex-wrap sm:flex-nowrap">
                               <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-xs sm:text-sm font-bold text-slate-900 leading-tight">
+                                <span className={`text-xs sm:text-sm font-bold leading-tight ${
+                                  isSoldOrOutbound ? 'text-amber-950' : isReceivedOrInbound ? 'text-emerald-950' : 'text-slate-900'
+                                }`}>
                                   {entry.summary}
                                 </span>
                                 {selectedEventId === entry.id && (
@@ -1043,27 +1097,31 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
                                 {/* Category Badge */}
                                 <span
                                   className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
-                                    isCreate
-                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                    isDel
+                                      ? 'bg-rose-100 text-rose-800 border-rose-300'
+                                      : isSoldOrOutbound
+                                      ? 'bg-amber-100 text-amber-900 border-amber-300 font-extrabold'
+                                      : isReceivedOrInbound
+                                      ? 'bg-emerald-100 text-emerald-900 border-emerald-300 font-extrabold'
                                       : isNote
                                       ? 'bg-violet-50 text-violet-800 border-violet-200'
-                                      : delta && delta > 0
-                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                      : delta && delta < 0
-                                      ? 'bg-amber-50 text-amber-800 border-amber-200'
                                       : isEdit
                                       ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
                                       : 'bg-slate-50 text-slate-700 border-slate-200'
                                   }`}
                                 >
-                                  {isCreate
+                                  {isDel
+                                    ? 'REMOVED'
+                                    : isSoldOrOutbound
+                                    ? summaryLower.includes('sale') || summaryLower.includes('sold')
+                                      ? 'SOLD / OUTBOUND'
+                                      : 'OUTBOUND DISPATCH'
+                                    : isCreate
                                     ? 'GENESIS ENTRY'
+                                    : isReceivedOrInbound
+                                    ? 'INBOUND RESTOCK'
                                     : isNote
                                     ? 'AUDIT NOTE'
-                                    : delta && delta > 0
-                                    ? 'INBOUND RESTOCK'
-                                    : delta && delta < 0
-                                    ? 'OUTBOUND DISPATCH'
                                     : isEdit
                                     ? 'SPECIFICATION EDIT'
                                     : 'LOG ENTRY'}
@@ -1072,10 +1130,12 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
 
                               {/* Relative & Absolute Timestamp */}
                               <div className="text-right shrink-0">
-                                <span className="text-xs font-bold text-slate-700 block">
+                                <span className={`text-xs font-bold block ${
+                                  isSoldOrOutbound ? 'text-amber-950' : isReceivedOrInbound ? 'text-emerald-950' : 'text-slate-700'
+                                }`}>
                                   {formatRelativeTime(entry.timestamp)}
                                 </span>
-                                <span className="text-[10px] text-slate-400 block">
+                                <span className="text-[10px] text-slate-500 block font-mono">
                                   {formatDateTime(entry.timestamp)}
                                 </span>
                               </div>
@@ -1083,17 +1143,23 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
 
                             {/* Details text */}
                             {entry.details && (
-                              <p className="text-xs text-slate-600 mt-2 bg-slate-50/70 p-2.5 rounded-xl border border-slate-100 leading-relaxed">
+                              <p className={`text-xs mt-2 p-2.5 rounded-xl border leading-relaxed ${
+                                isSoldOrOutbound
+                                  ? 'bg-amber-100/50 border-amber-200/80 text-amber-950 font-medium'
+                                  : isReceivedOrInbound
+                                  ? 'bg-emerald-100/50 border-emerald-200/80 text-emerald-950 font-medium'
+                                  : 'bg-slate-50/70 border-slate-100 text-slate-600'
+                              }`}>
                                 {entry.details}
                               </p>
                             )}
 
                             {/* Stock Movement & Running Balance Ribbon */}
-                            <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
+                            <div className="mt-2.5 pt-2 border-t border-slate-200/60 flex items-center justify-between gap-2 flex-wrap">
                               {/* Stock balance pill */}
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 {balance !== undefined && (
-                                  <span className="inline-flex items-center gap-1 text-xs font-mono font-bold px-2 py-0.5 rounded-lg bg-slate-100 text-slate-800 border border-slate-200">
+                                  <span className="inline-flex items-center gap-1 text-xs font-mono font-bold px-2 py-0.5 rounded-lg bg-white/90 text-slate-800 border border-slate-200 shadow-2xs">
                                     <span>Balance:</span>
                                     <strong className="text-slate-900">{balance}</strong>
                                     <span className="text-[10px] text-slate-500">{item.unit}</span>
@@ -1105,7 +1171,7 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
                                     className={`inline-flex items-center gap-0.5 text-xs font-mono font-bold px-2 py-0.5 rounded-lg border ${
                                       delta > 0
                                         ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                                        : 'bg-amber-100 text-amber-800 border-amber-300'
+                                        : 'bg-amber-100 text-amber-900 border-amber-300'
                                     }`}
                                   >
                                     {delta > 0 ? `+${delta}` : delta} {item.unit}
@@ -1127,8 +1193,24 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
                               {/* Performer badge */}
                               <div className="flex items-center gap-1.5 text-xs text-slate-500">
                                 <span className="text-[10px] text-slate-400 font-medium">By:</span>
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-100 text-slate-800 font-semibold border border-slate-200/80">
-                                  <User className="w-3 h-3 text-emerald-600" />
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg font-semibold border ${
+                                    isSoldOrOutbound
+                                      ? 'bg-amber-100/70 text-amber-950 border-amber-200'
+                                      : isReceivedOrInbound
+                                      ? 'bg-emerald-100/70 text-emerald-950 border-emerald-200'
+                                      : 'bg-slate-100 text-slate-800 border-slate-200/80'
+                                  }`}
+                                >
+                                  <User
+                                    className={`w-3 h-3 ${
+                                      isSoldOrOutbound
+                                        ? 'text-amber-700'
+                                        : isReceivedOrInbound
+                                        ? 'text-emerald-600'
+                                        : 'text-slate-500'
+                                    }`}
+                                  />
                                   <span>{entry.performedBy || 'Staff Member'}</span>
                                 </span>
                                 {entry.userEmail && (

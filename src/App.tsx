@@ -131,6 +131,9 @@ export function App() {
     return getUnifiedAuditLogs(globalLogs, items);
   }, [globalLogs, items]);
 
+  // Track synced audit logs to prevent redundant Firestore writes
+  const syncedAuditLogIdsRef = useRef<Set<string>>(new Set());
+
   // Self-heal audit records: automatically sync any missing item activities into globalLogs and Firestore
   useEffect(() => {
     const unified = getUnifiedAuditLogs(globalLogs, items);
@@ -139,9 +142,12 @@ export function App() {
       saveGlobalAuditLog(unified);
       if (currentUser?.uid) {
         const existingIds = new Set(globalLogs.map((l) => l.id));
-        const missing = unified.filter((l) => !existingIds.has(l.id));
+        const missing = unified.filter(
+          (l) => !existingIds.has(l.id) && !syncedAuditLogIdsRef.current.has(l.id)
+        );
         if (missing.length > 0) {
-          missing.slice(0, 25).forEach((log) => {
+          missing.slice(0, 15).forEach((log) => {
+            syncedAuditLogIdsRef.current.add(log.id);
             saveAuditLogToFirestore(log, currentUser.uid).catch((err) => {
               console.warn('Sync missing item audit to Firestore:', err);
             });
@@ -149,7 +155,7 @@ export function App() {
         }
       }
     }
-  }, [items, globalLogs, currentUser]);
+  }, [items, globalLogs.length, currentUser]);
 
   // Active Operator / Staff Profile for modification attribution & audit trail
   const [operator, setOperator] = useState<OperatorProfile>(() =>
@@ -486,19 +492,27 @@ export function App() {
         const fullyUnified = getUnifiedAuditLogs(combined, localItems);
         saveGlobalAuditLog(fullyUnified);
 
-        // 4. Background-sync any local-only logs to Firestore
+        return fullyUnified;
+      });
+
+      // Background-sync any local-only logs to Firestore cleanly outside state updater
+      if (currentUser?.uid) {
         const firestoreIds = new Set(firestoreLogs.map((l) => l.id));
-        const unsyncedLogs = fullyUnified.filter((l) => !firestoreIds.has(l.id));
-        if (unsyncedLogs.length > 0 && currentUser?.uid) {
-          unsyncedLogs.slice(0, 20).forEach((log) => {
+        firestoreLogs.forEach((l) => syncedAuditLogIdsRef.current.add(l.id));
+
+        const localLogs = loadGlobalAuditLog();
+        const unsyncedLogs = localLogs.filter(
+          (l) => !firestoreIds.has(l.id) && !syncedAuditLogIdsRef.current.has(l.id)
+        );
+        if (unsyncedLogs.length > 0) {
+          unsyncedLogs.slice(0, 15).forEach((log) => {
+            syncedAuditLogIdsRef.current.add(log.id);
             saveAuditLogToFirestore(log, currentUser.uid).catch((err) => {
-              console.warn('Background sync audit log error:', err);
+              console.warn('Background sync audit log issue:', err);
             });
           });
         }
-
-        return fullyUnified;
-      });
+      }
     });
     return () => unsubscribe();
   }, [currentUser]);

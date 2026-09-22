@@ -331,29 +331,35 @@ export async function saveAuditLogToFirestore(
   log: GlobalAuditRecord,
   userId?: string
 ): Promise<void> {
-  const docPath = `audit_logs/${log.id}`;
+  if (!log || !log.id) return;
+  const cleanId = log.id.replace(/[^a-zA-Z0-9_\-]/g, '_').substring(0, 128);
+  const docPath = `audit_logs/${cleanId}`;
   try {
-    const docRef = doc(db, 'audit_logs', log.id);
+    const docRef = doc(db, 'audit_logs', cleanId);
+    const cleanItemId = (log.itemId || 'general')
+      .replace(/[^a-zA-Z0-9_\-]/g, '_')
+      .substring(0, 128);
+
     const payload = {
-      id: log.id,
-      timestamp: log.timestamp,
-      action: log.action,
-      summary: log.summary,
-      details: log.details || null,
-      itemId: log.itemId,
-      itemName: log.itemName,
-      unit: log.unit,
-      previousQuantity: log.previousQuantity ?? null,
-      newQuantity: log.newQuantity ?? null,
-      delta: log.delta ?? null,
-      performedBy: log.performedBy || 'Store Operator',
-      userEmail: log.userEmail || null,
-      userPhotoURL: log.userPhotoURL || null,
+      id: cleanId,
+      timestamp: log.timestamp || new Date().toISOString(),
+      action: log.action || 'updated',
+      summary: (log.summary || 'Inventory action logged').substring(0, 480),
+      details: log.details ? log.details.substring(0, 4800) : null,
+      itemId: cleanItemId,
+      itemName: (log.itemName || 'Inventory Item').substring(0, 280),
+      unit: (log.unit || 'Unit').substring(0, 50),
+      previousQuantity: typeof log.previousQuantity === 'number' ? log.previousQuantity : null,
+      newQuantity: typeof log.newQuantity === 'number' ? log.newQuantity : null,
+      delta: typeof log.delta === 'number' ? log.delta : null,
+      performedBy: (log.performedBy || 'Store Operator').substring(0, 100),
+      userEmail: log.userEmail ? log.userEmail.substring(0, 100) : null,
+      userPhotoURL: log.userPhotoURL ? log.userPhotoURL.substring(0, 800) : null,
       userId: userId || log.userId || null,
     };
-    await setDoc(docRef, payload);
+    await setDoc(docRef, payload, { merge: true });
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, docPath);
+    console.warn(`Firestore Audit Log write issue for ${docPath}:`, error);
   }
 }
 
