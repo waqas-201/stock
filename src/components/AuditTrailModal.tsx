@@ -26,6 +26,7 @@ import {
 import {
   getTodayDateString,
   getLocalDateRange,
+  getRecentHoursRange,
   formatLocalDateTime,
   formatCalendarRelativeTime,
   useActiveTimezone,
@@ -38,17 +39,15 @@ interface AuditTrailModalProps {
   isOpen: boolean;
   onClose: () => void;
   logs: GlobalAuditRecord[];
-  onClearLogs?: () => void;
   onSelectItem?: (itemId: string) => void;
 }
 
-type DatePresetType = 'all' | 'today' | '7d' | '20d' | '30d' | 'custom';
+type DatePresetType = '10h' | '20h' | '48h' | '72h' | 'today' | '7d' | '20d' | '30d' | 'all' | 'custom';
 
 export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
   isOpen,
   onClose,
   logs = [],
-  onClearLogs,
   onSelectItem,
 }) => {
   const safeLogs = Array.isArray(logs) ? logs : [];
@@ -68,10 +67,33 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
     initial20Days.endStr
   );
 
+  const handleResetFilters = () => {
+    setSearchTerm('');
+    setFilterAction('all');
+    setSelectedStaff('all');
+    setDatePreset('all');
+  };
+
   // Compute date range
   const { startDate, endDate, dateSpanLabel, startStr, endStr } = useMemo(() => {
     if (datePreset === 'all') {
       return { startDate: null, endDate: null, dateSpanLabel: 'All Time', startStr: null, endStr: null };
+    }
+    if (datePreset === '10h') {
+      const r = getRecentHoursRange(10, timezone);
+      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 10 Hours', startStr: r.startStr, endStr: r.endStr };
+    }
+    if (datePreset === '20h') {
+      const r = getRecentHoursRange(20, timezone);
+      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 20 Hours', startStr: r.startStr, endStr: r.endStr };
+    }
+    if (datePreset === '48h') {
+      const r = getRecentHoursRange(48, timezone);
+      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 48 Hours', startStr: r.startStr, endStr: r.endStr };
+    }
+    if (datePreset === '72h') {
+      const r = getRecentHoursRange(72, timezone);
+      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 72 Hours', startStr: r.startStr, endStr: r.endStr };
     }
     if (datePreset === 'today') {
       const r = getLocalDateRange(1, timezone);
@@ -79,7 +101,7 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
     }
     if (datePreset === '7d') {
       const r = getLocalDateRange(7, timezone);
-      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 7 Days', startStr: r.startStr, endStr: r.endStr };
+      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 7 Days (1 Week)', startStr: r.startStr, endStr: r.endStr };
     }
     if (datePreset === '20d') {
       const r = getLocalDateRange(20, timezone);
@@ -139,6 +161,11 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
     const matchesDate = (() => {
       if (datePreset === 'all') return true;
       if (!log.timestamp) return false;
+
+      // Hourly rolling windows: check precise timestamp range
+      if (datePreset === '10h' || datePreset === '20h' || datePreset === '48h' || datePreset === '72h') {
+        return isTimestampInRange(log.timestamp, startDate, endDate, timezone);
+      }
 
       // Primary check for 'today': match calendar date in active timezone
       if (datePreset === 'today') {
@@ -288,9 +315,13 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                 {[
                   { id: 'all', label: 'All Time' },
                   { id: 'today', label: 'Today' },
-                  { id: '7d', label: 'Last 7 Days' },
-                  { id: '20d', label: 'Last 20 Days', highlight: true },
-                  { id: '30d', label: 'Last 30 Days' },
+                  { id: '10h', label: '10h' },
+                  { id: '20h', label: '20h' },
+                  { id: '48h', label: '48h' },
+                  { id: '72h', label: '72h' },
+                  { id: '7d', label: '1 Week' },
+                  { id: '20d', label: '20 Days', highlight: true },
+                  { id: '30d', label: '30 Days' },
                   { id: 'custom', label: 'Custom' },
                 ].map((p) => {
                   const isActive = datePreset === p.id;
@@ -330,7 +361,7 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                     onClick={() => setDatePreset('all')}
                     className="text-[11px] text-rose-600 hover:text-rose-800 font-semibold px-1.5 py-0.5 underline shrink-0 cursor-pointer ml-1"
                   >
-                    Reset Date
+                    Reset Period
                   </button>
                 )}
               </div>
@@ -581,15 +612,15 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                 <span>Export Trail ({filteredLogs.length})</span>
               </button>
             )}
-            {onClearLogs && logs.length > 0 && (
-              <button
-                type="button"
-                onClick={onClearLogs}
-                className="min-h-[36px] px-3 text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
-              >
-                Clear History
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={handleResetFilters}
+              className="min-h-[38px] px-3.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
+              title="Reset all search queries, action filters, staff filters, and date periods"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+              <span>Reset Filters</span>
+            </button>
             <button
               type="button"
               onClick={onClose}

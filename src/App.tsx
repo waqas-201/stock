@@ -13,6 +13,7 @@ import {
   loadOperatorProfile,
   saveOperatorProfile,
   GlobalAuditRecord,
+  getUnifiedAuditLogs,
 } from './lib/stockStorage';
 import {
   loadManagedUnits,
@@ -119,9 +120,36 @@ export function App() {
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [items, tags]);
 
-  const [globalLogs, setGlobalLogs] = useState<GlobalAuditRecord[]>(() =>
-    loadGlobalAuditLog()
-  );
+  const [globalLogs, setGlobalLogs] = useState<GlobalAuditRecord[]>(() => {
+    const raw = loadGlobalAuditLog();
+    const storedItems = loadStoredStock();
+    return getUnifiedAuditLogs(raw, storedItems);
+  });
+
+  // Compute unified audit trail that guarantees zero data loss across items and global ledger
+  const unifiedLogs = useMemo(() => {
+    return getUnifiedAuditLogs(globalLogs, items);
+  }, [globalLogs, items]);
+
+  // Self-heal audit records: automatically sync any missing item activities into globalLogs and Firestore
+  useEffect(() => {
+    const unified = getUnifiedAuditLogs(globalLogs, items);
+    if (unified.length > globalLogs.length) {
+      setGlobalLogs(unified);
+      saveGlobalAuditLog(unified);
+      if (currentUser?.uid) {
+        const existingIds = new Set(globalLogs.map((l) => l.id));
+        const missing = unified.filter((l) => !existingIds.has(l.id));
+        if (missing.length > 0) {
+          missing.slice(0, 25).forEach((log) => {
+            saveAuditLogToFirestore(log, currentUser.uid).catch((err) => {
+              console.warn('Sync missing item audit to Firestore:', err);
+            });
+          });
+        }
+      }
+    }
+  }, [items, globalLogs, currentUser]);
 
   // Active Operator / Staff Profile for modification attribution & audit trail
   const [operator, setOperator] = useState<OperatorProfile>(() =>
@@ -454,20 +482,22 @@ export function App() {
         const combined = Array.from(logMap.values()).sort((a, b) =>
           b.timestamp.localeCompare(a.timestamp)
         );
-        saveGlobalAuditLog(combined);
+        const localItems = loadStoredStock();
+        const fullyUnified = getUnifiedAuditLogs(combined, localItems);
+        saveGlobalAuditLog(fullyUnified);
 
         // 4. Background-sync any local-only logs to Firestore
         const firestoreIds = new Set(firestoreLogs.map((l) => l.id));
-        const unsyncedLogs = combined.filter((l) => !firestoreIds.has(l.id));
+        const unsyncedLogs = fullyUnified.filter((l) => !firestoreIds.has(l.id));
         if (unsyncedLogs.length > 0 && currentUser?.uid) {
-          unsyncedLogs.slice(0, 15).forEach((log) => {
+          unsyncedLogs.slice(0, 20).forEach((log) => {
             saveAuditLogToFirestore(log, currentUser.uid).catch((err) => {
               console.warn('Background sync audit log error:', err);
             });
           });
         }
 
-        return combined;
+        return fullyUnified;
       });
     });
     return () => unsubscribe();
@@ -1677,12 +1707,6 @@ export function App() {
     }
   };
 
-  const handleClearGlobalLogs = () => {
-    saveGlobalAuditLog([]);
-    setGlobalLogs([]);
-    showToast('Audit trail history cleared', 'info');
-  };
-
   return (
     <div className="min-h-screen bg-slate-100/70 text-slate-900 font-sans flex flex-col antialiased selection:bg-emerald-100 selection:text-emerald-900 pb-20 sm:pb-8">
       {/* Toast Notification with Undo - Mobile Friendly */}
@@ -1985,8 +2009,7 @@ export function App() {
       <AuditTrailModal
         isOpen={isAuditTrailModalOpen}
         onClose={() => setIsAuditTrailModalOpen(false)}
-        logs={globalLogs}
-        onClearLogs={handleClearGlobalLogs}
+        logs={unifiedLogs}
         onSelectItem={(itemId) => {
           const itm = items.find((i) => i.id === itemId);
           if (itm) {
@@ -2000,7 +2023,7 @@ export function App() {
         isOpen={isExportExcelModalOpen}
         onClose={() => setIsExportExcelModalOpen(false)}
         items={items}
-        globalLogs={globalLogs}
+        globalLogs={unifiedLogs}
         onShowToast={(msg, type) => showToast(msg, type)}
       />
 

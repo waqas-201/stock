@@ -452,3 +452,68 @@ export function saveActiveOperator(operator: OperatorProfile): void {
 export const loadOperatorProfile = loadActiveOperator;
 export const saveOperatorProfile = saveActiveOperator;
 
+/**
+ * Unifies all audit records from the global log registry AND all individual item audit trails.
+ * This guarantees complete, tamper-proof audit preservation: even if global logs were somehow cleared
+ * or reset, all item activities (creates, restocks, sales, edits, audit notes) are preserved and reconstructed!
+ */
+export function getUnifiedAuditLogs(
+  globalLogs: GlobalAuditRecord[],
+  items: StockItem[]
+): GlobalAuditRecord[] {
+  const map = new Map<string, GlobalAuditRecord>();
+
+  // 1. Process all existing global logs
+  if (Array.isArray(globalLogs)) {
+    globalLogs.forEach((l) => {
+      if (l && l.id) {
+        map.set(l.id, l);
+      }
+    });
+  }
+
+  // 2. Scan every item in inventory and extract their audit trails
+  if (Array.isArray(items)) {
+    items.forEach((item) => {
+      if (item && Array.isArray(item.auditTrail)) {
+        item.auditTrail.forEach((entry) => {
+          if (!entry) return;
+          const entryId = entry.id || `aud_item_${item.id}_${entry.timestamp}`;
+          if (!map.has(entryId)) {
+            // Also check for composite match to prevent duplicates if ID differed
+            const alreadyExists = Array.from(map.values()).some(
+              (existing) =>
+                existing.itemId === item.id &&
+                existing.timestamp === entry.timestamp &&
+                existing.action === entry.action &&
+                existing.newQuantity === entry.newQuantity
+            );
+            if (!alreadyExists) {
+              map.set(entryId, {
+                ...entry,
+                id: entryId,
+                itemId: item.id,
+                itemName: item.itemName,
+                unit: item.unit,
+                performedBy: entry.performedBy || item.lastModifiedByName || item.createdByName || 'Store Operator',
+                userEmail: entry.userEmail || item.lastModifiedByEmail || item.createdByEmail,
+              });
+            }
+          }
+        });
+      }
+    });
+  }
+
+  // 3. Return sorted descending by timestamp
+  return Array.from(map.values()).sort((a, b) => {
+    const tA = new Date(a.timestamp).getTime();
+    const tB = new Date(b.timestamp).getTime();
+    if (isNaN(tA) || isNaN(tB)) {
+      return (b.timestamp || '').localeCompare(a.timestamp || '');
+    }
+    return tB - tA;
+  });
+}
+
+

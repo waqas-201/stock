@@ -405,6 +405,34 @@ export function getLocalDateRange(
 }
 
 /**
+ * Returns a time boundary range for a given number of past hours (e.g. 10h, 20h, 48h, 72h)
+ * calculated relative to the exact current moment.
+ */
+export function getRecentHoursRange(
+  hours: number,
+  tz?: string
+): {
+  startDate: Date;
+  endDate: Date;
+  startStr: string;
+  endStr: string;
+} {
+  const resolved = getResolvedTimezone(tz);
+  const now = new Date();
+  const pastMs = now.getTime() - Math.max(1, hours) * 60 * 60 * 1000;
+  const startDate = new Date(pastMs);
+  const endDate = now;
+  const startStr = getLocalDateString(startDate, resolved);
+  const endStr = getLocalDateString(endDate, resolved);
+  return {
+    startDate,
+    endDate,
+    startStr,
+    endStr,
+  };
+}
+
+/**
  * Safely parses a 'YYYY-MM-DD' date string into a Date object representing
  * the start of day (00:00:00.000) or end of day (23:59:59.999) in the active timezone.
  */

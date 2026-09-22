@@ -20,6 +20,7 @@ import {
 } from '../lib/excelExport';
 import {
   getLocalDateRange,
+  getRecentHoursRange,
   useActiveTimezone,
   formatLocalDate,
   parseLocalDateBoundary,
@@ -34,7 +35,18 @@ export interface ExportExcelModalProps {
   onShowToast?: (message: string, type: 'success' | 'error' | 'info') => void;
 }
 
-type TimeSpanPreset = 'today' | '20_days' | '7_days' | '30_days' | '60_days' | 'all_time' | 'custom';
+type TimeSpanPreset =
+  | 'today'
+  | '10_hours'
+  | '20_hours'
+  | '48_hours'
+  | '72_hours'
+  | '7_days'
+  | '20_days'
+  | '30_days'
+  | '60_days'
+  | 'all_time'
+  | 'custom';
 type ExportScope = 'whole_stock' | 'affected_only';
 
 export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
@@ -82,6 +94,42 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
         startDate: range.startDate,
         endDate: range.endDate,
         timeSpanLabel: 'Today',
+      };
+    }
+
+    if (selectedPreset === '10_hours') {
+      const range = getRecentHoursRange(10, timezone);
+      return {
+        startDate: range.startDate,
+        endDate: range.endDate,
+        timeSpanLabel: 'Last 10 Hours',
+      };
+    }
+
+    if (selectedPreset === '20_hours') {
+      const range = getRecentHoursRange(20, timezone);
+      return {
+        startDate: range.startDate,
+        endDate: range.endDate,
+        timeSpanLabel: 'Last 20 Hours',
+      };
+    }
+
+    if (selectedPreset === '48_hours') {
+      const range = getRecentHoursRange(48, timezone);
+      return {
+        startDate: range.startDate,
+        endDate: range.endDate,
+        timeSpanLabel: 'Last 48 Hours',
+      };
+    }
+
+    if (selectedPreset === '72_hours') {
+      const range = getRecentHoursRange(72, timezone);
+      return {
+        startDate: range.startDate,
+        endDate: range.endDate,
+        timeSpanLabel: 'Last 72 Hours',
       };
     }
 
@@ -279,13 +327,16 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
             </div>
 
             {/* Quick preset chips */}
-            <div className="grid grid-cols-3 sm:grid-cols-7 gap-1.5">
+            <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-10 gap-1.5">
               {[
                 { id: 'today', label: 'Today' },
-                { id: '20_days', label: 'Last 20 Days', highlight: true },
-                { id: '7_days', label: 'Last 7 Days' },
-                { id: '30_days', label: 'Last 30 Days' },
-                { id: '60_days', label: 'Last 60 Days' },
+                { id: '10_hours', label: '10h' },
+                { id: '20_hours', label: '20h' },
+                { id: '48_hours', label: '48h' },
+                { id: '72_hours', label: '72h' },
+                { id: '7_days', label: '1 Week' },
+                { id: '20_days', label: '20 Days', highlight: true },
+                { id: '30_days', label: '30 Days' },
                 { id: 'all_time', label: 'All Time' },
                 { id: 'custom', label: 'Custom' },
               ].map((p) => {
