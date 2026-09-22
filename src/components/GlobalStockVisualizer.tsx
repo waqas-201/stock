@@ -24,6 +24,13 @@ import { StockItem, StockTag } from '../types';
 import { GlobalAuditRecord } from '../lib/stockStorage';
 import { Tag as TagIcon, Hash } from 'lucide-react';
 import { getTagStyle } from '../lib/tagUtils';
+import {
+  formatLocalDate,
+  formatLocalDateTime,
+  getLocalDateRange,
+  parseLocalDateBoundary,
+  useActiveTimezone,
+} from '../lib/dateUtils';
 
 export type TimePeriodPreset = 'today' | '7d' | '20d' | '30d' | '60d' | 'all' | 'custom';
 export type VisualizerMetricFilter = 'all' | 'inbound' | 'outbound';
@@ -72,6 +79,7 @@ export const GlobalStockVisualizer: React.FC<GlobalStockVisualizerProps> = ({
 }) => {
   const safeItems = Array.isArray(items) ? items : [];
   const isTagActive = Boolean(selectedTag);
+  const { timezone } = useActiveTimezone();
 
   // Filter items and logs when a specific tag is selected
   const scopedItems = useMemo(() => {
@@ -125,49 +133,62 @@ export const GlobalStockVisualizer: React.FC<GlobalStockVisualizerProps> = ({
 
   // 1. Determine Date Range Bounds
   const { startDate, endDate, dateRangeLabel } = useMemo(() => {
-    const now = new Date();
-    const end = new Date(now);
-    end.setHours(23, 59, 59, 999);
-
-    let start = new Date(now);
+    let start: Date;
+    let end: Date;
     let label = 'Last 20 Days';
 
     if (periodPreset === 'today') {
-      start.setHours(0, 0, 0, 0);
+      const range = getLocalDateRange(1, timezone);
+      start = range.startDate;
+      end = range.endDate;
       label = 'Today';
     } else if (periodPreset === '7d') {
-      start.setDate(start.getDate() - 7);
-      start.setHours(0, 0, 0, 0);
+      const range = getLocalDateRange(7, timezone);
+      start = range.startDate;
+      end = range.endDate;
       label = 'Last 7 Days';
     } else if (periodPreset === '20d') {
-      start.setDate(start.getDate() - 20);
-      start.setHours(0, 0, 0, 0);
+      const range = getLocalDateRange(20, timezone);
+      start = range.startDate;
+      end = range.endDate;
       label = 'Last 20 Days';
     } else if (periodPreset === '30d') {
-      start.setDate(start.getDate() - 30);
-      start.setHours(0, 0, 0, 0);
+      const range = getLocalDateRange(30, timezone);
+      start = range.startDate;
+      end = range.endDate;
       label = 'Last 30 Days';
     } else if (periodPreset === '60d') {
-      start.setDate(start.getDate() - 60);
-      start.setHours(0, 0, 0, 0);
+      const range = getLocalDateRange(60, timezone);
+      start = range.startDate;
+      end = range.endDate;
       label = 'Last 60 Days';
     } else if (periodPreset === 'all') {
       start = new Date('2020-01-01T00:00:00.000Z');
+      const nowRange = getLocalDateRange(1, timezone);
+      end = nowRange.endDate;
       label = 'All Time';
     } else if (periodPreset === 'custom') {
       if (customStartDate) {
-        start = new Date(customStartDate + 'T00:00:00');
+        start = parseLocalDateBoundary(customStartDate, false, timezone);
       } else {
-        start.setDate(start.getDate() - 30);
+        const range = getLocalDateRange(30, timezone);
+        start = range.startDate;
       }
       if (customEndDate) {
-        end.setTime(new Date(customEndDate + 'T23:59:59.999').getTime());
+        end = parseLocalDateBoundary(customEndDate, true, timezone);
+      } else {
+        const range = getLocalDateRange(1, timezone);
+        end = range.endDate;
       }
-      label = `${start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${end.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+      label = `${formatLocalDate(start, timezone)} – ${formatLocalDate(end, timezone)}`;
+    } else {
+      const range = getLocalDateRange(20, timezone);
+      start = range.startDate;
+      end = range.endDate;
     }
 
     return { startDate: start, endDate: end, dateRangeLabel: label };
-  }, [periodPreset, customStartDate, customEndDate]);
+  }, [periodPreset, customStartDate, customEndDate, timezone]);
 
   // 2. Synthesize all Global Events & Item Events in this period
   const { allPeriodEvents, filteredEvents, periodStats } = useMemo(() => {
@@ -422,9 +443,19 @@ export const GlobalStockVisualizer: React.FC<GlobalStockVisualizerProps> = ({
   // Format tick labels
   const formatTickDate = (d: Date) => {
     if (periodPreset === 'today') {
-      return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      try {
+        const timePart = new Intl.DateTimeFormat('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+          timeZone: timezone,
+        }).format(d);
+        return timePart;
+      } catch {
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
     }
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    return formatLocalDate(d, timezone);
   };
 
   // Zero-line Y coordinate
@@ -1198,7 +1229,7 @@ export const GlobalStockVisualizer: React.FC<GlobalStockVisualizerProps> = ({
                     <div className="flex items-center justify-between">
                       <span className="text-slate-400">Production Date:</span>
                       <span className="text-slate-300 font-mono text-[10px]">
-                        {new Date(hoveredItem.productionDate).toLocaleDateString()}
+                        {formatLocalDate(hoveredItem.productionDate, timezone)}
                       </span>
                     </div>
                   )}
@@ -1259,12 +1290,7 @@ export const GlobalStockVisualizer: React.FC<GlobalStockVisualizerProps> = ({
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Time:</span>
                     <span className="text-slate-400 font-mono text-[10px]">
-                      {hoveredPoint.dateObj.toLocaleString(undefined, {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
+                      {formatLocalDateTime(hoveredPoint.dateObj, timezone, true)}
                     </span>
                   </div>
                   {hoveredPoint.summary && (
@@ -1383,12 +1409,7 @@ export const GlobalStockVisualizer: React.FC<GlobalStockVisualizerProps> = ({
                 <div className="p-2 bg-white/90 rounded-xl border border-emerald-200">
                   <span className="text-[10px] text-slate-400 uppercase font-semibold block">Timestamp</span>
                   <span className="text-xs font-mono text-slate-700 block truncate">
-                    {selectedPoint.dateObj.toLocaleString(undefined, {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
+                    {formatLocalDateTime(selectedPoint.dateObj, timezone, true)}
                   </span>
                 </div>
               </div>

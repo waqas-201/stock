@@ -23,9 +23,13 @@ import {
   Tag,
   Settings,
   ChevronDown,
+  Clock,
+  Globe,
 } from 'lucide-react';
 import type { User as FirebaseUser } from '../lib/firebase';
 import { OperatorProfile, StockItem } from '../types';
+import { TimezonePill, TimezoneSelectorModal } from './TimezoneSelectorModal';
+import { useActiveTimezone } from '../lib/dateUtils';
 
 interface NavbarProps {
   itemCount: number;
@@ -49,6 +53,7 @@ interface NavbarProps {
   onOpenLabelModal?: () => void;
   selectedTag?: string | null;
   onSelectTag?: (tag: string | null) => void;
+  onOpenTimezoneModal?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -73,7 +78,19 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenLabelModal,
   selectedTag,
   onSelectTag,
+  onOpenTimezoneModal,
 }) => {
+  const { timezone, timezoneAbbr } = useActiveTimezone();
+  const [internalTimezoneOpen, setInternalTimezoneOpen] = useState(false);
+
+  const handleOpenTimezone = () => {
+    if (onOpenTimezoneModal) {
+      onOpenTimezoneModal();
+    } else {
+      setInternalTimezoneOpen(true);
+    }
+  };
+
   const handleOpenTags = onOpenTagModal || onOpenLabelModal;
   const rawName = currentOperator?.name || 'Waqas';
   const opName = rawName.replace(/\s*\(Admin\)/gi, '').trim() || 'Waqas';
@@ -195,6 +212,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                   {opRole}
                 </span>
               </button>
+
+              {/* Active Timezone & Local Date Sync Pill */}
+              <TimezonePill onOpenModal={handleOpenTimezone} />
 
               {/* Cloud DB & User Sign-In / Account Status */}
               {isAuthLoading ? (
@@ -562,6 +582,37 @@ export const Navbar: React.FC<NavbarProps> = ({
                             />
                           </div>
                         </button>
+
+                        {/* Timezone & Date Synchronization */}
+                        <button
+                          id="btn-settings-open-timezone"
+                          type="button"
+                          onClick={() => {
+                            setIsSettingsOpen(false);
+                            handleOpenTimezone();
+                          }}
+                          className="w-full flex items-center justify-between p-2.5 rounded-xl text-left bg-slate-50 hover:bg-slate-100/80 transition-colors cursor-pointer border border-slate-200 mt-2"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                              <Clock className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                                <span>Timezone & Date Sync</span>
+                                <span className="font-mono text-[10px] bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded font-bold">
+                                  {timezoneAbbr}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-slate-500">
+                                Fix "yesterday / 1 day before" date conflicts
+                              </div>
+                            </div>
+                          </div>
+                          <span className="text-[10px] font-semibold text-emerald-700 bg-white border border-emerald-300 px-2 py-0.5 rounded-md shadow-2xs">
+                            Sync
+                          </span>
+                        </button>
                       </div>
 
                       {/* 4. Keyboard Shortcuts Reference */}
@@ -857,6 +908,37 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </span>
               </button>
 
+              {/* Timezone / Date Synchronization */}
+              <button
+                id="btn-mobile-open-timezone"
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  handleOpenTimezone();
+                }}
+                className="w-full min-h-[50px] px-4 py-3 bg-slate-50 active:bg-slate-100 border border-slate-200 rounded-2xl flex items-center justify-between text-left transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                      <span>Timezone & Date Sync</span>
+                      <span className="text-xs font-mono font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded">
+                        {timezoneAbbr}
+                      </span>
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      Fix date conflict (Pakistani / MY / local time)
+                    </span>
+                  </div>
+                </div>
+                <span className="text-xs font-semibold text-emerald-700 px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg">
+                  Change
+                </span>
+              </button>
+
               {/* Audit Trail / Activity Log */}
               <button
                 type="button"
@@ -1012,6 +1094,12 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
       )}
+
+      {/* Timezone Selector Modal (if triggered internally) */}
+      <TimezoneSelectorModal
+        isOpen={internalTimezoneOpen}
+        onClose={() => setInternalTimezoneOpen(false)}
+      />
     </>
   );
 };

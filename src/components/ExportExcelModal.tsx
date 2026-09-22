@@ -14,10 +14,14 @@ import {
 import { StockItem } from '../types';
 import { GlobalAuditRecord } from '../lib/stockStorage';
 import {
-  getDateRangeFromDays,
   getAffectedItems,
   exportToExcelAdvanced,
 } from '../lib/excelExport';
+import {
+  getLocalDateRange,
+  useActiveTimezone,
+  formatLocalDate,
+} from '../lib/dateUtils';
 
 export interface ExportExcelModalProps {
   isOpen: boolean;
@@ -27,7 +31,7 @@ export interface ExportExcelModalProps {
   onShowToast?: (message: string, type: 'success' | 'error' | 'info') => void;
 }
 
-type TimeSpanPreset = '20_days' | '7_days' | '30_days' | '60_days' | 'all_time' | 'custom';
+type TimeSpanPreset = 'today' | '20_days' | '7_days' | '30_days' | '60_days' | 'all_time' | 'custom';
 type ExportScope = 'whole_stock' | 'affected_only';
 
 export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
@@ -40,17 +44,19 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
   const safeItems = Array.isArray(items) ? items : [];
   const safeLogs = Array.isArray(globalLogs) ? globalLogs : [];
 
+  const { timezone } = useActiveTimezone();
+
   // Default time span preset is "Last 20 Days"
   const [selectedPreset, setSelectedPreset] = useState<TimeSpanPreset>('20_days');
   const [customDays, setCustomDays] = useState<number>(20);
 
   // Date range state
-  const initial20Days = useMemo(() => getDateRangeFromDays(20), []);
+  const initial20Days = useMemo(() => getLocalDateRange(20, timezone), [timezone]);
   const [customStartDate, setCustomStartDate] = useState<string>(
-    initial20Days.startDate.toISOString().slice(0, 10)
+    initial20Days.startStr
   );
   const [customEndDate, setCustomEndDate] = useState<string>(
-    initial20Days.endDate.toISOString().slice(0, 10)
+    initial20Days.endStr
   );
 
   // Export scope: default to 'affected_only' or 'whole_stock'
@@ -64,6 +70,15 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
         startDate: null,
         endDate: null,
         timeSpanLabel: 'All Time',
+      };
+    }
+
+    if (selectedPreset === 'today') {
+      const range = getLocalDateRange(1, timezone);
+      return {
+        startDate: range.startDate,
+        endDate: range.endDate,
+        timeSpanLabel: 'Today',
       };
     }
 
@@ -83,13 +98,13 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
     else if (selectedPreset === '30_days') days = 30;
     else if (selectedPreset === '60_days') days = 60;
 
-    const range = getDateRangeFromDays(days);
+    const range = getLocalDateRange(days, timezone);
     return {
       startDate: range.startDate,
       endDate: range.endDate,
       timeSpanLabel: `Last ${days} Days`,
     };
-  }, [selectedPreset, customDays, customStartDate, customEndDate]);
+  }, [selectedPreset, customDays, customStartDate, customEndDate, timezone]);
 
   // Compute affected items for the active date range
   const { affectedItems, itemStatsMap } = useMemo(() => {
@@ -113,25 +128,30 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
 
   const handlePresetSelect = (preset: TimeSpanPreset) => {
     setSelectedPreset(preset);
-    if (preset === '7_days') {
-      const range = getDateRangeFromDays(7);
-      setCustomStartDate(range.startDate.toISOString().slice(0, 10));
-      setCustomEndDate(range.endDate.toISOString().slice(0, 10));
+    if (preset === 'today') {
+      const range = getLocalDateRange(1, timezone);
+      setCustomStartDate(range.startStr);
+      setCustomEndDate(range.endStr);
+      setCustomDays(1);
+    } else if (preset === '7_days') {
+      const range = getLocalDateRange(7, timezone);
+      setCustomStartDate(range.startStr);
+      setCustomEndDate(range.endStr);
       setCustomDays(7);
     } else if (preset === '20_days') {
-      const range = getDateRangeFromDays(20);
-      setCustomStartDate(range.startDate.toISOString().slice(0, 10));
-      setCustomEndDate(range.endDate.toISOString().slice(0, 10));
+      const range = getLocalDateRange(20, timezone);
+      setCustomStartDate(range.startStr);
+      setCustomEndDate(range.endStr);
       setCustomDays(20);
     } else if (preset === '30_days') {
-      const range = getDateRangeFromDays(30);
-      setCustomStartDate(range.startDate.toISOString().slice(0, 10));
-      setCustomEndDate(range.endDate.toISOString().slice(0, 10));
+      const range = getLocalDateRange(30, timezone);
+      setCustomStartDate(range.startStr);
+      setCustomEndDate(range.endStr);
       setCustomDays(30);
     } else if (preset === '60_days') {
-      const range = getDateRangeFromDays(60);
-      setCustomStartDate(range.startDate.toISOString().slice(0, 10));
-      setCustomEndDate(range.endDate.toISOString().slice(0, 10));
+      const range = getLocalDateRange(60, timezone);
+      setCustomStartDate(range.startStr);
+      setCustomEndDate(range.endStr);
       setCustomDays(60);
     }
   };
@@ -139,9 +159,9 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
   const handleCustomDaysChange = (days: number) => {
     const val = Math.max(1, Math.min(365, days));
     setCustomDays(val);
-    const range = getDateRangeFromDays(val);
-    setCustomStartDate(range.startDate.toISOString().slice(0, 10));
-    setCustomEndDate(range.endDate.toISOString().slice(0, 10));
+    const range = getLocalDateRange(val, timezone);
+    setCustomStartDate(range.startStr);
+    setCustomEndDate(range.endStr);
   };
 
   const handleExport = () => {
@@ -257,8 +277,9 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
             </div>
 
             {/* Quick preset chips */}
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+            <div className="grid grid-cols-3 sm:grid-cols-7 gap-1.5">
               {[
+                { id: 'today', label: 'Today' },
                 { id: '20_days', label: 'Last 20 Days', highlight: true },
                 { id: '7_days', label: 'Last 7 Days' },
                 { id: '30_days', label: 'Last 30 Days' },

@@ -20,10 +20,16 @@ import {
 } from 'lucide-react';
 import { GlobalAuditRecord } from '../lib/stockStorage';
 import {
-  getDateRangeFromDays,
   isTimestampInRange,
   exportAuditTrailToExcel,
 } from '../lib/excelExport';
+import {
+  getTodayDateString,
+  getLocalDateRange,
+  formatLocalDateTime,
+  formatCalendarRelativeTime,
+  useActiveTimezone,
+} from '../lib/dateUtils';
 
 interface AuditTrailModalProps {
   isOpen: boolean;
@@ -47,14 +53,16 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
   const [filterAction, setFilterAction] = useState<string>('all');
   const [selectedStaff, setSelectedStaff] = useState<string>('all');
 
+  const { timezone } = useActiveTimezone();
+
   // Date span filtering state - default to 'all' or quick presets
   const [datePreset, setDatePreset] = useState<DatePresetType>('all');
-  const initial20Days = useMemo(() => getDateRangeFromDays(20), []);
+  const initial20Days = useMemo(() => getLocalDateRange(20, timezone), [timezone]);
   const [customStartDate, setCustomStartDate] = useState<string>(
-    initial20Days.startDate.toISOString().slice(0, 10)
+    initial20Days.startStr
   );
   const [customEndDate, setCustomEndDate] = useState<string>(
-    initial20Days.endDate.toISOString().slice(0, 10)
+    initial20Days.endStr
   );
 
   // Compute date range
@@ -63,22 +71,19 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
       return { startDate: null, endDate: null, dateSpanLabel: 'All Time' };
     }
     if (datePreset === 'today') {
-      const start = new Date();
-      start.setHours(0, 0, 0, 0);
-      const end = new Date();
-      end.setHours(23, 59, 59, 999);
-      return { startDate: start, endDate: end, dateSpanLabel: 'Today' };
+      const r = getLocalDateRange(1, timezone);
+      return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Today' };
     }
     if (datePreset === '7d') {
-      const r = getDateRangeFromDays(7);
+      const r = getLocalDateRange(7, timezone);
       return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 7 Days' };
     }
     if (datePreset === '20d') {
-      const r = getDateRangeFromDays(20);
+      const r = getLocalDateRange(20, timezone);
       return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 20 Days' };
     }
     if (datePreset === '30d') {
-      const r = getDateRangeFromDays(30);
+      const r = getLocalDateRange(30, timezone);
       return { startDate: r.startDate, endDate: r.endDate, dateSpanLabel: 'Last 30 Days' };
     }
     if (datePreset === 'custom') {
@@ -91,7 +96,7 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
       };
     }
     return { startDate: null, endDate: null, dateSpanLabel: 'All Time' };
-  }, [datePreset, customStartDate, customEndDate]);
+  }, [datePreset, customStartDate, customEndDate, timezone]);
 
   // Extract unique staff members
   const staffMembers = useMemo(() => {
@@ -133,24 +138,12 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
 
   const handleExportFilteredTrail = () => {
     if (filteredLogs.length === 0) return;
-    const filename = `inventory-audit-trail-${dateSpanLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const filename = `inventory-audit-trail-${dateSpanLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${getTodayDateString(timezone)}.xlsx`;
     exportAuditTrailToExcel(filteredLogs, filename);
   };
 
   const formatDateTime = (dateStr: string) => {
-    try {
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return dateStr;
-      return d.toLocaleString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return dateStr;
-    }
+    return formatLocalDateTime(dateStr, timezone, true);
   };
 
   return (
@@ -287,13 +280,13 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                       onClick={() => {
                         setDatePreset(p.id as DatePresetType);
                         if (p.id === '20d') {
-                          const r = getDateRangeFromDays(20);
-                          setCustomStartDate(r.startDate.toISOString().slice(0, 10));
-                          setCustomEndDate(r.endDate.toISOString().slice(0, 10));
+                          const r = getLocalDateRange(20, timezone);
+                          setCustomStartDate(r.startStr);
+                          setCustomEndDate(r.endStr);
                         } else if (p.id === '7d') {
-                          const r = getDateRangeFromDays(7);
-                          setCustomStartDate(r.startDate.toISOString().slice(0, 10));
-                          setCustomEndDate(r.endDate.toISOString().slice(0, 10));
+                          const r = getLocalDateRange(7, timezone);
+                          setCustomStartDate(r.startStr);
+                          setCustomEndDate(r.endStr);
                         }
                       }}
                       className={`min-h-[28px] px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-all cursor-pointer relative ${
@@ -358,9 +351,9 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    const r = getDateRangeFromDays(20);
-                    setCustomStartDate(r.startDate.toISOString().slice(0, 10));
-                    setCustomEndDate(r.endDate.toISOString().slice(0, 10));
+                    const r = getLocalDateRange(20, timezone);
+                    setCustomStartDate(r.startStr);
+                    setCustomEndDate(r.endStr);
                   }}
                   className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 underline cursor-pointer ml-auto"
                 >
@@ -527,9 +520,14 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                       </div>
                     </div>
 
-                    <span className="text-[11px] text-slate-400 whitespace-nowrap shrink-0">
-                      {formatDateTime(log.timestamp)}
-                    </span>
+                    <div className="text-right whitespace-nowrap shrink-0">
+                      <span className="text-xs font-bold text-slate-700 block">
+                        {formatCalendarRelativeTime(log.timestamp, timezone)}
+                      </span>
+                      <span className="text-[10px] text-slate-400 block font-mono">
+                        {formatDateTime(log.timestamp)}
+                      </span>
+                    </div>
                   </div>
                 </div>
               );

@@ -1,6 +1,12 @@
 import * as XLSX from 'xlsx';
 import { StockItem } from '../types';
 import { GlobalAuditRecord } from './stockStorage';
+import {
+  formatLocalDate,
+  formatLocalDateTime,
+  getTodayDateString,
+  getLocalDateRange,
+} from './dateUtils';
 
 /**
  * Checks if an ISO timestamp string falls within [startDate, endDate] inclusive
@@ -21,16 +27,11 @@ export function isTimestampInRange(
 
 /**
  * Computes start/end dates for a given number of past days (e.g. 20 days)
+ * aligned to the user's active timezone boundaries.
  */
 export function getDateRangeFromDays(days: number): { startDate: Date; endDate: Date } {
-  const endDate = new Date();
-  endDate.setHours(23, 59, 59, 999);
-
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - (Math.max(1, days) - 1));
-  startDate.setHours(0, 0, 0, 0);
-
-  return { startDate, endDate };
+  const range = getLocalDateRange(days);
+  return { startDate: range.startDate, endDate: range.endDate };
 }
 
 /**
@@ -187,9 +188,9 @@ export function exportToExcelAdvanced(options: AdvancedExportOptions): void {
             : stats.netDelta
           : 0;
       row['Last Activity'] = stats?.lastActivity
-        ? new Date(stats.lastActivity).toLocaleDateString()
+        ? formatLocalDateTime(stats.lastActivity)
         : item.updatedAt
-        ? new Date(item.updatedAt).toLocaleDateString()
+        ? formatLocalDateTime(item.updatedAt)
         : '';
     }
 
@@ -235,7 +236,7 @@ export function exportToExcelAdvanced(options: AdvancedExportOptions): void {
 
     if (filteredLogs.length > 0) {
       const auditData = filteredLogs.map((log) => ({
-        'Timestamp': log.timestamp ? new Date(log.timestamp).toLocaleString() : '',
+        'Timestamp': log.timestamp ? formatLocalDateTime(log.timestamp) : '',
         'Item Name': log.itemName || '',
         'Action': log.action || '',
         'Staff Member': log.performedBy || '',
@@ -255,7 +256,7 @@ export function exportToExcelAdvanced(options: AdvancedExportOptions): void {
 
       const auditSheet = XLSX.utils.json_to_sheet(auditData);
       auditSheet['!cols'] = [
-        { wch: 22 }, // Timestamp
+        { wch: 24 }, // Timestamp
         { wch: 30 }, // Item Name
         { wch: 16 }, // Action
         { wch: 20 }, // Staff Member
@@ -275,8 +276,8 @@ export function exportToExcelAdvanced(options: AdvancedExportOptions): void {
     scope === 'affected_only'
       ? `stock-inventory-affected-${
           timeSpanLabel ? timeSpanLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-') : 'period'
-        }-${new Date().toISOString().slice(0, 10)}.xlsx`
-      : `stock-inventory-whole-stock-${new Date().toISOString().slice(0, 10)}.xlsx`;
+        }-${getTodayDateString()}.xlsx`
+      : `stock-inventory-whole-stock-${getTodayDateString()}.xlsx`;
 
   XLSX.writeFile(workbook, filename || defaultFilename);
 }
@@ -286,10 +287,10 @@ export function exportToExcelAdvanced(options: AdvancedExportOptions): void {
  */
 export function exportAuditTrailToExcel(
   logs: GlobalAuditRecord[],
-  filename = `inventory-audit-trail-${new Date().toISOString().slice(0, 10)}.xlsx`
+  filename = `inventory-audit-trail-${getTodayDateString()}.xlsx`
 ): void {
   const data = logs.map((log) => ({
-    'Timestamp': log.timestamp ? new Date(log.timestamp).toLocaleString() : '',
+    'Timestamp': log.timestamp ? formatLocalDateTime(log.timestamp) : '',
     'Item Name': log.itemName || '',
     'Action': log.action || '',
     'Staff Member': log.performedBy || '',
@@ -309,7 +310,7 @@ export function exportAuditTrailToExcel(
 
   const worksheet = XLSX.utils.json_to_sheet(data);
   worksheet['!cols'] = [
-    { wch: 22 },
+    { wch: 24 },
     { wch: 30 },
     { wch: 16 },
     { wch: 20 },
@@ -332,7 +333,7 @@ export function exportAuditTrailToExcel(
  */
 export function exportAuditTrailToCsv(
   logs: GlobalAuditRecord[],
-  filename = `inventory-audit-trail-${new Date().toISOString().slice(0, 10)}.csv`
+  filename = `inventory-audit-trail-${getTodayDateString()}.csv`
 ): void {
   const headers = [
     'Timestamp',
@@ -357,7 +358,7 @@ export function exportAuditTrailToCsv(
   };
 
   const rows = logs.map((log) => [
-    escape(log.timestamp ? new Date(log.timestamp).toLocaleString() : ''),
+    escape(log.timestamp ? formatLocalDateTime(log.timestamp) : ''),
     escape(log.itemName),
     escape(log.action),
     escape(log.performedBy),

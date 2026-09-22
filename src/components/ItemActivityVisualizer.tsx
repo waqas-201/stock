@@ -15,6 +15,11 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { StockItem, ItemAuditEntry } from '../types';
+import {
+  formatLocalDate,
+  formatLocalDateTime,
+  useActiveTimezone,
+} from '../lib/dateUtils';
 
 interface ItemActivityVisualizerProps {
   item: StockItem;
@@ -29,6 +34,7 @@ export const ItemActivityVisualizer: React.FC<ItemActivityVisualizerProps> = ({
   onSelectEvent,
   selectedEventId,
 }) => {
+  const { timezone } = useActiveTimezone();
   const containerRef = useRef<HTMLDivElement>(null);
   const [chartWidth, setChartWidth] = useState(600);
   const chartHeight = 200;
@@ -247,7 +253,7 @@ export const ItemActivityVisualizer: React.FC<ItemActivityVisualizerProps> = ({
                 <g key={`xtick_${idx}`} className="opacity-40">
                   <line x1={x} y1={0} x2={x} y2={innerHeight} stroke="#cbd5e1" strokeDasharray="2 3" />
                   <text x={x} y={innerHeight + 16} textAnchor="middle" className="text-[10px] fill-slate-400 font-mono">
-                    {tick.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    {formatLocalDate(tick, timezone)}
                   </text>
                 </g>
               );
@@ -456,12 +462,7 @@ export const ItemActivityVisualizer: React.FC<ItemActivityVisualizerProps> = ({
               <div className="flex justify-between">
                 <span className="text-slate-400">Time:</span>
                 <span className="text-slate-400 font-mono text-[10px]">
-                  {new Date(hoveredEvent.timestamp).toLocaleString(undefined, {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
+                  {formatLocalDateTime(hoveredEvent.timestamp, timezone, true)}
                 </span>
               </div>
               {hoveredEvent.summary && (
@@ -504,12 +505,7 @@ export const ItemActivityVisualizer: React.FC<ItemActivityVisualizerProps> = ({
               </span>
               <span className="text-slate-600 text-[11px]">
                 By {activeEvent.performedBy} on{' '}
-                {new Date(activeEvent.timestamp).toLocaleString(undefined, {
-                  month: 'short',
-                  day: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}{' '}
+                {formatLocalDateTime(activeEvent.timestamp, timezone, true)}{' '}
                 — Resulting stock: <strong>{activeEvent.balanceAfter ?? item.quantity} {item.unit}</strong>
               </span>
             </div>

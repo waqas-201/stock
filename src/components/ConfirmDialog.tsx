@@ -11,7 +11,7 @@ interface ConfirmDialogProps {
   requireNote?: boolean;
   notePlaceholder?: string;
   initialNote?: string;
-  onConfirm: () => void;
+  onConfirm?: () => void;
   onConfirmWithNote?: (note: string) => void;
   onCancel: () => void;
 }
@@ -23,7 +23,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
   isDestructive = true,
-  requireNote = false,
+  requireNote = true,
   notePlaceholder = 'Enter reason or audit note (e.g. Scrapped, Damaged, Discontinued)...',
   initialNote = '',
   onConfirm,
@@ -187,12 +187,14 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
               id="confirm-dialog-approve-btn"
               type="button"
               onClick={handleApprove}
-              className={`min-h-[48px] px-4 py-2.5 text-sm font-bold text-white rounded-xl shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
+              disabled={requireNote && !note.trim()}
+              title={requireNote && !note.trim() ? 'A note/reason is strictly required to approve deletion' : 'Confirm and approve action'}
+              className={`min-h-[48px] px-4 py-2.5 text-sm font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 ${
                 requireNote && !note.trim()
-                  ? 'bg-rose-400/80 cursor-pointer'
+                  ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed opacity-70'
                   : isDestructive
-                  ? 'bg-rose-600 hover:bg-rose-700 active:bg-rose-800'
-                  : 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800'
+                  ? 'bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white cursor-pointer'
+                  : 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white cursor-pointer'
               }`}
             >
               <CheckCircle2 className="w-4 h-4" />

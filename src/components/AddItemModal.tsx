@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { StockItem, StockUnit, StockTag, StockLabel, StockTagColor } from '../types';
 import { TagInput } from './TagInput';
+import { getTodayDateString } from '../lib/dateUtils';
 
 export interface AddItemModalProps {
   isOpen: boolean;
@@ -188,7 +189,7 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
   };
 
   const handleSetTodayProductionDate = () => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getTodayDateString();
     setProductionDate(today);
   };
 

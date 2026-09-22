@@ -70,6 +70,7 @@ import { ConfirmDialog } from './components/ConfirmDialog';
 import { UnauthorizedDomainModal } from './components/UnauthorizedDomainModal';
 import { ExportExcelModal } from './components/ExportExcelModal';
 import { QuickSaleModal } from './components/QuickSaleModal';
+import { TimezoneSelectorModal } from './components/TimezoneSelectorModal';
 import {
   CheckCircle2,
   AlertCircle,
@@ -149,6 +150,7 @@ export function App() {
   const [isDomainModalOpen, setIsDomainModalOpen] = useState(false);
   const [currentDomain, setCurrentDomain] = useState('');
   const [isExportExcelModalOpen, setIsExportExcelModalOpen] = useState(false);
+  const [isTimezoneModalOpen, setIsTimezoneModalOpen] = useState(false);
 
   // Quick Sale / Rapid Stock Deduction (Alt + B shortcut)
   const [isQuickSaleModalOpen, setIsQuickSaleModalOpen] = useState(false);
@@ -549,16 +551,14 @@ export function App() {
 
   // Toggle delete confirmation preference
   const handleToggleConfirmOnDelete = () => {
-    const next = !confirmOnDelete;
-    setConfirmOnDelete(next);
-    saveConfirmOnDelete(next);
+    // Audit Policy Enforced: Deletion without an explanatory note is strictly impossible
+    setConfirmOnDelete(true);
+    saveConfirmOnDelete(true);
     if (currentUser) {
-      saveUserSettingsToFirestore(currentUser.uid, next).catch(console.error);
+      saveUserSettingsToFirestore(currentUser.uid, true).catch(console.error);
     }
     showToast(
-      next
-        ? 'Delete confirmation popup enabled (will ask before deleting)'
-        : 'Quick Delete enabled (1-tap delete without popup + Undo)',
+      'Audit Policy Enforced: Every item deletion strictly requires an explanatory note and confirmation.',
       'info'
     );
   };
@@ -744,6 +744,12 @@ export function App() {
     notes?: string,
     tags?: string[]
   ) => {
+    const cleanNote = (notes || '').trim();
+    if (!cleanNote) {
+      showToast(`Cannot add "${itemName}": An audit note is strictly required.`, 'error');
+      return;
+    }
+
     const now = new Date().toISOString();
     const cleanTags = Array.isArray(tags)
       ? tags.map((t) => t.trim().replace(/^#+/, '')).filter((t) => t.length > 0)
@@ -752,11 +758,9 @@ export function App() {
     const auditEntry = createAuditEntry(
       'created',
       'Item added',
-      `Initial stock: ${quantity} ${unit}, Alert threshold: ≤ ${lowStockThreshold}${
+      `Audit Note: "${cleanNote}" • Initial stock: ${quantity} ${unit}, Alert threshold: ≤ ${lowStockThreshold}${
         productionDate ? `, Production Date: ${productionDate}` : ''
-      }${cleanTags.length > 0 ? `, Tags: [${cleanTags.join(', ')}]` : ''}${
-        notes ? `, Notes: ${notes}` : ''
-      }`,
+      }${cleanTags.length > 0 ? `, Tags: [${cleanTags.join(', ')}]` : ''}`,
       undefined,
       quantity,
       operator.name,
@@ -770,7 +774,7 @@ export function App() {
       quantity,
       lowStockThreshold,
       productionDate,
-      notes,
+      notes: cleanNote,
       tags: cleanTags,
       createdAt: now,
       updatedAt: now,
@@ -818,6 +822,12 @@ export function App() {
     const current = items.find((i) => i.id === id);
     if (!current) return;
 
+    const cleanNote = (notes || '').trim();
+    if (!cleanNote) {
+      showToast(`Cannot update "${itemName}": An audit note is strictly required.`, 'error');
+      return;
+    }
+
     const cleanTags = Array.isArray(tags)
       ? tags.map((t) => t.trim().replace(/^#+/, '')).filter((t) => t.length > 0)
       : [];
@@ -849,14 +859,14 @@ export function App() {
     if (currentTagsStr !== newTagsStr) {
       changes.push(`Tags: [${currentTagsStr || 'none'}] → [${newTagsStr || 'none'}]`);
     }
-    if (current.notes !== notes) {
-      changes.push(notes ? 'Notes updated' : 'Notes cleared');
+    if (current.notes !== cleanNote) {
+      changes.push('Note updated');
     }
 
     const auditEntry = createAuditEntry(
       'edited',
       changes.length > 0 ? `Item details modified` : `Item saved without changes`,
-      changes.length > 0 ? changes.join(' • ') : undefined,
+      `Audit Note: "${cleanNote}"${changes.length > 0 ? ` • ${changes.join(' • ')}` : ''}`,
       current.quantity,
       quantity,
       operator.name,
@@ -872,7 +882,7 @@ export function App() {
       quantity,
       lowStockThreshold,
       productionDate,
-      notes,
+      notes: cleanNote,
       tags: cleanTags,
       updatedAt: new Date().toISOString(),
       userId: currentUser?.uid || current.userId,
@@ -910,7 +920,13 @@ export function App() {
   };
 
   // Core delete execution with instant 1-tap Undo support and audit logging
-  const executeDelete = (item: StockItem) => {
+  const executeDelete = (item: StockItem, reasonNote: string) => {
+    const trimmedReason = (reasonNote || '').trim();
+    if (!trimmedReason) {
+      showToast(`Cannot delete "${item.itemName}": An explanation note is strictly required.`, 'error');
+      return;
+    }
+
     const itemIndex = items.findIndex((i) => i.id === item.id);
     const next = items.filter((i) => i.id !== item.id);
     updateItems(next);
@@ -928,7 +944,7 @@ export function App() {
     const deleteEntry = appendGlobalAuditLog({
       action: 'deleted',
       summary: `Removed item "${item.itemName}" from inventory`,
-      details: `Had ${item.quantity} ${item.unit} when deleted (Alert limit was ≤ ${
+      details: `Audit Note: "${trimmedReason}" • Had ${item.quantity} ${item.unit} when deleted (Alert limit was ≤ ${
         item.lowStockThreshold ?? 5
       })`,
       previousQuantity: item.quantity,
@@ -947,7 +963,7 @@ export function App() {
     }
 
     // Provide immediate Undo action
-    showToast(`Removed "${item.itemName}" by ${operator.name}`, 'info', {
+    showToast(`Removed "${item.itemName}" (Note: "${trimmedReason}") by ${operator.name}`, 'info', {
       label: 'Undo',
       onClick: () => {
         setItems((currentItems) => {
@@ -969,7 +985,7 @@ export function App() {
         const restoreEntry = appendGlobalAuditLog({
           action: 'restored',
           summary: `Restored "${item.itemName}" back to inventory`,
-          details: `Restored with ${item.quantity} ${item.unit}`,
+          details: `Restored with ${item.quantity} ${item.unit} (Reverted deletion note: "${trimmedReason}")`,
           previousQuantity: 0,
           newQuantity: item.quantity,
           delta: item.quantity,
@@ -990,35 +1006,30 @@ export function App() {
     });
   };
 
-  // Handle user clicking delete on an item
+  // Handle user clicking delete on an item - ALWAYS requires confirmation dialog & mandatory note
   const handleDeleteItemClick = (item: StockItem) => {
-    if (confirmOnDelete) {
-      setDontAskAgainInDialog(false);
-      setItemToDelete(item);
-    } else {
-      executeDelete(item);
-    }
+    setItemToDelete(item);
   };
 
-  // Confirm delete from dialog
-  const handleDeleteItemConfirm = () => {
+  // Confirm delete from dialog with mandatory reason note
+  const handleDeleteItemConfirm = (note: string) => {
     if (!itemToDelete) return;
     const item = itemToDelete;
-    setItemToDelete(null);
-
-    // If user checked "Don't ask again" in the dialog, persist their choice
-    if (dontAskAgainInDialog) {
-      setConfirmOnDelete(false);
-      saveConfirmOnDelete(false);
-      if (currentUser) {
-        saveUserSettingsToFirestore(currentUser.uid, false).catch(console.error);
-      }
+    const trimmedNote = (note || '').trim();
+    if (!trimmedNote) {
+      showToast(`Cannot delete "${item.itemName}": An audit note explaining the deletion is strictly required.`, 'error');
+      return;
     }
-
-    executeDelete(item);
+    setItemToDelete(null);
+    executeDelete(item, trimmedNote);
   };
 
-  const handleQuickQuantityChange = (item: StockItem, delta: number) => {
+  const handleQuickQuantityChange = (item: StockItem, delta: number, note?: string) => {
+    const cleanNote = (note || '').trim();
+    if (!cleanNote) {
+      showToast(`Cannot adjust quantity for "${item.itemName}": An audit note is strictly required. Please use "Add Stock" or "Quick Sale".`, 'error');
+      return;
+    }
     const newQty = Math.max(0, (item.quantity || 0) + delta);
     if (newQty === item.quantity) return;
 
@@ -1027,7 +1038,7 @@ export function App() {
       delta > 0
         ? `Stock increased (+${delta} ${item.unit})`
         : `Stock reduced (${delta} ${item.unit})`,
-      `Quantity changed from ${item.quantity} to ${newQty} ${item.unit}`,
+      `Audit Note: "${cleanNote}" • Quantity changed from ${item.quantity} to ${newQty} ${item.unit}`,
       item.quantity,
       newQty,
       operator.name,
@@ -1079,6 +1090,12 @@ export function App() {
     delta: number,
     reason?: string
   ): { previousQuantity: number; newQuantity: number; undo: () => void } => {
+    const cleanReason = (reason || '').trim();
+    if (!cleanReason) {
+      showToast(`Cannot adjust stock for "${item.itemName}": An audit note or reason is strictly required.`, 'error');
+      return { previousQuantity: item.quantity || 0, newQuantity: item.quantity || 0, undo: () => {} };
+    }
+
     const previousQuantity = item.quantity || 0;
     const newQty = Math.max(0, previousQuantity + delta);
 
@@ -1086,9 +1103,7 @@ export function App() {
     const actionDesc = isAddition
       ? `Inbound stock added (+${delta} ${item.unit})`
       : `Stock outbound deduction (${delta} ${item.unit})`;
-    const detailMsg = `${isAddition ? 'Added' : 'Deducted'} ${Math.abs(delta)} ${item.unit}. Baseline stock was ${previousQuantity}, new stock total is ${newQty}.${
-      reason ? ` Reference: ${reason}` : ''
-    }`;
+    const detailMsg = `Audit Note: "${cleanReason}" • ${isAddition ? 'Added' : 'Deducted'} ${Math.abs(delta)} ${item.unit}. Baseline stock was ${previousQuantity}, new stock total is ${newQty}.`;
 
     const auditEntry = createAuditEntry(
       'quantity_changed',
@@ -1134,7 +1149,7 @@ export function App() {
     }
 
     const undo = () => {
-      handleQuickQuantityChange(updatedItem, -delta);
+      handleInboundStock(updatedItem, -delta, `Undo inbound: Reverted adjustment of ${delta} ${item.unit}`);
     };
 
     showToast(
@@ -1157,6 +1172,12 @@ export function App() {
     customerOrRef?: string
   ) => {
     if (quantitySold <= 0) return;
+    const cleanNote = (notes || '').trim();
+    if (!cleanNote) {
+      showToast(`Cannot record sale for "${item.itemName}": A sale note or reference is strictly required.`, 'error');
+      return;
+    }
+
     const previousQuantity = item.quantity || 0;
 
     // Strict validation: Stock is already 0 -> cannot record sale
@@ -1179,17 +1200,13 @@ export function App() {
 
     const newQty = Math.max(0, previousQuantity - quantitySold);
 
-    const refNote = customerOrRef ? `Ref: ${customerOrRef}` : '';
-    const notePart = notes ? `Note: ${notes}` : '';
-    const details =
-      [refNote, notePart].filter(Boolean).join(' • ') || 'Rapid counter sale / stock deduction';
+    const refNote = customerOrRef ? `Ref: ${customerOrRef.trim()}` : '';
+    const details = `Audit Note: "${cleanNote}"${refNote ? ` • ${refNote}` : ''}`;
 
     const auditEntry = createAuditEntry(
       'quantity_changed',
       `Sale / Outbound (-${quantitySold} ${item.unit})`,
-      `Sold ${quantitySold} ${item.unit}. Baseline was ${previousQuantity}, remaining: ${newQty} ${item.unit}.${
-        details ? ` (${details})` : ''
-      }`,
+      `Sold ${quantitySold} ${item.unit}. Baseline was ${previousQuantity}, remaining: ${newQty} ${item.unit}. ${details}`,
       previousQuantity,
       newQty,
       operator.name,
@@ -1431,7 +1448,7 @@ export function App() {
       const nextThreshold =
         action.lowStockThreshold !== undefined ? action.lowStockThreshold : matchedItem.lowStockThreshold;
       const nextUnit = action.unit || matchedItem.unit;
-      const nextNotes = action.notes !== undefined ? action.notes : matchedItem.notes;
+      const nextNotes = (action.notes?.trim() || action.reason?.trim() || matchedItem.notes || 'Updated via Gemini AI Assistant').trim();
       const nextTags = action.tags !== undefined ? action.tags : matchedItem.tags;
       const nextProdDate =
         action.productionDate !== undefined ? action.productionDate : matchedItem.productionDate;
@@ -1471,7 +1488,8 @@ export function App() {
         };
       }
 
-      executeDelete(matchedItem);
+      const deleteReason = (action.reason?.trim() || 'Deleted via Gemini AI Assistant command').trim();
+      executeDelete(matchedItem, deleteReason);
       return {
         success: true,
         message: `Removed "${matchedItem.itemName}" from inventory.`,
@@ -1533,10 +1551,14 @@ export function App() {
       const now = new Date().toISOString();
       const newItems: StockItem[] = parsed.map((p) => {
         const id = generateItemId();
+        const itemNote = (p.notes && p.notes.trim())
+          ? p.notes.trim()
+          : `Batch imported from ${file.name} by ${operator.name}`;
+
         const auditEntry = createAuditEntry(
           'created',
           'Item imported from file',
-          `Imported from ${file.name} with quantity ${p.quantity} ${p.unit}`,
+          `Audit Note: "${itemNote}" • Imported from ${file.name} with quantity ${p.quantity} ${p.unit}`,
           undefined,
           p.quantity,
           operator.name,
@@ -1550,7 +1572,7 @@ export function App() {
           quantity: p.quantity,
           lowStockThreshold: p.lowStockThreshold ?? 5,
           productionDate: p.productionDate,
-          notes: p.notes,
+          notes: itemNote,
           createdAt: now,
           updatedAt: now,
           userId: currentUser?.uid,
@@ -1679,6 +1701,7 @@ export function App() {
         onSignOut={handleSignOut}
         selectedTag={selectedTag}
         onSelectTag={setSelectedTag}
+        onOpenTimezoneModal={() => setIsTimezoneModalOpen(true)}
       />
 
       {/* Cloud DB & Shared Access Status Banner */}
@@ -1951,18 +1974,17 @@ export function App() {
         }}
       />
 
-      {/* 6. Confirmation Dialog with "Don't ask again" choice */}
+      {/* 6. Confirmation Dialog requiring mandatory audit note */}
       <ConfirmDialog
         isOpen={!!itemToDelete}
         title="Delete Stock Item"
-        message={`Are you sure you want to remove "${itemToDelete?.itemName}"? You can also switch to Quick Delete mode to delete items without this dialog.`}
-        confirmLabel="Delete Item"
-        cancelLabel="Keep Item"
+        message={`Are you sure you want to remove "${itemToDelete?.itemName}" from inventory? An explanation note is strictly mandatory to approve any deletion.`}
+        confirmLabel="Approve Deletion"
+        cancelLabel="Cancel"
         isDestructive={true}
-        showDontAskAgain={true}
-        dontAskAgain={dontAskAgainInDialog}
-        onToggleDontAskAgain={setDontAskAgainInDialog}
-        onConfirm={handleDeleteItemConfirm}
+        requireNote={true}
+        notePlaceholder="Enter mandatory deletion reason (e.g. Scrapped, Damaged, Expired, Catalog Obsolete)..."
+        onConfirmWithNote={(note) => handleDeleteItemConfirm(note)}
         onCancel={() => setItemToDelete(null)}
       />
 
@@ -2016,6 +2038,13 @@ export function App() {
         onConfirmSale={handleConfirmQuickSale}
         onSwitchToEdit={(item) => setEditingItem(item)}
         onRestockItem={(item) => setRestockTargetItem(item)}
+      />
+
+      {/* 11. Timezone & Local Date Sync Modal */}
+      <TimezoneSelectorModal
+        isOpen={isTimezoneModalOpen}
+        onClose={() => setIsTimezoneModalOpen(false)}
+        onShowToast={(msg, type) => showToast(msg, type)}
       />
     </div>
   );

@@ -33,6 +33,13 @@ import { StockItem, ItemAuditEntry, StockTag, StockLabel } from '../types';
 import { GlobalAuditRecord } from '../lib/stockStorage';
 import { getTagStyle } from '../lib/tagUtils';
 import { ItemActivityVisualizer } from './ItemActivityVisualizer';
+import {
+  formatLocalDate,
+  formatLocalDateTime,
+  formatCalendarRelativeTime,
+  getTodayDateString,
+  useActiveTimezone,
+} from '../lib/dateUtils';
 
 interface ItemDetailsModalProps {
   isOpen: boolean;
@@ -93,57 +100,19 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
   // Copy feedback state
   const [copiedTrail, setCopiedTrail] = useState(false);
 
+  const { timezone } = useActiveTimezone();
+
   // Date formatting helpers
   const formatDate = (dateStr?: string) => {
-    if (!dateStr) return 'Not set';
-    try {
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return dateStr;
-      return d.toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-      });
-    } catch {
-      return dateStr;
-    }
+    return formatLocalDate(dateStr, timezone);
   };
 
   const formatDateTime = (dateStr?: string) => {
-    if (!dateStr) return 'Unknown';
-    try {
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return dateStr;
-      return d.toLocaleString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return dateStr;
-    }
+    return formatLocalDateTime(dateStr, timezone, true);
   };
 
   const formatRelativeTime = (dateStr?: string) => {
-    if (!dateStr) return '';
-    try {
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return '';
-      const now = Date.now();
-      const diffMs = now - d.getTime();
-      const diffMins = Math.floor(diffMs / 60000);
-      if (diffMins < 1) return 'Just now';
-      if (diffMins < 60) return `${diffMins}m ago`;
-      const diffHours = Math.floor(diffMins / 60);
-      if (diffHours < 24) return `${diffHours}h ago`;
-      const diffDays = Math.floor(diffHours / 24);
-      if (diffDays < 30) return `${diffDays}d ago`;
-      return formatDate(dateStr);
-    } catch {
-      return '';
-    }
+    return formatCalendarRelativeTime(dateStr, timezone);
   };
 
   // 1. Comprehensive Trail Synthesis & Deduplication
@@ -429,7 +398,7 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
     link.setAttribute(
       'download',
       `${item.itemName.replace(/[^a-z0-9_-]/gi, '_')}_Audit_Trail_${
-        new Date().toISOString().split('T')[0]
+        getTodayDateString(timezone)
       }.csv`
     );
     document.body.appendChild(link);
@@ -445,7 +414,7 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
     const lines = [
       `====================================================`,
       `PRODUCT AUDIT TRAIL REPORT: ${item.itemName.toUpperCase()}`,
-      `Generated: ${new Date().toLocaleString()}`,
+      `Generated: ${formatLocalDateTime(new Date(), timezone, true)}`,
       `Current Balance: ${item.quantity} ${item.unit} | Alert Threshold: ≤ ${threshold}`,
       `Total Recorded Events: ${lifetimeStats.totalEvents}`,
       `Lifetime Inbound: +${lifetimeStats.totalInboundUnits} ${item.unit} (${lifetimeStats.inboundCount} events)`,
@@ -477,7 +446,7 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
     if (!item || !onAddAuditNote) return;
 
     const text = auditNoteText.trim();
-    if (!text && auditNoteType !== 'count_verification') return;
+    if (!text) return;
 
     let verifiedCount: number | undefined = undefined;
     if (auditNoteType === 'count_verification' && verifiedCountInput.trim() !== '') {
@@ -491,7 +460,7 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
     try {
       onAddAuditNote(
         item,
-        text || `Physical count verified at ${verifiedCount ?? item.quantity} ${item.unit}`,
+        text,
         auditNoteType,
         verifiedCount
       );
@@ -939,7 +908,8 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
 
                   <div>
                     <label className="text-xs font-bold text-slate-700 block mb-1">
-                      Detailed Inspection Notes / Findings
+                      <span>Detailed Inspection Notes / Findings</span>
+                      <span className="text-rose-600 font-bold ml-1">* (Required to approve)</span>
                     </label>
                     <textarea
                       value={auditNoteText}
@@ -960,8 +930,8 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
                     </button>
                     <button
                       type="submit"
-                      disabled={isSubmittingNote}
-                      className="px-4 py-1.5 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-xl shadow-xs cursor-pointer disabled:opacity-50"
+                      disabled={isSubmittingNote || !auditNoteText.trim()}
+                      className="px-4 py-1.5 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-xl shadow-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {isSubmittingNote ? 'Saving Entry...' : 'Save to Product Trail'}
                     </button>

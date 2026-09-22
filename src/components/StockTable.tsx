@@ -34,6 +34,11 @@ import {
 import { StockItem, StockFilter, SortField, SortOrder, StockTag, StockLabel, StockUnit } from '../types';
 import { getTagStyle, getUniqueTagsWithCounts } from '../lib/tagUtils';
 import { ItemMiniActivitySparkline } from './ItemActivityVisualizer';
+import {
+  formatLocalDate,
+  formatCalendarRelativeTime,
+  useActiveTimezone,
+} from '../lib/dateUtils';
 
 interface StockTableProps {
   items: StockItem[];
@@ -123,6 +128,8 @@ export const StockTable: React.FC<StockTableProps> = ({
     return (item.quantity || 0) > 0 && (item.quantity || 0) <= threshold;
   };
 
+  const { timezone } = useActiveTimezone();
+
   // Helper to determine if an item is in stock (above its individual threshold)
   const isItemInStock = (item: StockItem) => {
     const threshold = item.lowStockThreshold ?? 5;
@@ -131,24 +138,7 @@ export const StockTable: React.FC<StockTableProps> = ({
 
   const formatProductionDate = (dateStr?: string) => {
     if (!dateStr) return null;
-    try {
-      const parts = dateStr.split('-');
-      if (parts.length === 3) {
-        const d = new Date(
-          parseInt(parts[0], 10),
-          parseInt(parts[1], 10) - 1,
-          parseInt(parts[2], 10)
-        );
-        return d.toLocaleDateString(undefined, {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-        });
-      }
-      return dateStr;
-    } catch {
-      return dateStr;
-    }
+    return formatLocalDate(dateStr, timezone);
   };
 
   // Unique tags extracted from inventory items
@@ -1657,11 +1647,8 @@ export const StockTable: React.FC<StockTableProps> = ({
                     </span>
                   </span>
                   {item.updatedAt && (
-                    <span className="text-[10px] text-slate-400 shrink-0">
-                      {new Date(item.updatedAt).toLocaleDateString(undefined, {
-                        month: 'short',
-                        day: 'numeric',
-                      })}
+                    <span className="text-[10px] text-slate-400 shrink-0 font-medium">
+                      {formatCalendarRelativeTime(item.updatedAt, timezone)}
                     </span>
                   )}
                 </div>
@@ -2009,13 +1996,8 @@ export const StockTable: React.FC<StockTableProps> = ({
                           </span>
                         </span>
                         {item.updatedAt && (
-                          <span className="text-[11px] text-slate-400 pl-4.5">
-                            {new Date(item.updatedAt).toLocaleDateString(undefined, {
-                              month: 'short',
-                              day: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
+                          <span className="text-[11px] text-slate-500 pl-4.5 font-medium block">
+                            {formatCalendarRelativeTime(item.updatedAt, timezone)}
                           </span>
                         )}
                       </div>
