@@ -14,6 +14,8 @@ import {
   saveOperatorProfile,
   GlobalAuditRecord,
   getUnifiedAuditLogs,
+  areAuditLogsDuplicate,
+  deduplicateAuditLogs,
 } from './lib/stockStorage';
 import {
   loadManagedUnits,
@@ -137,10 +139,10 @@ export function App() {
   // Self-heal audit records: automatically sync any missing item activities into globalLogs and Firestore
   useEffect(() => {
     const unified = getUnifiedAuditLogs(globalLogs, items);
-    if (unified.length > globalLogs.length) {
+    if (unified.length !== globalLogs.length) {
       setGlobalLogs(unified);
       saveGlobalAuditLog(unified);
-      if (currentUser?.uid) {
+      if (currentUser?.uid && unified.length > globalLogs.length) {
         const existingIds = new Set(globalLogs.map((l) => l.id));
         const missing = unified.filter(
           (l) => !existingIds.has(l.id) && !syncedAuditLogIdsRef.current.has(l.id)
@@ -501,9 +503,15 @@ export function App() {
         firestoreLogs.forEach((l) => syncedAuditLogIdsRef.current.add(l.id));
 
         const localLogs = loadGlobalAuditLog();
-        const unsyncedLogs = localLogs.filter(
-          (l) => !firestoreIds.has(l.id) && !syncedAuditLogIdsRef.current.has(l.id)
-        );
+        const unsyncedLogs = localLogs.filter((l) => {
+          if (firestoreIds.has(l.id) || syncedAuditLogIdsRef.current.has(l.id)) {
+            return false;
+          }
+          // Prevent syncing duplicate entries if Firestore already has a record for this event
+          const alreadyInFirestore = firestoreLogs.some((fl) => areAuditLogsDuplicate(fl, l));
+          return !alreadyInFirestore;
+        });
+
         if (unsyncedLogs.length > 0) {
           unsyncedLogs.slice(0, 15).forEach((log) => {
             syncedAuditLogIdsRef.current.add(log.id);

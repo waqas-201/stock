@@ -684,9 +684,9 @@ export const StockTable: React.FC<StockTableProps> = ({
         )}
 
         {/* Row 2: Filter Tabs & View Toggle / Sort */}
-        <div className="flex items-center justify-between gap-2 pt-0.5 flex-wrap sm:flex-nowrap">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-0.5 w-full">
           {/* Filter Pills with Horizontal Scroll on Small Screens */}
-          <div className="flex items-center gap-1 p-1 bg-slate-100/90 rounded-xl overflow-x-auto scrollbar-none max-w-full">
+          <div className="flex items-center gap-1 p-1 bg-slate-100/90 rounded-xl overflow-x-auto scrollbar-none w-full sm:w-auto shrink-0">
             {(
               [
                 { key: 'all', label: 'All', count: countAll },
@@ -701,7 +701,7 @@ export const StockTable: React.FC<StockTableProps> = ({
                   key={f.key}
                   type="button"
                   onClick={() => onFilterChange(f.key)}
-                  className={`min-h-[34px] px-2.5 sm:px-3 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                  className={`min-h-[34px] px-2.5 sm:px-3 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5 shrink-0 ${
                     isActive
                       ? 'bg-white text-slate-900 shadow-2xs'
                       : 'text-slate-600 hover:text-slate-900 active:bg-slate-200/60'
@@ -723,11 +723,11 @@ export const StockTable: React.FC<StockTableProps> = ({
           </div>
 
           {/* Right Side: Notes Enforced Badge, Shortcuts Guide, Sort & View Toggle */}
-          <div className="flex items-center gap-1.5 shrink-0 ml-auto flex-wrap sm:flex-nowrap">
+          <div className="flex items-center gap-1.5 w-full sm:w-auto sm:ml-auto overflow-x-auto sm:overflow-visible pb-1 sm:pb-0 scrollbar-none flex-nowrap shrink-0">
             {/* Notes Mandatory Status Badge */}
             <span
               id="audit-protection-badge"
-              className="min-h-[38px] px-2.5 py-1.5 inline-flex items-center gap-1.5 text-xs font-semibold rounded-xl bg-emerald-50 text-emerald-900 border border-emerald-200/90 select-none shadow-2xs"
+              className="min-h-[38px] px-2.5 py-1.5 inline-flex items-center gap-1.5 text-xs font-semibold rounded-xl bg-emerald-50 text-emerald-900 border border-emerald-200/90 select-none shadow-2xs shrink-0 whitespace-nowrap"
               title="Audit Enforced: Notes are strictly required for adding, updating, selling, and deleting items."
             >
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
@@ -740,11 +740,11 @@ export const StockTable: React.FC<StockTableProps> = ({
               id="btn-open-shortcuts-guide"
               type="button"
               onClick={() => setShowShortcutsModal(true)}
-              className="min-h-[38px] px-2.5 py-1.5 inline-flex items-center gap-1.5 text-xs font-semibold rounded-xl bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 active:bg-slate-100 cursor-pointer shadow-2xs transition-colors"
+              className="min-h-[38px] px-2.5 py-1.5 inline-flex items-center gap-1.5 text-xs font-semibold rounded-xl bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 active:bg-slate-100 cursor-pointer shadow-2xs transition-colors shrink-0 whitespace-nowrap"
               title="View all Keyboard Shortcuts (?)"
             >
               <Keyboard className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-              <span className="hidden sm:inline">Shortcuts</span>
+              <span className="hidden xs:inline sm:inline">Shortcuts</span>
               <kbd className="hidden sm:inline-flex text-[9px] font-mono px-1 py-0.2 rounded bg-slate-100 text-slate-500 border border-slate-200 font-bold">
                 ?
               </kbd>
@@ -761,15 +761,15 @@ export const StockTable: React.FC<StockTableProps> = ({
                 else toggleSort('name');
               }}
               title={`Sort by ${sortField} (${sortOrder})`}
-              className="min-h-[38px] px-2.5 py-1.5 inline-flex items-center gap-1 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 active:bg-slate-100 cursor-pointer"
+              className="min-h-[38px] px-2.5 py-1.5 inline-flex items-center gap-1 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 active:bg-slate-100 cursor-pointer shrink-0 whitespace-nowrap"
             >
-              <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />
-              <span className="hidden sm:inline">Sort:</span>
+              <ArrowUpDown className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+              <span className="hidden xs:inline sm:inline">Sort:</span>
               <span className="capitalize">
                 {sortField === 'threshold'
-                  ? 'Alert Level'
+                  ? 'Alert'
                   : sortField === 'production_date'
-                  ? 'Prod. Date'
+                  ? 'Date'
                   : sortField === 'tags'
                   ? 'Tags'
                   : sortField}
@@ -780,44 +780,44 @@ export const StockTable: React.FC<StockTableProps> = ({
             </button>
 
             {/* Layout Mode Toggle: Compact (Mobile-first, zero-scroll), Cards, Table */}
-            <div className="flex items-center p-0.5 bg-slate-100 rounded-xl border border-slate-200">
+            <div className="flex items-center p-0.5 bg-slate-100 rounded-xl border border-slate-200 shrink-0">
               <button
                 type="button"
                 onClick={() => setViewMode('compact')}
-                className={`min-h-[32px] px-2 py-1 rounded-lg transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold ${
+                className={`min-h-[32px] px-2 py-1 rounded-lg transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold shrink-0 whitespace-nowrap ${
                   viewMode === 'compact'
                     ? 'bg-white text-emerald-800 shadow-2xs'
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
                 title="Compact List View (Zero horizontal scrolling on mobile, stock numbers upfront)"
               >
-                <Rows3 className="w-3.5 h-3.5" />
+                <Rows3 className="w-3.5 h-3.5 shrink-0" />
                 <span className="text-[11px]">Compact</span>
               </button>
               <button
                 type="button"
                 onClick={() => setViewMode('cards')}
-                className={`min-h-[32px] px-2 py-1 rounded-lg transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold ${
+                className={`min-h-[32px] px-2 py-1 rounded-lg transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold shrink-0 whitespace-nowrap ${
                   viewMode === 'cards'
                     ? 'bg-white text-emerald-800 shadow-2xs'
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
                 title="Card Grid View"
               >
-                <LayoutGrid className="w-3.5 h-3.5" />
+                <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
                 <span className="text-[11px] hidden xs:inline">Cards</span>
               </button>
               <button
                 type="button"
                 onClick={() => setViewMode('table')}
-                className={`min-h-[32px] px-2 py-1 rounded-lg transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold ${
+                className={`min-h-[32px] px-2 py-1 rounded-lg transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold shrink-0 whitespace-nowrap ${
                   viewMode === 'table'
                     ? 'bg-white text-emerald-800 shadow-2xs'
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
                 title="Table Spreadsheet View"
               >
-                <List className="w-3.5 h-3.5" />
+                <List className="w-3.5 h-3.5 shrink-0" />
                 <span className="text-[11px] hidden xs:inline">Table</span>
               </button>
             </div>

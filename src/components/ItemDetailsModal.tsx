@@ -30,7 +30,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { StockItem, ItemAuditEntry, StockTag, StockLabel } from '../types';
-import { GlobalAuditRecord } from '../lib/stockStorage';
+import { GlobalAuditRecord, deduplicateAuditLogs } from '../lib/stockStorage';
 import { getTagStyle } from '../lib/tagUtils';
 import { ItemActivityVisualizer } from './ItemActivityVisualizer';
 import {
@@ -138,43 +138,23 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
     }
 
     // Merge internal item trail with relevant global audit logs for this item
-    const rawEntries: ItemAuditEntry[] = [];
-    const seenMap = new Set<string>();
+    const rawGlobalForThisItem: GlobalAuditRecord[] = (globalLogs || []).filter(
+      (l) => l.itemId === item.id || (l.itemName && l.itemName === item.itemName)
+    );
 
-    const addEntry = (e: ItemAuditEntry) => {
-      // Composite fingerprint to deduplicate
-      const fp = `${e.id || ''}_${e.timestamp}_${e.action}_${e.newQuantity ?? ''}`;
-      if (!seenMap.has(fp)) {
-        seenMap.add(fp);
-        rawEntries.push({ ...e });
-      }
-    };
+    const itemTrailAsGlobal: GlobalAuditRecord[] = (item.auditTrail || []).map((e) => ({
+      ...e,
+      itemId: item.id,
+      itemName: item.itemName,
+      unit: item.unit,
+      performedBy: e.performedBy || item.lastModifiedByName || item.createdByName || 'Store Operator',
+      userEmail: e.userEmail || item.lastModifiedByEmail || item.createdByEmail,
+    }));
 
-    if (item.auditTrail && Array.isArray(item.auditTrail)) {
-      item.auditTrail.forEach(addEntry);
-    }
-
-    if (globalLogs && Array.isArray(globalLogs)) {
-      globalLogs
-        .filter((l) => l.itemId === item.id)
-        .forEach((l) => {
-          addEntry({
-            id: l.id,
-            action: l.action,
-            timestamp: l.timestamp,
-            summary: l.summary,
-            details: l.details,
-            previousQuantity: l.previousQuantity,
-            newQuantity: l.newQuantity,
-            delta: l.delta,
-            performedBy: l.performedBy,
-            userEmail: l.userEmail,
-            userPhotoURL: l.userPhotoURL,
-            userId: l.userId,
-            balanceAfter: l.newQuantity,
-          });
-        });
-    }
+    const rawEntries: ItemAuditEntry[] = deduplicateAuditLogs([
+      ...itemTrailAsGlobal,
+      ...rawGlobalForThisItem,
+    ]);
 
     // Ensure genesis creation record exists
     const hasCreation = rawEntries.some((e) => e.action === 'created');

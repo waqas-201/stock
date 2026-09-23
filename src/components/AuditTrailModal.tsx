@@ -18,7 +18,7 @@ import {
   FileSpreadsheet,
   Clock,
 } from 'lucide-react';
-import { GlobalAuditRecord } from '../lib/stockStorage';
+import { GlobalAuditRecord, deduplicateAuditLogs } from '../lib/stockStorage';
 import {
   isTimestampInRange,
   exportAuditTrailToExcel,
@@ -51,7 +51,10 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
   logs = [],
   onSelectItem,
 }) => {
-  const safeLogs = Array.isArray(logs) ? logs : [];
+  const safeLogs = useMemo(() => {
+    const list = Array.isArray(logs) ? logs : [];
+    return deduplicateAuditLogs(list);
+  }, [logs]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterAction, setFilterAction] = useState<string>('all');
   const [selectedStaff, setSelectedStaff] = useState<string>('all');

@@ -303,6 +303,190 @@ export function saveStoredStock(items: StockItem[]): void {
 }
 
 /**
+ * Normalizes text for comparison (collapses extra whitespace, trims, lowercases)
+ */
+function normalizeLogString(str?: string | null): string {
+  if (!str) return '';
+  return str.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * Extracts audit note content if formatted as `Audit Note: "..."`
+ */
+function extractLogNote(str?: string | null): string {
+  if (!str) return '';
+  const match = str.match(/Audit Note:\s*"([^"]*)"/i);
+  if (match) return normalizeLogString(match[1]);
+  return normalizeLogString(str);
+}
+
+/**
+ * Checks whether two audit records refer to the exact same inventory event.
+ */
+export function areAuditLogsDuplicate(
+  a: GlobalAuditRecord,
+  b: GlobalAuditRecord
+): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+
+  // 1. Direct ID match
+  if (a.id && b.id && a.id === b.id) return true;
+
+  // 2. Actions must be identical
+  if (a.action !== b.action) return false;
+
+  // 3. Items must refer to the same catalog SKU
+  const aItemId = (a.itemId || '').trim();
+  const bItemId = (b.itemId || '').trim();
+  const aName = normalizeLogString(a.itemName);
+  const bName = normalizeLogString(b.itemName);
+
+  const itemMatches =
+    (aItemId && bItemId && aItemId === bItemId) ||
+    (aName && bName && aName === bName);
+
+  if (!itemMatches) return false;
+
+  // 4. Check timestamp proximity
+  const tA = new Date(a.timestamp).getTime();
+  const tB = new Date(b.timestamp).getTime();
+  const hasValidTimestamps = !isNaN(tA) && !isNaN(tB);
+  const timeDiffMs = hasValidTimestamps ? Math.abs(tA - tB) : null;
+
+  // If timestamps are valid and more than 10 minutes apart, they are separate events
+  if (timeDiffMs !== null && timeDiffMs > 10 * 60 * 1000) {
+    return false;
+  }
+
+  // 5. Quantity match check
+  const hasNewQtyA = typeof a.newQuantity === 'number';
+  const hasNewQtyB = typeof b.newQuantity === 'number';
+  const newQtyMatches = !hasNewQtyA || !hasNewQtyB || a.newQuantity === b.newQuantity;
+
+  const hasPrevQtyA = typeof a.previousQuantity === 'number';
+  const hasPrevQtyB = typeof b.previousQuantity === 'number';
+  const prevQtyMatches = !hasPrevQtyA || !hasPrevQtyB || a.previousQuantity === b.previousQuantity;
+
+  const hasDeltaA = typeof a.delta === 'number';
+  const hasDeltaB = typeof b.delta === 'number';
+  const deltaMatches = !hasDeltaA || !hasDeltaB || a.delta === b.delta;
+
+  if (!newQtyMatches || !prevQtyMatches || !deltaMatches) {
+    return false;
+  }
+
+  // 6. Content & summary comparison
+  const aSummary = normalizeLogString(a.summary);
+  const bSummary = normalizeLogString(b.summary);
+  const summaryMatches =
+    aSummary === bSummary ||
+    (aSummary.length > 0 && bSummary.length > 0 && (aSummary.includes(bSummary) || bSummary.includes(aSummary)));
+
+  const aNote = extractLogNote(a.details);
+  const bNote = extractLogNote(b.details);
+  const noteMatches = !aNote || !bNote || aNote === bNote;
+
+  const aDetailsNorm = normalizeLogString(a.details);
+  const bDetailsNorm = normalizeLogString(b.details);
+  const fullDetailsMatches = !aDetailsNorm || !bDetailsNorm || aDetailsNorm === bDetailsNorm;
+
+  // If summary matches and details/notes match:
+  if (summaryMatches && (noteMatches || fullDetailsMatches)) {
+    return true;
+  }
+
+  // If baseline & new quantities both match and occurred within 3 minutes on the same item:
+  if (
+    hasNewQtyA &&
+    hasNewQtyB &&
+    a.newQuantity === b.newQuantity &&
+    hasPrevQtyA &&
+    hasPrevQtyB &&
+    a.previousQuantity === b.previousQuantity &&
+    timeDiffMs !== null &&
+    timeDiffMs < 3 * 60 * 1000
+  ) {
+    return true;
+  }
+
+  // Item creation duplicate check (same item created around the same time)
+  if (a.action === 'created' && timeDiffMs !== null && timeDiffMs < 10 * 60 * 1000) {
+    return true;
+  }
+
+  // Item deletion duplicate check
+  if (a.action === 'deleted' && timeDiffMs !== null && timeDiffMs < 10 * 60 * 1000 && noteMatches) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Deduplicates audit log records, merging complementary fields and returning sorted records.
+ */
+export function deduplicateAuditLogs(records: GlobalAuditRecord[]): GlobalAuditRecord[] {
+  if (!Array.isArray(records) || records.length <= 1) {
+    return Array.isArray(records) ? records : [];
+  }
+
+  const result: GlobalAuditRecord[] = [];
+  const seenIds = new Set<string>();
+
+  for (const record of records) {
+    if (!record) continue;
+
+    if (record.id && seenIds.has(record.id)) {
+      continue;
+    }
+
+    const existingIndex = result.findIndex((existing) => areAuditLogsDuplicate(existing, record));
+
+    if (existingIndex >= 0) {
+      const existing = result[existingIndex];
+      // Keep whichever has richer fields
+      result[existingIndex] = {
+        ...record,
+        ...existing,
+        id: existing.id || record.id,
+        itemId: existing.itemId || record.itemId,
+        itemName: existing.itemName || record.itemName,
+        unit: existing.unit || record.unit,
+        performedBy: existing.performedBy || record.performedBy || 'Store Operator',
+        userEmail: existing.userEmail || record.userEmail,
+        userPhotoURL: existing.userPhotoURL || record.userPhotoURL,
+        userId: existing.userId || record.userId,
+        details: existing.details || record.details,
+        summary: existing.summary || record.summary,
+        previousQuantity:
+          existing.previousQuantity !== undefined ? existing.previousQuantity : record.previousQuantity,
+        newQuantity:
+          existing.newQuantity !== undefined ? existing.newQuantity : record.newQuantity,
+        delta: existing.delta !== undefined ? existing.delta : record.delta,
+        balanceAfter:
+          existing.balanceAfter !== undefined ? existing.balanceAfter : record.balanceAfter,
+        timestamp: existing.timestamp || record.timestamp,
+      };
+      if (record.id) seenIds.add(record.id);
+      if (existing.id) seenIds.add(existing.id);
+    } else {
+      result.push({ ...record });
+      if (record.id) seenIds.add(record.id);
+    }
+  }
+
+  return result.sort((a, b) => {
+    const tA = new Date(a.timestamp).getTime();
+    const tB = new Date(b.timestamp).getTime();
+    if (isNaN(tA) || isNaN(tB)) {
+      return (b.timestamp || '').localeCompare(a.timestamp || '');
+    }
+    return tB - tA;
+  });
+}
+
+/**
  * Loads the complete global inventory audit trail (all actions across all items,
  * including deletions).
  */
@@ -312,7 +496,7 @@ export function loadGlobalAuditLog(): GlobalAuditRecord[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed;
+        return deduplicateAuditLogs(parsed);
       }
     }
   } catch (err) {
@@ -333,8 +517,9 @@ export function loadGlobalAuditLog(): GlobalAuditRecord[] {
       });
     }
   });
-  saveGlobalAuditLog(initialLogs);
-  return initialLogs;
+  const dedupedInitial = deduplicateAuditLogs(initialLogs);
+  saveGlobalAuditLog(dedupedInitial);
+  return dedupedInitial;
 }
 
 /**
@@ -342,8 +527,9 @@ export function loadGlobalAuditLog(): GlobalAuditRecord[] {
  */
 export function saveGlobalAuditLog(records: GlobalAuditRecord[]): void {
   try {
-    // Keep the most recent 250 log entries to prevent localStorage bloat
-    const trimmed = records.slice(0, 250);
+    const clean = deduplicateAuditLogs(records);
+    // Keep the most recent 350 log entries to prevent localStorage bloat
+    const trimmed = clean.slice(0, 350);
     localStorage.setItem(GLOBAL_LOG_KEY, JSON.stringify(trimmed));
   } catch (err) {
     console.error('Failed to save global audit log:', err);
@@ -351,19 +537,27 @@ export function saveGlobalAuditLog(records: GlobalAuditRecord[]): void {
 }
 
 /**
- * Adds a new entry to the global audit log
+ * Adds a new entry to the global audit log.
+ * Reuses the original ID and timestamp if provided to prevent duplicated records.
  */
 export function appendGlobalAuditLog(
-  record: Omit<GlobalAuditRecord, 'id' | 'timestamp'>
+  record: Partial<GlobalAuditRecord> & {
+    action: GlobalAuditRecord['action'];
+    summary: string;
+    itemName: string;
+  }
 ): GlobalAuditRecord {
   const newRecord: GlobalAuditRecord = {
+    itemId: record.itemId || 'general',
+    unit: record.unit || 'Unit',
+    performedBy: record.performedBy || 'Store Operator',
     ...record,
-    id: 'aud_g_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-    timestamp: new Date().toISOString(),
+    id: record.id || ('aud_g_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6)),
+    timestamp: record.timestamp || new Date().toISOString(),
   };
 
   const logs = loadGlobalAuditLog();
-  const next = [newRecord, ...logs];
+  const next = deduplicateAuditLogs([newRecord, ...logs]);
   saveGlobalAuditLog(next);
   return newRecord;
 }
@@ -456,18 +650,19 @@ export const saveOperatorProfile = saveActiveOperator;
  * Unifies all audit records from the global log registry AND all individual item audit trails.
  * This guarantees complete, tamper-proof audit preservation: even if global logs were somehow cleared
  * or reset, all item activities (creates, restocks, sales, edits, audit notes) are preserved and reconstructed!
+ * Runs through deduplicateAuditLogs to ensure zero duplicate entries are ever shown.
  */
 export function getUnifiedAuditLogs(
   globalLogs: GlobalAuditRecord[],
   items: StockItem[]
 ): GlobalAuditRecord[] {
-  const map = new Map<string, GlobalAuditRecord>();
+  const allLogs: GlobalAuditRecord[] = [];
 
-  // 1. Process all existing global logs
+  // 1. Collect all existing global logs
   if (Array.isArray(globalLogs)) {
     globalLogs.forEach((l) => {
       if (l && l.id) {
-        map.set(l.id, l);
+        allLogs.push(l);
       }
     });
   }
@@ -478,42 +673,29 @@ export function getUnifiedAuditLogs(
       if (item && Array.isArray(item.auditTrail)) {
         item.auditTrail.forEach((entry) => {
           if (!entry) return;
-          const entryId = entry.id || `aud_item_${item.id}_${entry.timestamp}`;
-          if (!map.has(entryId)) {
-            // Also check for composite match to prevent duplicates if ID differed
-            const alreadyExists = Array.from(map.values()).some(
-              (existing) =>
-                existing.itemId === item.id &&
-                existing.timestamp === entry.timestamp &&
-                existing.action === entry.action &&
-                existing.newQuantity === entry.newQuantity
-            );
-            if (!alreadyExists) {
-              map.set(entryId, {
-                ...entry,
-                id: entryId,
-                itemId: item.id,
-                itemName: item.itemName,
-                unit: item.unit,
-                performedBy: entry.performedBy || item.lastModifiedByName || item.createdByName || 'Store Operator',
-                userEmail: entry.userEmail || item.lastModifiedByEmail || item.createdByEmail,
-              });
-            }
-          }
+          allLogs.push({
+            ...entry,
+            id: entry.id || `aud_item_${item.id}_${entry.timestamp}`,
+            itemId: item.id,
+            itemName: item.itemName,
+            unit: item.unit,
+            performedBy:
+              entry.performedBy ||
+              item.lastModifiedByName ||
+              item.createdByName ||
+              'Store Operator',
+            userEmail:
+              entry.userEmail ||
+              item.lastModifiedByEmail ||
+              item.createdByEmail,
+          });
         });
       }
     });
   }
 
-  // 3. Return sorted descending by timestamp
-  return Array.from(map.values()).sort((a, b) => {
-    const tA = new Date(a.timestamp).getTime();
-    const tB = new Date(b.timestamp).getTime();
-    if (isNaN(tA) || isNaN(tB)) {
-      return (b.timestamp || '').localeCompare(a.timestamp || '');
-    }
-    return tB - tA;
-  });
+  // 3. Deduplicate across all combined records and sort newest first
+  return deduplicateAuditLogs(allLogs);
 }
 
 

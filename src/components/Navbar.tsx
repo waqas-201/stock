@@ -647,14 +647,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
 
             {/* Mobile Actions Header (Touch-optimized, Guaranteed Zero-Overflow) */}
-            <div className="flex md:hidden items-center gap-1.5 shrink-0">
+            <div className="flex md:hidden items-center gap-1.5 sm:gap-2 shrink-0">
               {/* Talk to Gemini AI on mobile */}
               {onOpenGeminiChat && (
                 <button
                   id="btn-mobile-gemini-chat"
                   type="button"
                   onClick={onOpenGeminiChat}
-                  className="min-h-[38px] px-2.5 py-1.5 inline-flex items-center justify-center gap-1 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-700 rounded-xl shadow-xs cursor-pointer active:scale-95 transition-transform"
+                  className="min-h-[40px] px-2.5 py-1.5 inline-flex items-center justify-center gap-1 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-700 active:from-emerald-700 active:to-teal-800 rounded-xl shadow-xs cursor-pointer active:scale-95 transition-transform"
                   title="Talk with Gemini AI about your stock"
                   aria-label="Talk with Gemini AI"
                 >
@@ -667,14 +667,14 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={onOpenOperatorModal}
-                className="min-h-[38px] px-2 py-1.5 inline-flex items-center justify-center gap-1 text-xs font-bold bg-white text-slate-800 border border-slate-300 rounded-xl cursor-pointer shadow-2xs active:bg-slate-50"
+                className="min-h-[40px] px-2.5 py-1.5 inline-flex items-center justify-center gap-1.5 text-xs font-bold bg-white text-slate-800 border border-slate-300 active:bg-slate-50 rounded-xl cursor-pointer shadow-2xs"
                 title={`Active staff: ${opName}`}
                 aria-label="Active staff member"
               >
                 <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-[10px]">
                   {opInitial}
                 </div>
-                <span className="max-w-[50px] truncate text-[11px] font-bold">
+                <span className="max-w-[60px] truncate text-[11px] font-bold">
                   {opName}
                 </span>
               </button>
@@ -684,7 +684,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 id="btn-mobile-nav-menu"
                 type="button"
                 onClick={() => setIsMobileMenuOpen(true)}
-                className="min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-700 bg-slate-100 active:bg-slate-200 border border-slate-200 rounded-xl transition-colors cursor-pointer"
+                className="min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-700 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 border border-slate-200 rounded-xl transition-colors cursor-pointer"
                 title="More actions & settings"
                 aria-label="Open settings and actions menu"
               >
@@ -715,7 +715,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             id="mobile-nav-sheet"
             role="dialog"
             aria-modal="true"
-            className="w-full bg-white rounded-t-3xl border-t border-slate-200 p-5 shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto animate-in slide-in-from-bottom-5 duration-200"
+            className="w-full bg-white rounded-t-3xl border-t border-slate-200 p-5 pb-8 sm:pb-6 shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto animate-in slide-in-from-bottom-5 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Sheet Handle */}

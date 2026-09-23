@@ -12,7 +12,7 @@ import {
   Boxes,
 } from 'lucide-react';
 import { StockItem } from '../types';
-import { GlobalAuditRecord } from '../lib/stockStorage';
+import { GlobalAuditRecord, deduplicateAuditLogs } from '../lib/stockStorage';
 import {
   getAffectedItems,
   exportToExcelAdvanced,
@@ -57,7 +57,10 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
   onShowToast,
 }) => {
   const safeItems = Array.isArray(items) ? items : [];
-  const safeLogs = Array.isArray(globalLogs) ? globalLogs : [];
+  const safeLogs = useMemo(() => {
+    const list = Array.isArray(globalLogs) ? globalLogs : [];
+    return deduplicateAuditLogs(list);
+  }, [globalLogs]);
 
   const { timezone } = useActiveTimezone();
 
