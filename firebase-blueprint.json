@@ -124,12 +124,69 @@
         "userId": { "type": "string", "maxLength": 128 }
       },
       "required": ["id", "name", "createdAt", "updatedAt"]
+    },
+    "DeliveryChallan": {
+      "title": "Delivery Challan",
+      "description": "Official goods dispatch note and delivery challan for multi-item inventory orders",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "challanNumber": { "type": "string", "maxLength": 80 },
+        "customerName": { "type": "string", "maxLength": 200 },
+        "date": { "type": "string", "maxLength": 60 },
+        "dispatchedByName": { "type": "string", "maxLength": 120 },
+        "dispatchedByEmail": { "type": "string", "maxLength": 120 },
+        "items": { "type": "array" },
+        "totalItems": { "type": "number" },
+        "totalQuantity": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "deliveryAddress": { "type": "string", "maxLength": 500 },
+        "vehicleNumber": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "maxLength": 50 },
+        "companyName": { "type": "string", "maxLength": 200 },
+        "companyAddress": { "type": "string", "maxLength": 300 },
+        "companyPhone": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string", "maxLength": 60 },
+        "userId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "challanNumber", "customerName", "date", "dispatchedByName", "totalItems", "totalQuantity", "createdAt"]
+    },
+    "Customer": {
+      "title": "Customer Party",
+      "description": "Registered customer or client party profile for dispatch orders and delivery challans",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 200 },
+        "contactPerson": { "type": "string", "maxLength": 150 },
+        "phone": { "type": "string", "maxLength": 60 },
+        "email": { "type": "string", "maxLength": 120 },
+        "address": { "type": "string", "maxLength": 500 },
+        "city": { "type": "string", "maxLength": 100 },
+        "taxNumber": { "type": "string", "maxLength": 80 },
+        "partyType": { "type": "string", "maxLength": 50 },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "status": { "type": "string", "maxLength": 30 },
+        "isDefault": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 60 },
+        "updatedAt": { "type": "string", "maxLength": 60 },
+        "userId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "name", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
+    "/customers/{customerId}": {
+      "schema": { "$ref": "#/entities/Customer" },
+      "description": "Shared registered customer party profiles collection for sales and dispatch management"
+    },
     "/companies/{companyId}": {
       "schema": { "$ref": "#/entities/CompanyProfile" },
       "description": "Multi-company profiles collection for corporate inventory management"
+    },
+    "/delivery_challans/{challanId}": {
+      "schema": { "$ref": "#/entities/DeliveryChallan" },
+      "description": "Shared delivery challans collection for multi-item order fulfillment"
     },
     "/stock_items/{itemId}": {
       "schema": { "$ref": "#/entities/StockItem" },

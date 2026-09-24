@@ -30,6 +30,7 @@ import {
   Receipt,
   Keyboard,
   ShieldCheck,
+  Truck,
 } from 'lucide-react';
 import { StockItem, StockFilter, SortField, SortOrder, StockTag, StockLabel, StockUnit } from '../types';
 import { getTagStyle, getUniqueTagsWithCounts } from '../lib/tagUtils';
@@ -66,6 +67,7 @@ interface StockTableProps {
   onOpenLabelModal?: () => void;
   onOpenQuickSale?: (item: StockItem) => void;
   onActiveItemChange?: (item: StockItem | null) => void;
+  onOpenDispatchOrder?: (item?: StockItem) => void;
 }
 
 export const StockTable: React.FC<StockTableProps> = ({
@@ -93,6 +95,7 @@ export const StockTable: React.FC<StockTableProps> = ({
   onOpenLabelModal,
   onOpenQuickSale,
   onActiveItemChange,
+  onOpenDispatchOrder,
 }) => {
   const effectiveTags: StockTag[] = managedTags || (managedLabels as unknown as StockTag[]) || [];
   const handleOpenTagsModal = onOpenTagModal || onOpenLabelModal;
@@ -360,6 +363,12 @@ export const StockTable: React.FC<StockTableProps> = ({
       if (activeItem) {
         onDeleteItem(activeItem);
       }
+    } else if (e.altKey && (e.key === 'o' || e.key === 'O' || e.code === 'KeyO')) {
+      // Direct Order Dispatch & Delivery Challan shortcut: Alt + O
+      e.preventDefault();
+      if (onOpenDispatchOrder) {
+        onOpenDispatchOrder(activeItem || undefined);
+      }
     } else if (e.key === 'Escape') {
       if (searchQuery) {
         setSearchQuery('');
@@ -410,6 +419,20 @@ export const StockTable: React.FC<StockTableProps> = ({
       ) {
         e.preventDefault();
         onAddItem();
+        return;
+      }
+
+      // Multi-Item Order Dispatch & Delivery Challan: Alt + O
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        (e.key === 'o' || e.key === 'O' || e.code === 'KeyO')
+      ) {
+        if (onOpenDispatchOrder) {
+          e.preventDefault();
+          onOpenDispatchOrder(activeItem || undefined);
+        }
         return;
       }
 
@@ -589,6 +612,24 @@ export const StockTable: React.FC<StockTableProps> = ({
               A + N
             </kbd>
           </button>
+
+          {/* Dispatch Order & Delivery Challan */}
+          {onOpenDispatchOrder && (
+            <button
+              id="btn-dispatch-order-stock"
+              type="button"
+              onClick={() => onOpenDispatchOrder(activeItem || undefined)}
+              className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 sm:px-4 py-2 text-sm font-bold text-white bg-slate-900 hover:bg-slate-800 active:bg-black rounded-xl shadow-xs transition-colors cursor-pointer shrink-0 border border-slate-700/80"
+              title="Fulfill multi-item order & issue Delivery Challan (Shortcut: Alt + O)"
+            >
+              <Truck className="w-4 h-4 text-emerald-400" />
+              <span className="hidden xs:inline">Dispatch Order</span>
+              <span className="xs:hidden">Dispatch</span>
+              <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-300 bg-slate-800 rounded border border-slate-600">
+                Alt+O
+              </kbd>
+            </button>
+          )}
         </div>
 
         {/* Active Selection Keyboard Helper strip when searching */}
@@ -636,6 +677,21 @@ export const StockTable: React.FC<StockTableProps> = ({
                       Alt+S
                     </kbd>
                   )}
+                </button>
+              )}
+
+              {onOpenDispatchOrder && (
+                <button
+                  type="button"
+                  onClick={() => onOpenDispatchOrder(activeItem)}
+                  className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-slate-800 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg cursor-pointer transition-colors shadow-2xs"
+                  title="Dispatch in multi-item order (Alt + O)"
+                >
+                  <Truck className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Dispatch</span>
+                  <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                    Alt+O
+                  </kbd>
                 </button>
               )}
 
@@ -2141,6 +2197,18 @@ export const StockTable: React.FC<StockTableProps> = ({
                       <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">Alt</kbd>
                       <span className="text-slate-400">+</span>
                       <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">S</kbd>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl">
+                    <div>
+                      <span className="font-bold text-slate-800 block">Unified Multi-Item Dispatch & Delivery Challan</span>
+                      <span className="text-[11px] text-slate-500">Pick multiple items, deduct stock at once & issue challan</span>
+                    </div>
+                    <div className="flex items-center gap-1 font-mono">
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">Alt</kbd>
+                      <span className="text-slate-400">+</span>
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">O</kbd>
                     </div>
                   </div>
 

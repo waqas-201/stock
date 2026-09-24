@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { StockItem, StockUnit, StockFilter, OperatorProfile, GeminiAgentAction, StockTag, StockTagColor } from './types';
+import { StockItem, StockUnit, StockFilter, OperatorProfile, GeminiAgentAction, StockTag, StockTagColor, DeliveryChallan, CustomerParty, GoodsReceipt } from './types';
 import {
   loadStoredStock,
   saveStoredStock,
@@ -28,6 +28,13 @@ import {
   DEFAULT_TAGS,
 } from './lib/tagStorage';
 import {
+  loadRegisteredCustomers,
+  saveRegisteredCustomers,
+  saveCustomer,
+  deleteRegisteredCustomer,
+  quickRegisterCustomer,
+} from './lib/customerStorage';
+import {
   exportToExcel,
   exportToCsv,
   parseExcelOrCsvFile,
@@ -55,6 +62,11 @@ import {
   subscribeUserSettings,
   saveUserSettingsToFirestore,
   migrateLocalDataToCloud,
+  saveDeliveryChallanToFirestore,
+  saveGoodsReceiptToFirestore,
+  subscribeCustomers,
+  saveCustomerToFirestore,
+  deleteCustomerFromFirestore,
 } from './lib/firestoreService';
 
 // Components
@@ -74,6 +86,9 @@ import { UnauthorizedDomainModal } from './components/UnauthorizedDomainModal';
 import { ExportExcelModal } from './components/ExportExcelModal';
 import { QuickSaleModal } from './components/QuickSaleModal';
 import { TimezoneSelectorModal } from './components/TimezoneSelectorModal';
+import { DispatchOrderModal } from './components/DispatchOrderModal';
+import { ReceiveStockModal } from './components/ReceiveStockModal';
+import { CustomerManagementModal } from './components/CustomerManagementModal';
 import {
   CheckCircle2,
   AlertCircle,
@@ -89,6 +104,7 @@ import {
   UserCheck,
   ShieldCheck,
   Users,
+  PackageCheck,
 } from 'lucide-react';
 
 export function App() {
@@ -102,6 +118,10 @@ export function App() {
   const [items, setItems] = useState<StockItem[]>(() => loadStoredStock());
   const [units, setUnits] = useState<StockUnit[]>(() => loadManagedUnits());
   const [tags, setTags] = useState<StockTag[]>(() => loadManagedTags());
+  const [customers, setCustomers] = useState<CustomerParty[]>(() => loadRegisteredCustomers());
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
+  const [dispatchPreselectedCustomer, setDispatchPreselectedCustomer] = useState<string>('');
+  const [dispatchPreselectedAddress, setDispatchPreselectedAddress] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<StockFilter>('all');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
@@ -187,6 +207,26 @@ export function App() {
   const [currentDomain, setCurrentDomain] = useState('');
   const [isExportExcelModalOpen, setIsExportExcelModalOpen] = useState(false);
   const [isTimezoneModalOpen, setIsTimezoneModalOpen] = useState(false);
+
+  // Unified Multi-Item Order Dispatch & Delivery Challan (Alt + O)
+  const [isDispatchOrderOpen, setIsDispatchOrderOpen] = useState(false);
+  const [dispatchInitialItem, setDispatchInitialItem] = useState<StockItem | null>(null);
+
+  const handleOpenDispatchOrder = useCallback((initialItem?: StockItem | null) => {
+    setDispatchInitialItem(initialItem || null);
+    setIsDispatchOrderOpen(true);
+  }, []);
+
+  // Unified Goods Receipt & Stock Receiving Inward (Alt + R)
+  const [isReceiveStockOpen, setIsReceiveStockOpen] = useState(false);
+  const [receiveInitialItem, setReceiveInitialItem] = useState<StockItem | null>(null);
+  const [receiveInitialVendor, setReceiveInitialVendor] = useState<string>('');
+
+  const handleOpenReceiveStock = useCallback((initialItem?: StockItem | null, initialVendor?: string) => {
+    setReceiveInitialItem(initialItem || null);
+    setReceiveInitialVendor(initialVendor || '');
+    setIsReceiveStockOpen(true);
+  }, []);
 
   // Quick Sale / Rapid Stock Deduction (Alt + B shortcut)
   const [isQuickSaleModalOpen, setIsQuickSaleModalOpen] = useState(false);
@@ -286,6 +326,30 @@ export function App() {
         return;
       }
 
+      // 2b. Alt + O (Windows/Linux/macOS) -> Unified Multi-Item Order Dispatch & Delivery Challan
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        (e.key === 'o' || e.key === 'O' || e.code === 'KeyO')
+      ) {
+        e.preventDefault();
+        handleOpenDispatchOrder();
+        return;
+      }
+
+      // 2c. Alt + R (Windows/Linux/macOS) -> Unified Goods Receipt & Stock Receiving Inward
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        (e.key === 'r' || e.key === 'R' || e.code === 'KeyR')
+      ) {
+        e.preventDefault();
+        handleOpenReceiveStock();
+        return;
+      }
+
       const activeElement = document.activeElement;
       const isTypingInField =
         activeElement &&
@@ -341,7 +405,7 @@ export function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [handleOpenQuickSale, openRegisterNewSKUModal]);
+  }, [handleOpenQuickSale, handleOpenDispatchOrder, openRegisterNewSKUModal]);
 
   // Auth state listener
   useEffect(() => {
@@ -536,6 +600,57 @@ export function App() {
     });
     return () => unsubscribe();
   }, [currentUser]);
+
+  // Real-time Firestore synchronizer for registered customer & vendor parties
+  useEffect(() => {
+    if (!currentUser) return;
+    const unsubscribe = subscribeCustomers((cloudCustomers) => {
+      // Synchronize directly with Cloud DB so deletions immediately reflect in UI
+      setCustomers(cloudCustomers);
+      saveRegisteredCustomers(cloudCustomers);
+    });
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  // Customer & Vendor Party Handlers
+  const handleSaveCustomer = async (cust: CustomerParty) => {
+    const updated = saveCustomer(cust);
+    setCustomers(updated);
+    showToast(`${cust.partyType === 'vendor' ? 'Vendor' : 'Customer'} "${cust.name}" saved!`, 'success');
+    if (currentUser?.uid) {
+      await saveCustomerToFirestore(cust, currentUser.uid).catch((err) => {
+        console.warn('Party firestore sync issue:', err);
+      });
+    }
+  };
+
+  const handleDeleteCustomer = async (id: string) => {
+    const target = customers.find((c) => c.id === id);
+    const updated = deleteRegisteredCustomer(id);
+    setCustomers(updated);
+    showToast(`Party "${target?.name || 'Party'}" removed.`, 'info');
+    if (currentUser?.uid) {
+      await deleteCustomerFromFirestore(id).catch((err) => {
+        console.warn('Party delete firestore sync issue:', err);
+      });
+    }
+  };
+
+  const handleQuickRegisterCustomer = async (name: string, address?: string) => {
+    const { customer, isNew } = quickRegisterCustomer(name, { address, partyType: 'customer' });
+    const currentList = loadRegisteredCustomers();
+    setCustomers(currentList);
+    if (isNew) {
+      showToast(`Customer "${customer.name}" registered!`, 'success');
+      if (currentUser?.uid) {
+        await saveCustomerToFirestore(customer, currentUser.uid).catch((err) => {
+          console.warn('Quick customer firestore sync issue:', err);
+        });
+      }
+    } else {
+      showToast(`Party "${customer.name}" is already registered.`, 'info');
+    }
+  };
 
   // Persist items locally and to Cloud DB
   const updateItems = (newItems: StockItem[]) => {
@@ -1369,6 +1484,192 @@ export function App() {
     );
   };
 
+  // Unified Multi-Item Order Dispatch & Delivery Challan Handler
+  const handleFulfillOrderDispatch = (challan: DeliveryChallan) => {
+    if (!challan || !challan.items || challan.items.length === 0) return;
+
+    // Create item map for batched multi-item inventory reduction
+    const itemMap = new Map<string, StockItem>();
+    items.forEach((it) => itemMap.set(it.id, it));
+
+    const updatedItemsList: StockItem[] = [];
+    const newGlobalEntries: GlobalAuditRecord[] = [];
+
+    challan.items.forEach((cItem) => {
+      const existing = itemMap.get(cItem.itemId);
+      if (!existing) return;
+
+      const previousQuantity = existing.quantity || 0;
+      const dispatchedQty = cItem.dispatchedQty || 0;
+      const remainingQty = Math.max(0, previousQuantity - dispatchedQty);
+
+      const refNote = challan.notes ? ` • Ref: ${challan.notes}` : '';
+      const siteNote = challan.deliveryAddress ? ` • Delivery Site: ${challan.deliveryAddress}` : '';
+      const vehicleNote = challan.vehicleNumber ? ` • Vehicle: ${challan.vehicleNumber}` : '';
+      const details = `Delivery Challan #${challan.challanNumber} dispatched to "${challan.customerName}". Baseline stock was ${previousQuantity} ${existing.unit}, remaining stock is ${remainingQty} ${existing.unit}.${siteNote}${vehicleNote}${refNote}`;
+
+      const auditEntry = createAuditEntry(
+        'quantity_changed',
+        `Delivery Challan #${challan.challanNumber} (-${dispatchedQty} ${existing.unit})`,
+        details,
+        previousQuantity,
+        remainingQty,
+        operator.name,
+        operator.email
+      );
+
+      const updatedTrail = [auditEntry, ...(existing.auditTrail || [])];
+      const updatedItem: StockItem = {
+        ...existing,
+        quantity: remainingQty,
+        updatedAt: new Date().toISOString(),
+        userId: currentUser?.uid || existing.userId,
+        lastModifiedByName: operator.name,
+        lastModifiedByEmail: operator.email,
+        auditTrail: updatedTrail,
+      };
+
+      itemMap.set(existing.id, updatedItem);
+      updatedItemsList.push(updatedItem);
+
+      const globalEntry = appendGlobalAuditLog({
+        ...auditEntry,
+        itemId: existing.id,
+        itemName: existing.itemName,
+        unit: existing.unit,
+        performedBy: operator.name,
+        userEmail: operator.email,
+        userId: currentUser?.uid,
+      });
+      newGlobalEntries.push(globalEntry);
+
+      if (currentUser) {
+        saveStockItemToFirestore(updatedItem, operator, currentUser.uid).catch(console.error);
+        saveAuditLogToFirestore(globalEntry, currentUser.uid).catch(console.error);
+      }
+    });
+
+    const nextItems = Array.from(itemMap.values());
+    updateItems(nextItems);
+
+    if (newGlobalEntries.length > 0) {
+      setGlobalLogs((prev) => [...newGlobalEntries, ...prev]);
+    }
+
+    if (currentUser) {
+      saveDeliveryChallanToFirestore(challan, currentUser.uid).catch(console.error);
+    }
+
+    // Auto-record / update customer in registry
+    if (challan.customerName && challan.customerName.trim()) {
+      try {
+        const { customer, isNew } = quickRegisterCustomer(challan.customerName, {
+          address: challan.deliveryAddress,
+          notes: `Auto-recorded via Delivery Challan #${challan.challanNumber}`,
+        });
+        const currentList = loadRegisteredCustomers();
+        setCustomers(currentList);
+        if (currentUser?.uid && isNew) {
+          saveCustomerToFirestore(customer, currentUser.uid).catch(console.error);
+        }
+      } catch (err) {
+        console.warn('Customer registry sync on dispatch failed:', err);
+      }
+    }
+  };
+
+  // Unified Multi-Item Goods Receipt & Stock Inward Handler
+  const handleFulfillGoodsReceipt = (receipt: GoodsReceipt) => {
+    if (!receipt || !receipt.items || receipt.items.length === 0) return;
+
+    const itemMap = new Map<string, StockItem>();
+    items.forEach((it) => itemMap.set(it.id, it));
+
+    const updatedItemsList: StockItem[] = [];
+    const newGlobalEntries: GlobalAuditRecord[] = [];
+
+    receipt.items.forEach((rItem) => {
+      const existing = itemMap.get(rItem.itemId);
+      if (!existing) return;
+
+      const previousQuantity = existing.quantity || 0;
+      const receivedQty = rItem.receivedQty || 0;
+      const newQuantity = previousQuantity + receivedQty;
+
+      const refNote = receipt.vendorInvoiceNumber ? ` • Ref/Bill: ${receipt.vendorInvoiceNumber}` : '';
+      const notesNote = receipt.notes ? ` • Note: ${receipt.notes}` : '';
+      const details = `Goods Receipt #${receipt.receiptNumber} received from Vendor "${receipt.vendorName}". Baseline stock was ${previousQuantity} ${existing.unit}, new total stock is ${newQuantity} ${existing.unit}.${refNote}${notesNote}`;
+
+      const auditEntry = createAuditEntry(
+        'quantity_changed',
+        `Goods Receipt #${receipt.receiptNumber} (+${receivedQty} ${existing.unit})`,
+        details,
+        previousQuantity,
+        newQuantity,
+        operator.name,
+        operator.email
+      );
+
+      const updatedTrail = [auditEntry, ...(existing.auditTrail || [])];
+      const updatedItem: StockItem = {
+        ...existing,
+        quantity: newQuantity,
+        updatedAt: new Date().toISOString(),
+        userId: currentUser?.uid || existing.userId,
+        lastModifiedByName: operator.name,
+        lastModifiedByEmail: operator.email,
+        auditTrail: updatedTrail,
+      };
+
+      itemMap.set(existing.id, updatedItem);
+      updatedItemsList.push(updatedItem);
+
+      const globalEntry = appendGlobalAuditLog({
+        ...auditEntry,
+        itemId: existing.id,
+        itemName: existing.itemName,
+        unit: existing.unit,
+        performedBy: operator.name,
+        userEmail: operator.email,
+        userId: currentUser?.uid,
+      });
+      newGlobalEntries.push(globalEntry);
+
+      if (currentUser) {
+        saveStockItemToFirestore(updatedItem, operator, currentUser.uid).catch(console.error);
+        saveAuditLogToFirestore(globalEntry, currentUser.uid).catch(console.error);
+      }
+    });
+
+    const nextItems = Array.from(itemMap.values());
+    updateItems(nextItems);
+
+    if (newGlobalEntries.length > 0) {
+      setGlobalLogs((prev) => [...newGlobalEntries, ...prev]);
+    }
+
+    if (currentUser) {
+      saveGoodsReceiptToFirestore(receipt, currentUser.uid).catch(console.error);
+    }
+
+    // Auto-record / update vendor in registry with partyType: 'vendor'
+    if (receipt.vendorName && receipt.vendorName.trim()) {
+      try {
+        const { customer, isNew } = quickRegisterCustomer(receipt.vendorName, {
+          partyType: 'vendor',
+          notes: `Auto-recorded via Goods Receipt #${receipt.receiptNumber}`,
+        });
+        const currentList = loadRegisteredCustomers();
+        setCustomers(currentList);
+        if (currentUser?.uid && isNew) {
+          saveCustomerToFirestore(customer, currentUser.uid).catch(console.error);
+        }
+      } catch (err) {
+        console.warn('Vendor registry sync on receive failed:', err);
+      }
+    }
+  };
+
   const handleAddAuditNote = (
     item: StockItem,
     note: string,
@@ -1806,6 +2107,10 @@ export function App() {
         selectedTag={selectedTag}
         onSelectTag={setSelectedTag}
         onOpenTimezoneModal={() => setIsTimezoneModalOpen(true)}
+        onOpenDispatchOrder={() => handleOpenDispatchOrder()}
+        onOpenReceiveStock={() => handleOpenReceiveStock()}
+        onOpenCustomerModal={() => setIsCustomerModalOpen(true)}
+        customerCount={customers.length}
       />
 
       {/* Cloud DB & Shared Access Status Banner */}
@@ -1926,11 +2231,7 @@ export function App() {
           onEditItem={(item) => setEditingItem(item)}
           onDeleteItem={handleDeleteItemClick}
           onQuickQuantityChange={handleQuickQuantityChange}
-          onReceiveStock={(item) => {
-            setRestockTargetItem(item);
-            setAddModalInitialTab('restock');
-            setIsAddModalOpen(true);
-          }}
+          onReceiveStock={(item) => handleOpenReceiveStock(item)}
           onExportExcel={handleExportExcel}
           onViewItemDetails={(item) => setSelectedItemForDetails(item)}
           onOpenAuditTrail={() => setIsAuditTrailModalOpen(true)}
@@ -1943,6 +2244,7 @@ export function App() {
           onOpenTagModal={() => setIsTagModalOpen(true)}
           onOpenQuickSale={handleOpenQuickSale}
           onActiveItemChange={handleActiveKeyboardItemChange}
+          onOpenDispatchOrder={handleOpenDispatchOrder}
         />
       </main>
 
@@ -2020,8 +2322,7 @@ export function App() {
         onQuickQuantityChange={handleQuickQuantityChange}
         onReceiveStock={(item) => {
           setSelectedItemForDetails(null);
-          setRestockTargetItem(item);
-          setIsAddModalOpen(true);
+          handleOpenReceiveStock(item);
         }}
         onSelectTag={(tag) => setSelectedTag(tag)}
         onAddAuditNote={handleAddAuditNote}
@@ -2141,6 +2442,76 @@ export function App() {
         onConfirmSale={handleConfirmQuickSale}
         onSwitchToEdit={(item) => setEditingItem(item)}
         onRestockItem={(item) => setRestockTargetItem(item)}
+        onSwitchToDispatchOrder={(item) => handleOpenDispatchOrder(item)}
+      />
+
+      {/* 10b. Unified Multi-Item Order Dispatch & Delivery Challan Modal (Shortcut: Alt + O) */}
+      <DispatchOrderModal
+        isOpen={isDispatchOrderOpen}
+        onClose={() => {
+          setIsDispatchOrderOpen(false);
+          setDispatchInitialItem(null);
+          setDispatchPreselectedCustomer('');
+          setDispatchPreselectedAddress('');
+        }}
+        items={items}
+        operator={operator}
+        globalLogs={unifiedLogs}
+        initialItem={dispatchInitialItem}
+        initialCustomerName={dispatchPreselectedCustomer}
+        initialDeliveryAddress={dispatchPreselectedAddress}
+        registeredCustomers={customers}
+        onOpenCustomerModal={() => setIsCustomerModalOpen(true)}
+        onQuickRegisterCustomer={handleQuickRegisterCustomer}
+        onFulfillDispatch={handleFulfillOrderDispatch}
+        onShowToast={(msg, type) => showToast(msg, type)}
+      />
+
+      {/* 10c. Customer & Party Registry Management Modal */}
+      <CustomerManagementModal
+        isOpen={isCustomerModalOpen}
+        customers={customers}
+        onClose={() => setIsCustomerModalOpen(false)}
+        onSaveCustomer={handleSaveCustomer}
+        onDeleteCustomer={handleDeleteCustomer}
+        onSelectForDispatch={(custName, addr) => {
+          setDispatchPreselectedCustomer(custName);
+          setDispatchPreselectedAddress(addr || '');
+          setIsDispatchOrderOpen(true);
+        }}
+        onSelectForReceive={(vendorName) => {
+          handleOpenReceiveStock(null, vendorName);
+        }}
+      />
+
+      {/* 10d. Unified Multi-Item Goods Receipt & Stock Receiving Modal (Shortcut: Alt + R) */}
+      <ReceiveStockModal
+        isOpen={isReceiveStockOpen}
+        onClose={() => {
+          setIsReceiveStockOpen(false);
+          setReceiveInitialItem(null);
+          setReceiveInitialVendor('');
+        }}
+        items={items}
+        operator={operator}
+        globalLogs={unifiedLogs}
+        initialItem={receiveInitialItem}
+        initialVendorName={receiveInitialVendor}
+        registeredCustomers={customers}
+        onOpenCustomerModal={() => setIsCustomerModalOpen(true)}
+        onQuickRegisterVendor={(name) => {
+          try {
+            const { customer, isNew } = quickRegisterCustomer(name, { partyType: 'vendor' });
+            setCustomers(loadRegisteredCustomers());
+            if (currentUser?.uid && isNew) {
+              saveCustomerToFirestore(customer, currentUser.uid).catch(console.error);
+            }
+          } catch (e) {
+            console.warn('Auto-register vendor error:', e);
+          }
+        }}
+        onFulfillReceive={handleFulfillGoodsReceipt}
+        onShowToast={(msg, type) => showToast(msg, type)}
       />
 
       {/* 11. Timezone & Local Date Sync Modal */}

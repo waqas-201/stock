@@ -125,3 +125,83 @@ export interface GeminiAgentAction {
   reason?: string;
 }
 
+export interface DeliveryChallanItem {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  dispatchedQty: number;
+  previousQty: number;
+  remainingQty: number;
+  tags?: string[];
+  notes?: string;
+}
+
+export interface DeliveryChallan {
+  id: string;
+  challanNumber: string;
+  customerName: string; // The required customer / party name
+  date: string; // ISO string
+  dispatchedByName: string;
+  dispatchedByEmail?: string;
+  items: DeliveryChallanItem[];
+  totalItems: number;
+  totalQuantity: number;
+  notes?: string;
+  deliveryAddress?: string;
+  vehicleNumber?: string;
+  status: 'dispatched' | 'delivered';
+  companyName?: string;
+  companyAddress?: string;
+  companyPhone?: string;
+  companyEmail?: string;
+  createdAt: string;
+  userId?: string;
+}
+
+export type CustomerPartyType = 'customer' | 'vendor';
+
+export interface CustomerParty {
+  id: string;
+  name: string; // Party / Company Name (required)
+  partyType: CustomerPartyType; // 'customer' | 'vendor'
+  phone?: string;
+  email?: string;
+  address?: string;
+  city?: string;
+  contactPerson?: string;
+  taxNumber?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+  userId?: string;
+}
+
+export interface GoodsReceiptItem {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  receivedQty: number;
+  previousQty: number;
+  newQty: number;
+  unitCost?: number;
+  tags?: string[];
+  notes?: string;
+}
+
+export interface GoodsReceipt {
+  id: string;
+  receiptNumber: string; // e.g. GRN-20260924-001
+  vendorName: string; // The vendor / supplier party name
+  date: string; // ISO string
+  receivedByName: string;
+  receivedByEmail?: string;
+  items: GoodsReceiptItem[];
+  totalItems: number;
+  totalQuantity: number;
+  vendorInvoiceNumber?: string; // Optional PO, delivery note, or vendor bill #
+  notes?: string;
+  status: 'received' | 'verified';
+  createdAt: string;
+  userId?: string;
+}
+

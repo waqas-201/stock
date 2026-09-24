@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { StockItem } from '../types';
+import { StockItem, DeliveryChallan, GoodsReceipt } from '../types';
 import { GlobalAuditRecord } from './stockStorage';
 import {
   formatLocalDate,
@@ -593,3 +593,110 @@ export async function parseExcelOrCsvFile(
     reader.readAsArrayBuffer(file);
   });
 }
+
+/**
+ * Exports an official Delivery Challan document into a formatted Excel sheet.
+ */
+export function exportDeliveryChallanToExcel(challan: DeliveryChallan): void {
+  const wb = XLSX.utils.book_new();
+
+  const rows: (string | number)[][] = [
+    ['DELIVERY CHALLAN / GOODS DISPATCH NOTE'],
+    ['Challan Number:', challan.challanNumber],
+    ['Date:', challan.date ? formatLocalDate(challan.date) : getTodayDateString()],
+    ['Customer / Party Name:', challan.customerName],
+    ['Dispatched By:', challan.dispatchedByName || 'Warehouse Staff'],
+    ['Delivery Address / Site:', challan.deliveryAddress || 'On-site / Self-pickup'],
+    ['Vehicle / Ref #:', challan.vehicleNumber || challan.notes || 'None'],
+    ['Status:', (challan.status || 'Dispatched').toUpperCase()],
+    [], // Blank separator
+    ['Sr #', 'Item / Product Description', 'Dispatched Qty', 'Unit', 'Baseline Stock', 'Remaining Stock'],
+  ];
+
+  challan.items.forEach((item, index) => {
+    rows.push([
+      index + 1,
+      item.itemName,
+      item.dispatchedQty,
+      item.unit,
+      item.previousQty !== undefined ? item.previousQty : '-',
+      item.remainingQty !== undefined ? item.remainingQty : '-',
+    ]);
+  });
+
+  rows.push([]);
+  rows.push(['Total Items:', challan.totalItems, 'Total Qty Dispatched:', challan.totalQuantity]);
+  rows.push([]);
+  rows.push(['Declaration:', 'Goods received in sound and undamaged condition.']);
+  rows.push(['Receiver Signature:', '_______________________', 'Authorized Signatory:', '_______________________']);
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+
+  // Set column widths for readability
+  ws['!cols'] = [
+    { wch: 8 },  // Sr #
+    { wch: 38 }, // Item Description
+    { wch: 18 }, // Dispatched Qty
+    { wch: 14 }, // Unit
+    { wch: 16 }, // Baseline Stock
+    { wch: 18 }, // Remaining Stock
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Delivery Challan');
+
+  const cleanChallanNumber = challan.challanNumber.replace(/[^a-zA-Z0-9_-]/g, '_');
+  XLSX.writeFile(wb, `Delivery_Challan_${cleanChallanNumber}.xlsx`);
+}
+
+/**
+ * Exports an official Goods Receipt Note (GRN) document into a formatted Excel sheet.
+ */
+export function exportGoodsReceiptToExcel(receipt: GoodsReceipt): void {
+  const wb = XLSX.utils.book_new();
+
+  const rows: (string | number)[][] = [
+    ['GOODS RECEIPT NOTE / INWARD RECEIVING SLIP'],
+    ['Receipt (GRN) Number:', receipt.receiptNumber],
+    ['Date:', receipt.date ? formatLocalDate(receipt.date) : getTodayDateString()],
+    ['Vendor / Supplier:', receipt.vendorName],
+    ['Received By:', receipt.receivedByName || 'Warehouse Staff'],
+    ['Vendor Bill / PO #:', receipt.vendorInvoiceNumber || receipt.notes || 'None'],
+    ['Status:', (receipt.status || 'Received').toUpperCase()],
+    [], // Blank separator
+    ['Sr #', 'Item / Product Description', 'Received Qty', 'Unit', 'Baseline Stock', 'Resulting Stock'],
+  ];
+
+  receipt.items.forEach((item, index) => {
+    rows.push([
+      index + 1,
+      item.itemName,
+      item.receivedQty,
+      item.unit,
+      item.previousQty !== undefined ? item.previousQty : '-',
+      item.newQty !== undefined ? item.newQty : '-',
+    ]);
+  });
+
+  rows.push([]);
+  rows.push(['Total Items:', receipt.totalItems, 'Total Qty Received:', receipt.totalQuantity]);
+  rows.push([]);
+  rows.push(['Declaration:', 'Goods verified and taken into inventory in sound condition.']);
+  rows.push(['Inspector Signature:', '_______________________', 'Warehouse Incharge:', '_______________________']);
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+
+  ws['!cols'] = [
+    { wch: 8 },  // Sr #
+    { wch: 38 }, // Item Description
+    { wch: 18 }, // Received Qty
+    { wch: 14 }, // Unit
+    { wch: 16 }, // Baseline Stock
+    { wch: 18 }, // Resulting Stock
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Goods Receipt');
+
+  const cleanReceiptNumber = receipt.receiptNumber.replace(/[^a-zA-Z0-9_-]/g, '_');
+  XLSX.writeFile(wb, `Goods_Receipt_${cleanReceiptNumber}.xlsx`);
+}
+

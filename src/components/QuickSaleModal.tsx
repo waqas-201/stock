@@ -11,6 +11,7 @@ import {
   Sparkles,
   Edit2,
   Tag as TagIcon,
+  Truck,
 } from 'lucide-react';
 import { StockItem, StockUnit } from '../types';
 
@@ -22,6 +23,7 @@ interface QuickSaleModalProps {
   onConfirmSale: (item: StockItem, quantitySold: number, note?: string) => void;
   onSwitchToEdit?: (item: StockItem) => void;
   onRestockItem?: (item: StockItem) => void;
+  onSwitchToDispatchOrder?: (item: StockItem) => void;
 }
 
 export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
@@ -31,6 +33,7 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
   onConfirmSale,
   onSwitchToEdit,
   onRestockItem,
+  onSwitchToDispatchOrder,
 }) => {
   const [quantitySold, setQuantitySold] = useState<number>(1);
   const [quantityInputStr, setQuantityInputStr] = useState<string>('1');
@@ -457,6 +460,28 @@ export const QuickSaleModal: React.FC<QuickSaleModalProps> = ({
               </p>
             )}
           </div>
+
+          {/* Switch to Multi-Item Dispatch Order Helper */}
+          {onSwitchToDispatchOrder && item && (
+            <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Truck className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="text-xs text-slate-600 truncate">
+                  Dispatched multiple items in this order?
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onSwitchToDispatchOrder(item);
+                }}
+                className="text-xs font-bold text-emerald-800 hover:text-emerald-950 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shrink-0 shadow-2xs"
+              >
+                Open Unified Dispatch (Alt+O)
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Modal Footer with Primary Enter Shortcut & Edit Transition */}

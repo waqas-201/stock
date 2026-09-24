@@ -8,7 +8,7 @@ import {
   limit,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
-import { StockItem, StockUnit, StockTag, StockLabel, UserSetting, OperatorProfile } from '../types';
+import { StockItem, StockUnit, StockTag, StockLabel, UserSetting, OperatorProfile, DeliveryChallan, CustomerParty, GoodsReceipt } from '../types';
 import { GlobalAuditRecord } from './stockStorage';
 
 // ==========================================
@@ -425,7 +425,321 @@ export async function saveUserSettingsToFirestore(
 }
 
 // ==========================================
-// 5. Initial Collaborative Seeding
+// 5. Delivery Challans & Multi-Item Dispatches
+// ==========================================
+
+export function subscribeDeliveryChallans(
+  onChallans: (challans: DeliveryChallan[]) => void,
+  onError?: (error: unknown) => void
+): () => void {
+  const collectionPath = 'delivery_challans';
+  try {
+    const q = query(collection(db, collectionPath), limit(300));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const challans: DeliveryChallan[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          challans.push({
+            id: data.id || docSnap.id,
+            challanNumber: data.challanNumber || docSnap.id,
+            customerName: data.customerName || 'Customer',
+            date: data.date || new Date().toISOString(),
+            dispatchedByName: data.dispatchedByName || 'Staff',
+            dispatchedByEmail: data.dispatchedByEmail || undefined,
+            items: Array.isArray(data.items) ? data.items : [],
+            totalItems: typeof data.totalItems === 'number' ? data.totalItems : (data.items?.length || 0),
+            totalQuantity: typeof data.totalQuantity === 'number' ? data.totalQuantity : 0,
+            notes: data.notes || undefined,
+            deliveryAddress: data.deliveryAddress || undefined,
+            vehicleNumber: data.vehicleNumber || undefined,
+            status: data.status || 'dispatched',
+            companyName: data.companyName || undefined,
+            companyAddress: data.companyAddress || undefined,
+            companyPhone: data.companyPhone || undefined,
+            companyEmail: data.companyEmail || undefined,
+            createdAt: data.createdAt || data.date || new Date().toISOString(),
+            userId: data.userId || undefined,
+          });
+        });
+        challans.sort((a, b) => {
+          const tA = new Date(a.createdAt || a.date).getTime();
+          const tB = new Date(b.createdAt || b.date).getTime();
+          if (isNaN(tA) || isNaN(tB)) {
+            return (b.challanNumber || '').localeCompare(a.challanNumber || '');
+          }
+          return tB - tA;
+        });
+        onChallans(challans);
+      },
+      (error) => {
+        onError?.(error);
+        handleFirestoreError(error, OperationType.GET, collectionPath);
+      }
+    );
+    return unsubscribe;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, collectionPath);
+    return () => {};
+  }
+}
+
+export async function saveDeliveryChallanToFirestore(
+  challan: DeliveryChallan,
+  userId?: string
+): Promise<void> {
+  if (!challan || !challan.id) return;
+  const cleanId = challan.id.replace(/[^a-zA-Z0-9_\-]/g, '_').substring(0, 128);
+  const docPath = `delivery_challans/${cleanId}`;
+  try {
+    const docRef = doc(db, 'delivery_challans', cleanId);
+    const sanitizedItems = (challan.items || []).map((it) => ({
+      itemId: (it.itemId || 'item').substring(0, 128),
+      itemName: (it.itemName || 'Item').substring(0, 200),
+      unit: (it.unit || 'Unit').substring(0, 50),
+      dispatchedQty: typeof it.dispatchedQty === 'number' ? it.dispatchedQty : 0,
+      previousQty: typeof it.previousQty === 'number' ? it.previousQty : 0,
+      remainingQty: typeof it.remainingQty === 'number' ? it.remainingQty : 0,
+      tags: Array.isArray(it.tags) ? it.tags.slice(0, 10) : [],
+      notes: it.notes ? String(it.notes).substring(0, 500) : null,
+    }));
+
+    const payload = {
+      id: cleanId,
+      challanNumber: (challan.challanNumber || cleanId).substring(0, 80),
+      customerName: (challan.customerName || 'Customer').substring(0, 200),
+      date: challan.date || new Date().toISOString(),
+      dispatchedByName: (challan.dispatchedByName || 'Staff').substring(0, 120),
+      dispatchedByEmail: challan.dispatchedByEmail ? challan.dispatchedByEmail.substring(0, 120) : null,
+      items: sanitizedItems,
+      totalItems: typeof challan.totalItems === 'number' ? challan.totalItems : sanitizedItems.length,
+      totalQuantity: typeof challan.totalQuantity === 'number' ? challan.totalQuantity : 0,
+      notes: challan.notes ? challan.notes.substring(0, 2000) : null,
+      deliveryAddress: challan.deliveryAddress ? challan.deliveryAddress.substring(0, 500) : null,
+      vehicleNumber: challan.vehicleNumber ? challan.vehicleNumber.substring(0, 100) : null,
+      status: (challan.status || 'dispatched').substring(0, 50),
+      companyName: challan.companyName ? challan.companyName.substring(0, 200) : null,
+      companyAddress: challan.companyAddress ? challan.companyAddress.substring(0, 300) : null,
+      companyPhone: challan.companyPhone ? challan.companyPhone.substring(0, 50) : null,
+      createdAt: challan.createdAt || new Date().toISOString(),
+      userId: userId || challan.userId || null,
+    };
+    await setDoc(docRef, payload, { merge: true });
+  } catch (error) {
+    console.warn(`Firestore Delivery Challan write issue for ${docPath}:`, error);
+  }
+}
+
+export async function deleteDeliveryChallanFromFirestore(challanId: string): Promise<void> {
+  const cleanId = challanId.replace(/[^a-zA-Z0-9_\-]/g, '_').substring(0, 128);
+  const docPath = `delivery_challans/${cleanId}`;
+  try {
+    const docRef = doc(db, 'delivery_challans', cleanId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, docPath);
+  }
+}
+
+// ==========================================
+// 5c. Customer & Party Services (Collaborative & Shared)
+// ==========================================
+
+export function subscribeCustomers(
+  onCustomers: (customers: CustomerParty[]) => void,
+  onError?: (error: unknown) => void
+): () => void {
+  const collectionPath = 'customers';
+  try {
+    const q = query(
+      collection(db, collectionPath),
+      limit(500)
+    );
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const customers: CustomerParty[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          customers.push({
+            id: data.id,
+            name: data.name,
+            phone: data.phone || undefined,
+            address: data.address || undefined,
+            partyType: data.partyType === 'vendor' ? 'vendor' : 'customer',
+            notes: data.notes || undefined,
+            createdAt: data.createdAt,
+            updatedAt: data.updatedAt,
+            userId: data.userId || undefined,
+          });
+        });
+        customers.sort((a, b) => a.name.localeCompare(b.name));
+        onCustomers(customers);
+      },
+      (error) => {
+        console.error('Snapshot error on customers:', error);
+        onError?.(error);
+        handleFirestoreError(error, OperationType.GET, collectionPath);
+      }
+    );
+    return unsubscribe;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, collectionPath);
+    return () => {};
+  }
+}
+
+export async function saveCustomerToFirestore(
+  customer: CustomerParty,
+  userId?: string
+): Promise<void> {
+  if (!customer || !customer.id) return;
+  const cleanId = customer.id.replace(/[^a-zA-Z0-9_\-]/g, '_').substring(0, 128);
+  const docPath = `customers/${cleanId}`;
+  try {
+    const docRef = doc(db, 'customers', cleanId);
+    const payload = {
+      id: cleanId,
+      name: (customer.name || 'Unnamed Party').trim().substring(0, 200),
+      partyType: customer.partyType === 'vendor' ? 'vendor' : 'customer',
+      phone: customer.phone ? customer.phone.substring(0, 60) : null,
+      address: customer.address ? customer.address.substring(0, 500) : null,
+      notes: customer.notes ? customer.notes.substring(0, 2000) : null,
+      createdAt: customer.createdAt || new Date().toISOString(),
+      updatedAt: customer.updatedAt || new Date().toISOString(),
+      userId: userId || customer.userId || null,
+    };
+    await setDoc(docRef, payload, { merge: true });
+  } catch (error) {
+    console.warn(`Firestore Customer write issue for ${docPath}:`, error);
+  }
+}
+
+export async function deleteCustomerFromFirestore(customerId: string): Promise<void> {
+  const cleanId = customerId.replace(/[^a-zA-Z0-9_\-]/g, '_').substring(0, 128);
+  const docPath = `customers/${cleanId}`;
+  try {
+    const docRef = doc(db, 'customers', cleanId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, docPath);
+  }
+}
+
+// ==========================================
+// 6. Goods Receipts & Inward Stock Receiving
+// ==========================================
+
+export function subscribeGoodsReceipts(
+  onReceipts: (receipts: GoodsReceipt[]) => void,
+  onError?: (error: unknown) => void
+): () => void {
+  const collectionPath = 'goods_receipts';
+  try {
+    const q = query(collection(db, collectionPath), limit(300));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const receipts: GoodsReceipt[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          receipts.push({
+            id: data.id || docSnap.id,
+            receiptNumber: data.receiptNumber || docSnap.id,
+            vendorName: data.vendorName || 'Vendor',
+            date: data.date || new Date().toISOString(),
+            receivedByName: data.receivedByName || 'Staff',
+            receivedByEmail: data.receivedByEmail || undefined,
+            items: Array.isArray(data.items) ? data.items : [],
+            totalItems: typeof data.totalItems === 'number' ? data.totalItems : (data.items?.length || 0),
+            totalQuantity: typeof data.totalQuantity === 'number' ? data.totalQuantity : 0,
+            vendorInvoiceNumber: data.vendorInvoiceNumber || undefined,
+            notes: data.notes || undefined,
+            status: data.status || 'received',
+            createdAt: data.createdAt || data.date || new Date().toISOString(),
+            userId: data.userId || undefined,
+          });
+        });
+        receipts.sort((a, b) => {
+          const tA = new Date(a.createdAt || a.date).getTime();
+          const tB = new Date(b.createdAt || b.date).getTime();
+          if (isNaN(tA) || isNaN(tB)) {
+            return (b.receiptNumber || '').localeCompare(a.receiptNumber || '');
+          }
+          return tB - tA;
+        });
+        onReceipts(receipts);
+      },
+      (error) => {
+        onError?.(error);
+        handleFirestoreError(error, OperationType.GET, collectionPath);
+      }
+    );
+    return unsubscribe;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, collectionPath);
+    return () => {};
+  }
+}
+
+export async function saveGoodsReceiptToFirestore(
+  receipt: GoodsReceipt,
+  userId?: string
+): Promise<void> {
+  if (!receipt || !receipt.id) return;
+  const cleanId = receipt.id.replace(/[^a-zA-Z0-9_\-]/g, '_').substring(0, 128);
+  const docPath = `goods_receipts/${cleanId}`;
+  try {
+    const docRef = doc(db, 'goods_receipts', cleanId);
+    const sanitizedItems = (receipt.items || []).map((it) => ({
+      itemId: (it.itemId || 'item').substring(0, 128),
+      itemName: (it.itemName || 'Item').substring(0, 200),
+      unit: (it.unit || 'Unit').substring(0, 50),
+      receivedQty: typeof it.receivedQty === 'number' ? it.receivedQty : 0,
+      previousQty: typeof it.previousQty === 'number' ? it.previousQty : 0,
+      newQty: typeof it.newQty === 'number' ? it.newQty : 0,
+      unitCost: typeof it.unitCost === 'number' ? it.unitCost : null,
+      tags: Array.isArray(it.tags) ? it.tags.slice(0, 10) : [],
+      notes: it.notes ? String(it.notes).substring(0, 500) : null,
+    }));
+
+    const payload = {
+      id: cleanId,
+      receiptNumber: (receipt.receiptNumber || cleanId).substring(0, 80),
+      vendorName: (receipt.vendorName || 'Vendor').substring(0, 200),
+      date: receipt.date || new Date().toISOString(),
+      receivedByName: (receipt.receivedByName || 'Staff').substring(0, 120),
+      receivedByEmail: receipt.receivedByEmail ? receipt.receivedByEmail.substring(0, 120) : null,
+      items: sanitizedItems,
+      totalItems: typeof receipt.totalItems === 'number' ? receipt.totalItems : sanitizedItems.length,
+      totalQuantity: typeof receipt.totalQuantity === 'number' ? receipt.totalQuantity : 0,
+      vendorInvoiceNumber: receipt.vendorInvoiceNumber ? receipt.vendorInvoiceNumber.substring(0, 100) : null,
+      notes: receipt.notes ? receipt.notes.substring(0, 2000) : null,
+      status: (receipt.status || 'received').substring(0, 50),
+      createdAt: receipt.createdAt || new Date().toISOString(),
+      userId: userId || receipt.userId || null,
+    };
+    await setDoc(docRef, payload, { merge: true });
+  } catch (error) {
+    console.warn(`Firestore Goods Receipt write issue for ${docPath}:`, error);
+  }
+}
+
+export async function deleteGoodsReceiptFromFirestore(receiptId: string): Promise<void> {
+  const cleanId = receiptId.replace(/[^a-zA-Z0-9_\-]/g, '_').substring(0, 128);
+  const docPath = `goods_receipts/${cleanId}`;
+  try {
+    const docRef = doc(db, 'goods_receipts', cleanId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    console.warn(`Firestore Goods Receipt delete issue for ${docPath}:`, error);
+  }
+}
+
+// ==========================================
+// 7. Initial Collaborative Seeding
 // ==========================================
 
 export async function migrateLocalDataToCloud(
