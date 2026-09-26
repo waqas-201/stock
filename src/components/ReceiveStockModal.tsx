@@ -498,14 +498,14 @@ Status: VERIFIED & TAKEN INTO INVENTORY`;
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-bold tracking-tight text-white">
-                  Receive Stock & Goods Inward
+                  Inward Delivery Challan
                 </h2>
                 <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 rounded-md">
-                  Inbound (+Qty)
+                  + Stock Inward
                 </span>
               </div>
               <p className="text-xs text-slate-300">
-                Receive incoming items from Vendors into inventory with instant stock increment & GRN note
+                Official inward delivery challan required to add & verify inbound stock from vendors
               </p>
             </div>
           </div>
@@ -522,7 +522,7 @@ Status: VERIFIED & TAKEN INTO INVENTORY`;
                     : 'text-slate-300 hover:text-white'
                 }`}
               >
-                Receive Goods
+                Create Inward Challan
               </button>
               {activeReceipt && (
                 <button
@@ -534,7 +534,7 @@ Status: VERIFIED & TAKEN INTO INVENTORY`;
                       : 'text-slate-300 hover:text-white'
                   }`}
                 >
-                  GRN Note
+                  Challan Slip
                 </button>
               )}
               <button
@@ -547,7 +547,7 @@ Status: VERIFIED & TAKEN INTO INVENTORY`;
                 }`}
               >
                 <History className="w-3.5 h-3.5" />
-                <span>History ({storedReceipts.length})</span>
+                <span>Past Challans ({storedReceipts.length})</span>
               </button>
             </div>
 
@@ -1062,10 +1062,10 @@ Status: VERIFIED & TAKEN INTO INVENTORY`;
                 <div className="border-b border-slate-200 pb-4 flex items-start justify-between">
                   <div>
                     <h3 className="text-xl font-bold tracking-tight text-slate-900">
-                      GOODS RECEIPT NOTE (GRN)
+                      INWARD DELIVERY CHALLAN (STOCK RECEIPT)
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Official Inward Warehouse Stock Receiving Voucher
+                      Official Inward Goods & Stock Receiving Voucher
                     </p>
                   </div>
                   <div className="text-right">

@@ -1,18 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import {
   X,
-  Plus,
-  Package,
   Scale,
   AlertTriangle,
-  Minus,
   Calendar,
-  Layers,
-  ArrowRight,
+  Lock,
+  Truck,
   ShieldCheck,
-  CheckCircle2,
-  RefreshCw,
-  Sliders,
+  Plus,
 } from 'lucide-react';
 import { StockItem, StockUnit, StockTag, StockLabel, StockTagColor } from '../types';
 import { TagInput } from './TagInput';
@@ -38,6 +33,8 @@ interface EditItemModalProps {
   ) => void;
   onOpenUnitModal: () => void;
   onCreateTag?: (name: string, color: StockTagColor, description?: string) => void;
+  onOpenInwardChallan?: (item: StockItem) => void;
+  onOpenOutwardChallan?: (item: StockItem) => void;
 }
 
 export const EditItemModal: React.FC<EditItemModalProps> = ({
@@ -51,6 +48,8 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
   onSave,
   onOpenUnitModal,
   onCreateTag,
+  onOpenInwardChallan,
+  onOpenOutwardChallan,
 }) => {
   const effectiveTags: StockTag[] = managedTags || (managedLabels as unknown as StockTag[]) || [];
   const [itemName, setItemName] = useState('');
@@ -60,12 +59,6 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
   const [notes, setNotes] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
-
-  // Stock adjustment mode: 'adjustment' (+/- inbound/outbound) vs 'override' (recount stocktake)
-  const [stockMode, setStockMode] = useState<'adjust' | 'override'>('adjust');
-  const [adjustAmount, setAdjustAmount] = useState<string>('0');
-  const [isDeduction, setIsDeduction] = useState<boolean>(false);
-  const [overrideQuantity, setOverrideQuantity] = useState<string>('0');
 
   useEffect(() => {
     if (item && isOpen) {
@@ -78,31 +71,10 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
       setNotes(item.notes || '');
       setTags(Array.isArray(item.tags) ? [...item.tags] : []);
       setError(null);
-
-      // Reset adjustment
-      setStockMode('adjust');
-      setAdjustAmount('0');
-      setIsDeduction(false);
-      setOverrideQuantity(item.quantity.toString());
     }
   }, [item, isOpen]);
 
   const baselineQuantity = item ? item.quantity || 0 : 0;
-
-  // Calculate resulting quantity
-  let calculatedQuantity = baselineQuantity;
-  if (stockMode === 'adjust') {
-    const delta = parseFloat(adjustAmount) || 0;
-    calculatedQuantity = Math.max(0, baselineQuantity + (isDeduction ? -delta : delta));
-  } else {
-    calculatedQuantity = Math.max(0, parseFloat(overrideQuantity) || 0);
-  }
-
-  const handleStepAdjust = (step: number) => {
-    const curr = parseFloat(adjustAmount) || 0;
-    const next = Math.max(0, curr + step);
-    setAdjustAmount(next.toString());
-  };
 
   const handleStepThreshold = (delta: number) => {
     const curr = parseInt(threshold, 10) || 0;
@@ -125,11 +97,6 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
       return;
     }
 
-    if (isNaN(calculatedQuantity) || calculatedQuantity < 0) {
-      setError('Calculated stock quantity is invalid');
-      return;
-    }
-
     const parsedThreshold = parseInt(threshold, 10);
     if (isNaN(parsedThreshold) || parsedThreshold < 0) {
       setError('Please enter a valid low stock alert threshold (0 or higher)');
@@ -141,11 +108,13 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
       return;
     }
 
+    // Strict inventory policy: Stock quantity is preserved.
+    // Stock can ONLY be added or updated via Delivery Challan.
     onSave(
       item.id,
       cleanName,
       unit || item.unit,
-      calculatedQuantity,
+      item.quantity, // Preserved exactly as-is
       parsedThreshold,
       productionDate.trim() || undefined,
       notes.trim(),
@@ -188,9 +157,12 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
 
     window.addEventListener('keydown', handleSaveKeyDown, true);
     return () => window.removeEventListener('keydown', handleSaveKeyDown, true);
-  }, [isOpen, itemName, calculatedQuantity, threshold, unit, item, productionDate, notes, tags]);
+  }, [isOpen, itemName, threshold, unit, item, productionDate, notes, tags]);
 
   if (!isOpen || !item) return null;
+
+  const isLowStock = baselineQuantity > 0 && baselineQuantity <= (item.lowStockThreshold ?? 5);
+  const isOutOfStock = baselineQuantity <= 0;
 
   return (
     <div
@@ -207,46 +179,56 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-5 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/90 shrink-0">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0 shadow-2xs">
-              <Package className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <h3
-                id="edit-item-modal-title"
-                className="text-base sm:text-lg font-bold text-slate-900 leading-tight truncate"
-              >
-                Edit Item: {item.itemName}
-              </h3>
-              <p className="text-xs text-slate-500 truncate">
-                Update stock levels, unit, alerts & product details
-              </p>
-            </div>
+        <div className="px-5 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/95 shrink-0">
+          <div className="min-w-0 pr-2">
+            <h2
+              id="edit-item-modal-title"
+              className="text-base sm:text-lg font-bold tracking-tight text-slate-900 truncate"
+            >
+              Edit Item Specifications
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5 truncate">
+              Modify name, unit, alert threshold, tags and notes for "{item.itemName}"
+            </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-200/60 transition-colors cursor-pointer shrink-0"
+            className="min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-200/60 transition-colors cursor-pointer shrink-0"
             aria-label="Close modal"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Scrollable Form Body */}
+        {/* Audit Enforced Policy Banner */}
+        <div className="px-5 py-2.5 bg-slate-100 border-b border-slate-200 flex items-center gap-2 text-xs text-slate-700 font-medium">
+          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>
+            <strong>Audit Policy Enforced:</strong> Stock quantity cannot be edited directly here. All stock updates must be recorded via <strong>Delivery Challan</strong>.
+          </span>
+        </div>
+
+        {/* Error banner */}
+        {error && (
+          <div className="mx-5 sm:mx-6 mt-3 p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold text-rose-800 flex items-center justify-between animate-in fade-in">
+            <span>{error}</span>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              className="text-rose-500 hover:text-rose-700"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Form */}
         <form
           id="edit-item-form"
           onSubmit={handleSubmit}
           className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-w-0"
         >
-          {error && (
-            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
-              <span>{error}</span>
-            </div>
-          )}
-
           {/* 1. Item Name */}
           <div>
             <label
@@ -259,13 +241,14 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
               id="edit-item-name"
               type="text"
               required
+              autoFocus
               value={itemName}
               onChange={(e) => setItemName(e.target.value)}
               className="w-full px-3.5 py-2.5 min-h-[44px] text-sm sm:text-base bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 text-slate-900 font-medium"
             />
           </div>
 
-          {/* 2. Unit of Measure Selection */}
+          {/* 2. Unit Selection */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label
@@ -303,52 +286,36 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
             </select>
           </div>
 
-          {/* 3. SOPHISTICATED STOCK MANAGEMENT: Baseline Protected + Inbound Addition / Recount */}
+          {/* 3. CURRENT STOCK: READ-ONLY & LOCKED PER STRICT POLICY */}
           <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-            {/* Header with Mode Toggle */}
-            <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center justify-between">
               <div>
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                  <span>Stock Quantity</span>
+                  <Lock className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Current Inventory Stock</span>
                 </span>
-                <span className="text-[11px] text-slate-500">
-                  Current baseline is protected from accidental single-cell overwrites
+                <span className="text-[11px] text-slate-500 block">
+                  Direct numeric overwrite is locked to guarantee full audit traceability
                 </span>
               </div>
-
-              {/* Mode switch: Adjust Stock (+/-) vs Recount Override */}
-              <div className="flex items-center p-0.5 bg-slate-200/80 rounded-lg text-[11px] font-bold">
-                <button
-                  type="button"
-                  onClick={() => setStockMode('adjust')}
-                  className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors ${
-                    stockMode === 'adjust'
-                      ? 'bg-white text-emerald-900 shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Add / Adjust
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStockMode('override')}
-                  className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors ${
-                    stockMode === 'override'
-                      ? 'bg-white text-amber-900 shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Recount Override
-                </button>
-              </div>
+              <span
+                className={`text-xs font-bold px-2 py-0.5 rounded-full inline-block ${
+                  isOutOfStock
+                    ? 'bg-rose-100 text-rose-800'
+                    : isLowStock
+                    ? 'bg-amber-100 text-amber-800'
+                    : 'bg-emerald-100 text-emerald-800'
+                }`}
+              >
+                {isOutOfStock ? 'Out of Stock' : isLowStock ? 'Low Stock' : 'In Stock'}
+              </span>
             </div>
 
-            {/* Current Baseline Display */}
+            {/* Current Stock Display */}
             <div className="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-between">
               <div>
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                  Current Verified Baseline
+                  Verified Physical Balance
                 </span>
                 <div className="flex items-baseline gap-1.5">
                   <span className="text-2xl font-bold font-mono text-slate-900">
@@ -359,141 +326,43 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
                   </span>
                 </div>
               </div>
-              <div className="text-right">
-                <span className="text-[10px] text-slate-400 block">Status</span>
-                <span
-                  className={`text-xs font-bold px-2 py-0.5 rounded-full inline-block ${
-                    baselineQuantity <= 0
-                      ? 'bg-rose-100 text-rose-800'
-                      : baselineQuantity <= (item.lowStockThreshold ?? 5)
-                      ? 'bg-amber-100 text-amber-800'
-                      : 'bg-emerald-100 text-emerald-800'
-                  }`}
-                >
-                  {baselineQuantity <= 0
-                    ? 'Out of Stock'
-                    : baselineQuantity <= (item.lowStockThreshold ?? 5)
-                    ? 'Low Stock'
-                    : 'In Stock'}
-                </span>
+
+              {/* Direct Challan Actions */}
+              <div className="flex items-center gap-2">
+                {onOpenInwardChallan && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenInwardChallan(item);
+                    }}
+                    className="min-h-[36px] px-3 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 border border-emerald-300 rounded-xl flex items-center gap-1 cursor-pointer transition-colors"
+                    title="Add stock by creating an Inward Delivery Challan"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Inward Challan</span>
+                  </button>
+                )}
+                {onOpenOutwardChallan && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenOutwardChallan(item);
+                    }}
+                    className="min-h-[36px] px-3 py-1.5 text-xs font-bold text-slate-800 bg-white hover:bg-slate-100 active:bg-slate-200 border border-slate-300 rounded-xl flex items-center gap-1 cursor-pointer transition-colors"
+                    title="Dispatch or update stock via Outward Delivery Challan"
+                  >
+                    <Truck className="w-3.5 h-3.5 text-slate-600" />
+                    <span>Dispatch Challan</span>
+                  </button>
+                )}
               </div>
             </div>
 
-            {/* Sub-Panel: Add / Deduct Adjustment */}
-            {stockMode === 'adjust' ? (
-              <div className="space-y-2.5 pt-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-700">
-                    Specify Quantity to Add or Deduct:
-                  </span>
-                  <div className="flex items-center gap-1 text-[11px] font-bold">
-                    <button
-                      type="button"
-                      onClick={() => setIsDeduction(false)}
-                      className={`px-2 py-0.5 rounded-md cursor-pointer ${
-                        !isDeduction
-                          ? 'bg-emerald-600 text-white shadow-2xs'
-                          : 'bg-white text-slate-600 border border-slate-200'
-                      }`}
-                    >
-                      + Inbound Add
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setIsDeduction(true)}
-                      className={`px-2 py-0.5 rounded-md cursor-pointer ${
-                        isDeduction
-                          ? 'bg-rose-600 text-white shadow-2xs'
-                          : 'bg-white text-slate-600 border border-slate-200'
-                      }`}
-                    >
-                      − Outbound Deduct
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleStepAdjust(-1)}
-                    className="min-h-[40px] min-w-[40px] rounded-xl bg-white hover:bg-slate-100 text-slate-700 flex items-center justify-center font-bold border border-slate-300 transition-transform active:scale-95 cursor-pointer shrink-0"
-                    title="Decrease adjustment"
-                  >
-                    <Minus className="w-4 h-4" />
-                  </button>
-
-                  <div className="relative flex-1 min-w-0">
-                    <input
-                      id="edit-item-adjust-input"
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={adjustAmount}
-                      onChange={(e) => setAdjustAmount(e.target.value)}
-                      className="w-full px-3 py-2 min-h-[40px] text-base font-mono text-center font-bold bg-white border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-600 text-slate-900"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400 pointer-events-none">
-                      {unit || item.unit}
-                    </span>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handleStepAdjust(1)}
-                    className="min-h-[40px] min-w-[40px] rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold border border-emerald-300 transition-transform active:scale-95 cursor-pointer shrink-0"
-                    title="Increase adjustment"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </div>
-
-                {/* Quick Presets */}
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {[1, 5, 10, 25, 50].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setAdjustAmount(preset.toString())}
-                      className="text-xs px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-slate-700 font-bold cursor-pointer"
-                    >
-                      +{preset}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Calculation Breakdown */}
-                <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl flex items-center justify-between text-xs">
-                  <span className="text-emerald-950 font-medium">
-                    {baselineQuantity} {isDeduction ? '−' : '+'} {parseFloat(adjustAmount) || 0} =
-                  </span>
-                  <span className="font-bold text-emerald-900 font-mono text-sm">
-                    Updated Total: {calculatedQuantity} {item.unit}
-                  </span>
-                </div>
-              </div>
-            ) : (
-              /* Sub-Panel: Direct Recount Override (Cycle count audit) */
-              <div className="space-y-2 pt-1">
-                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
-                  <span className="font-bold block">⚠️ Direct Physical Recount</span>
-                  Use this only when performing an official physical stocktake recount.
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="edit-item-recount-input"
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={overrideQuantity}
-                    onChange={(e) => setOverrideQuantity(e.target.value)}
-                    className="w-full px-3 py-2 min-h-[40px] text-base font-mono text-center font-bold bg-white border border-amber-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amber-500 text-slate-900"
-                  />
-                  <span className="text-xs font-bold text-slate-600 shrink-0">
-                    {item.unit}
-                  </span>
-                </div>
-              </div>
-            )}
+            <p className="text-[11px] text-slate-500">
+              💡 Need to change stock? Issue an <strong>Inward Delivery Challan</strong> to add received goods, or an <strong>Outward Delivery Challan</strong> to dispatch items.
+            </p>
           </div>
 
           {/* 4. Individual Low Stock Alert Level */}
@@ -515,10 +384,10 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
               <button
                 type="button"
                 onClick={() => handleStepThreshold(-1)}
-                className="min-h-[40px] min-w-[40px] rounded-xl bg-white hover:bg-amber-100 text-slate-700 flex items-center justify-center font-bold border border-amber-300 transition-transform active:scale-95 cursor-pointer shadow-2xs shrink-0"
-                title="Decrease alert limit"
+                className="min-h-[40px] min-w-[40px] rounded-xl bg-white hover:bg-amber-100 active:bg-amber-200 text-slate-700 flex items-center justify-center font-bold border border-amber-300 transition-transform active:scale-95 cursor-pointer shadow-2xs shrink-0"
+                title="Decrease alert threshold"
               >
-                <Minus className="w-4 h-4" />
+                -
               </button>
 
               <input
@@ -534,18 +403,18 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
               <button
                 type="button"
                 onClick={() => handleStepThreshold(1)}
-                className="min-h-[40px] min-w-[40px] rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 flex items-center justify-center font-bold border border-amber-400 transition-transform active:scale-95 cursor-pointer shadow-2xs shrink-0"
-                title="Increase alert limit"
+                className="min-h-[40px] min-w-[40px] rounded-xl bg-amber-100 hover:bg-amber-200 active:bg-amber-300 text-amber-900 flex items-center justify-center font-bold border border-amber-400 transition-transform active:scale-95 cursor-pointer shadow-2xs shrink-0"
+                title="Increase alert threshold"
               >
-                <Plus className="w-4 h-4" />
+                +
               </button>
             </div>
             <p className="text-[10px] text-amber-700">
-              Triggers a low stock warning when inventory drops to or below this amount
+              Alert triggers when stock drops to or below this count
             </p>
           </div>
 
-          {/* 5. Production / Batch Date */}
+          {/* 5. Production / Batch Date (Optional) */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label
@@ -579,25 +448,25 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
               onChange={setTags}
               availableTags={availableTags}
               managedTags={effectiveTags}
-              placeholder="Add tags (e.g. Office, Food, Fragile)..."
+              placeholder="Add tags (e.g., Raw Material, Packaged)..."
               onCreateTag={onCreateTag}
             />
           </div>
 
-          {/* 7. Notes (Required for approval) */}
+          {/* 7. Modification Reason Note (Required) */}
           <div>
             <label
               htmlFor="edit-item-notes"
               className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1"
             >
-              <span>Update Note / Reason for Modification</span>
-              <span className="text-rose-600 font-bold ml-1">* (Required to approve)</span>
+              <span>Audit Note / Reason for Edit</span>
+              <span className="text-rose-600 font-bold ml-1">* (Required)</span>
             </label>
             <textarea
               id="edit-item-notes"
               rows={2}
               required
-              placeholder="e.g., Stock count audit, changed supplier, updated threshold, Shelf location moved..."
+              placeholder="e.g., Updated unit from pieces to boxes, changed alert limit per manager review..."
               value={notes}
               onChange={(e) => {
                 setNotes(e.target.value);
@@ -610,11 +479,11 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
               }`}
             />
             <p className="mt-1 text-[11px] text-slate-400">
-              An update note is strictly required to approve modifications and preserve audit integrity.
+              An explanatory note is strictly required to approve any specification changes.
             </p>
           </div>
 
-          {/* Footer Buttons */}
+          {/* Footer */}
           <div className="pt-2 flex items-center justify-end gap-2.5">
             <button
               type="button"
@@ -630,17 +499,16 @@ export const EditItemModal: React.FC<EditItemModalProps> = ({
               className={`min-h-[44px] px-5 sm:px-6 text-sm font-bold rounded-xl shadow-sm flex items-center gap-2 cursor-pointer transition-all ${
                 !itemName.trim() || !notes.trim()
                   ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed'
-                  : 'text-white bg-slate-900 hover:bg-slate-800 active:bg-slate-950'
+                  : 'text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800'
               }`}
               title={
                 !notes.trim()
-                  ? 'A note is required to approve updates'
-                  : 'Approve & update item (Shortcut: Alt + S or Enter)'
+                  ? 'A note is required to approve item modification'
+                  : 'Approve & save item changes (Shortcut: Alt + S or Enter)'
               }
             >
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>Approve Update ({calculatedQuantity} {unit || item.unit})</span>
-              <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-bold text-slate-300 bg-slate-800 rounded border border-slate-700">
+              <span>Save Specifications</span>
+              <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-bold text-emerald-100 bg-emerald-700/80 rounded border border-emerald-500/60">
                 Alt+S
               </kbd>
             </button>

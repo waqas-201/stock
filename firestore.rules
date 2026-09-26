@@ -129,8 +129,12 @@ service cloud.firestore {
         && data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 200
         && data.date is string && data.date.size() <= 60
         && data.dispatchedByName is string && data.dispatchedByName.size() <= 120
+        && (!('dispatchedByEmail' in data) || data.dispatchedByEmail == null || (data.dispatchedByEmail is string && data.dispatchedByEmail.size() <= 120))
+        && (!('items' in data) || data.items == null || (data.items is list))
         && data.totalItems is number && data.totalItems >= 1
         && data.totalQuantity is number && data.totalQuantity > 0
+        && (!('poNumber' in data) || data.poNumber == null || (data.poNumber is string && data.poNumber.size() <= 100))
+        && (!('invoiceNumber' in data) || data.invoiceNumber == null || (data.invoiceNumber is string && data.invoiceNumber.size() <= 100))
         && (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 2000))
         && (!('deliveryAddress' in data) || data.deliveryAddress == null || (data.deliveryAddress is string && data.deliveryAddress.size() <= 500))
         && (!('vehicleNumber' in data) || data.vehicleNumber == null || (data.vehicleNumber is string && data.vehicleNumber.size() <= 100))
@@ -138,6 +142,25 @@ service cloud.firestore {
         && (!('companyName' in data) || data.companyName == null || (data.companyName is string && data.companyName.size() <= 200))
         && (!('companyAddress' in data) || data.companyAddress == null || (data.companyAddress is string && data.companyAddress.size() <= 300))
         && (!('companyPhone' in data) || data.companyPhone == null || (data.companyPhone is string && data.companyPhone.size() <= 50))
+        && (!('companyEmail' in data) || data.companyEmail == null || (data.companyEmail is string && data.companyEmail.size() <= 100))
+        && data.createdAt is string && data.createdAt.size() <= 60
+        && (!('userId' in data) || data.userId == null || (data.userId is string && data.userId.size() <= 128));
+    }
+
+    // Validation for Goods Receipt / Inward Delivery Challan
+    function isValidGoodsReceipt(data) {
+      return data.id is string && isValidId(data.id)
+        && data.receiptNumber is string && data.receiptNumber.size() >= 1 && data.receiptNumber.size() <= 80
+        && data.vendorName is string && data.vendorName.size() >= 1 && data.vendorName.size() <= 200
+        && data.date is string && data.date.size() <= 60
+        && data.receivedByName is string && data.receivedByName.size() <= 120
+        && (!('receivedByEmail' in data) || data.receivedByEmail == null || (data.receivedByEmail is string && data.receivedByEmail.size() <= 120))
+        && (!('items' in data) || data.items == null || (data.items is list))
+        && data.totalItems is number && data.totalItems >= 0
+        && data.totalQuantity is number && data.totalQuantity >= 0
+        && (!('vendorInvoiceNumber' in data) || data.vendorInvoiceNumber == null || (data.vendorInvoiceNumber is string && data.vendorInvoiceNumber.size() <= 100))
+        && (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 2000))
+        && (!('status' in data) || data.status == null || (data.status is string && data.status.size() <= 50))
         && data.createdAt is string && data.createdAt.size() <= 60
         && (!('userId' in data) || data.userId == null || (data.userId is string && data.userId.size() <= 128));
     }
@@ -197,7 +220,25 @@ service cloud.firestore {
         && isValidId(challanId);
     }
 
-    // 0c. Shared Customer Parties collection: Collaborative registered party management
+    // 0c. Shared Goods Receipts & Inward Delivery Challans collection
+    match /goods_receipts/{receiptId} {
+      allow get, list: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && isValidId(receiptId)
+        && incoming().id == receiptId
+        && isValidGoodsReceipt(incoming());
+
+      allow update: if isSignedIn()
+        && isValidId(receiptId)
+        && incoming().id == existing().id
+        && isValidGoodsReceipt(incoming());
+
+      allow delete: if isSignedIn()
+        && isValidId(receiptId);
+    }
+
+    // 0d. Shared Customer Parties collection: Collaborative registered party management
     match /customers/{customerId} {
       allow get, list: if isSignedIn();
 

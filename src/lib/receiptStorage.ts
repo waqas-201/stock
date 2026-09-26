@@ -71,7 +71,7 @@ export function deleteStoredGoodsReceipt(id: string): void {
 }
 
 /**
- * Generates the next sequential Goods Receipt Note number (e.g. GRN-20260924-001).
+ * Generates the next sequential Inward Delivery Challan number (e.g. DC-IN-20260926-001).
  */
 export function generateNextReceiptNumber(
   existingReceipts: GoodsReceipt[] = []
@@ -80,16 +80,26 @@ export function generateNextReceiptNumber(
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
-  const datePrefix = `GRN-${year}${month}${day}`;
+  const datePrefix = `DC-IN-${year}${month}${day}`;
 
   const todayReceipts = existingReceipts.filter(
-    (r) => r.receiptNumber && r.receiptNumber.startsWith(datePrefix)
+    (r) =>
+      r.receiptNumber &&
+      (r.receiptNumber.startsWith(datePrefix) ||
+        r.receiptNumber.startsWith(`GRN-${year}${month}${day}`))
   );
 
   let maxSeq = 0;
   todayReceipts.forEach((r) => {
     const parts = r.receiptNumber.split('-');
-    if (parts.length >= 3) {
+    if (parts.length >= 4) {
+      // Format: DC-IN-YYYYMMDD-SEQ
+      const seq = parseInt(parts[3], 10);
+      if (!isNaN(seq) && seq > maxSeq) {
+        maxSeq = seq;
+      }
+    } else if (parts.length >= 3) {
+      // Format: GRN-YYYYMMDD-SEQ
       const seq = parseInt(parts[2], 10);
       if (!isNaN(seq) && seq > maxSeq) {
         maxSeq = seq;

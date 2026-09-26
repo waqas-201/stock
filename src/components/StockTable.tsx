@@ -51,8 +51,8 @@ interface StockTableProps {
   onAddItem: () => void;
   onEditItem: (item: StockItem) => void;
   onDeleteItem: (item: StockItem) => void;
-  onQuickQuantityChange: (item: StockItem, delta: number) => void;
-  onReceiveStock?: (item: StockItem) => void;
+  onQuickQuantityChange?: (item: StockItem, delta: number) => void;
+  onReceiveStock?: (item?: StockItem) => void;
   onExportExcel: () => void;
   onViewItemDetails: (item: StockItem) => void;
   onOpenAuditTrail: () => void;
@@ -441,30 +441,30 @@ export const StockTable: React.FC<StockTableProps> = ({
         return;
       }
 
-      // Sell Active Item: Alt + S or Alt + B
+      // Dispatch Order / Outward Delivery Challan: Alt + S or Alt + B or Alt + O
       if (
         e.altKey &&
         !e.ctrlKey &&
         !e.metaKey &&
-        (e.key === 's' || e.key === 'S' || e.code === 'KeyS' || e.key === 'b' || e.key === 'B' || e.code === 'KeyB')
+        (e.key === 's' || e.key === 'S' || e.code === 'KeyS' || e.key === 'b' || e.key === 'B' || e.code === 'KeyB' || e.key === 'o' || e.key === 'O' || e.code === 'KeyO')
       ) {
-        if (activeItem && onOpenQuickSale && activeItem.quantity > 0) {
+        if (onOpenDispatchOrder) {
           e.preventDefault();
-          onOpenQuickSale(activeItem);
+          onOpenDispatchOrder(activeItem || undefined);
         }
         return;
       }
 
-      // Restock / Add Stock to Active Item: Alt + R
+      // Inward Delivery Challan (Add Stock): Alt + R
       if (
         e.altKey &&
         !e.ctrlKey &&
         !e.metaKey &&
         (e.key === 'r' || e.key === 'R' || e.code === 'KeyR')
       ) {
-        if (activeItem && onReceiveStock) {
+        if (onReceiveStock) {
           e.preventDefault();
-          onReceiveStock(activeItem);
+          onReceiveStock(activeItem || undefined);
         }
         return;
       }
@@ -613,17 +613,35 @@ export const StockTable: React.FC<StockTableProps> = ({
             </kbd>
           </button>
 
-          {/* Dispatch Order & Delivery Challan */}
+          {/* Inward Delivery Challan (Add Stock) */}
+          {onReceiveStock && (
+            <button
+              id="btn-inward-challan-stock"
+              type="button"
+              onClick={() => onReceiveStock(activeItem || undefined)}
+              className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3 sm:px-3.5 py-2 text-sm font-bold text-emerald-900 bg-emerald-100 hover:bg-emerald-200 active:bg-emerald-300 rounded-xl shadow-xs transition-colors cursor-pointer shrink-0 border border-emerald-300"
+              title="Add & receive inbound stock via Inward Delivery Challan (Shortcut: Alt + R)"
+            >
+              <Package className="w-4 h-4 text-emerald-800" />
+              <span className="hidden xs:inline">+ Inward Challan</span>
+              <span className="xs:hidden">+ Inward</span>
+              <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-semibold text-emerald-900 bg-emerald-200/80 rounded border border-emerald-400/60">
+                Alt+R
+              </kbd>
+            </button>
+          )}
+
+          {/* Dispatch Order & Outward Delivery Challan */}
           {onOpenDispatchOrder && (
             <button
               id="btn-dispatch-order-stock"
               type="button"
               onClick={() => onOpenDispatchOrder(activeItem || undefined)}
               className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 sm:px-4 py-2 text-sm font-bold text-white bg-slate-900 hover:bg-slate-800 active:bg-black rounded-xl shadow-xs transition-colors cursor-pointer shrink-0 border border-slate-700/80"
-              title="Fulfill multi-item order & issue Delivery Challan (Shortcut: Alt + O)"
+              title="Fulfill order & issue Outward Delivery Challan (Shortcut: Alt + O)"
             >
               <Truck className="w-4 h-4 text-emerald-400" />
-              <span className="hidden xs:inline">Dispatch Order</span>
+              <span className="hidden xs:inline">Dispatch Challan</span>
               <span className="xs:hidden">Dispatch</span>
               <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-300 bg-slate-800 rounded border border-slate-600">
                 Alt+O
@@ -654,29 +672,18 @@ export const StockTable: React.FC<StockTableProps> = ({
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
-              {onOpenQuickSale && (
+              {onReceiveStock && (
                 <button
                   type="button"
-                  onClick={() => onOpenQuickSale(activeItem)}
-                  disabled={activeItem.quantity <= 0}
-                  className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg shadow-2xs transition-colors ${
-                    activeItem.quantity <= 0
-                      ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-                      : 'text-white bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 cursor-pointer'
-                  }`}
-                  title={
-                    activeItem.quantity <= 0
-                      ? `Cannot sell "${activeItem.itemName}": Stock is already 0`
-                      : 'Quick Sale / Bill this item (Alt + S or Alt + B)'
-                  }
+                  onClick={() => onReceiveStock(activeItem)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 rounded-lg cursor-pointer transition-colors shadow-2xs"
+                  title="Add inbound stock via Inward Delivery Challan (Alt + R)"
                 >
-                  <Receipt className="w-3.5 h-3.5" />
-                  <span>{activeItem.quantity <= 0 ? 'Out of Stock' : 'Sell'}</span>
-                  {activeItem.quantity > 0 && (
-                    <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-800 text-emerald-100 border border-emerald-600/50">
-                      Alt+S
-                    </kbd>
-                  )}
+                  <Plus className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Inward Challan</span>
+                  <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-200 text-emerald-800 border border-emerald-400">
+                    Alt+R
+                  </kbd>
                 </button>
               )}
 
@@ -684,29 +691,25 @@ export const StockTable: React.FC<StockTableProps> = ({
                 <button
                   type="button"
                   onClick={() => onOpenDispatchOrder(activeItem)}
-                  className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-slate-800 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg cursor-pointer transition-colors shadow-2xs"
-                  title="Dispatch in multi-item order (Alt + O)"
+                  disabled={activeItem.quantity <= 0}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg shadow-2xs transition-colors ${
+                    activeItem.quantity <= 0
+                      ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                      : 'text-white bg-slate-900 hover:bg-slate-800 active:bg-black cursor-pointer'
+                  }`}
+                  title={
+                    activeItem.quantity <= 0
+                      ? `Cannot dispatch "${activeItem.itemName}": Stock is 0`
+                      : 'Dispatch / issue Delivery Challan (Alt + O)'
+                  }
                 >
-                  <Truck className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Dispatch</span>
-                  <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                    Alt+O
-                  </kbd>
-                </button>
-              )}
-
-              {onReceiveStock && (
-                <button
-                  type="button"
-                  onClick={() => onReceiveStock(activeItem)}
-                  className="hidden sm:inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg cursor-pointer transition-colors shadow-2xs"
-                  title="Add inbound stock to this item (Alt + R)"
-                >
-                  <Plus className="w-3 h-3 text-emerald-700" />
-                  <span>Restock</span>
-                  <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
-                    Alt+R
-                  </kbd>
+                  <Truck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>{activeItem.quantity <= 0 ? 'Out of Stock' : 'Dispatch Challan'}</span>
+                  {activeItem.quantity > 0 && (
+                    <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-slate-800 text-slate-200 border border-slate-700">
+                      Alt+O
+                    </kbd>
+                  )}
                 </button>
               )}
 
@@ -1431,45 +1434,45 @@ export const StockTable: React.FC<StockTableProps> = ({
                     </div>
                   </div>
 
-                  {/* Actions: Quick Sell / Add Stock / Edit / Delete (Notes mandatory on all) */}
+                  {/* Actions: Inward Challan (Add Stock) / Dispatch Challan / Edit / Delete */}
                   <div className="flex items-center gap-1">
-                    {onOpenQuickSale && (
-                      <button
-                        type="button"
-                        onClick={() => item.quantity > 0 && onOpenQuickSale(item)}
-                        disabled={item.quantity <= 0}
-                        className={`min-h-[34px] px-2 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-2xs ${
-                          item.quantity <= 0
-                            ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-                            : 'text-white bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 cursor-pointer'
-                        }`}
-                        title={
-                          item.quantity <= 0
-                            ? `Cannot record sale for "${item.itemName}": stock is already 0`
-                            : `Record sale for "${item.itemName}" (Shortcut: Alt + S)`
-                        }
-                      >
-                        <Receipt className="w-3.5 h-3.5" />
-                        <span className="hidden xs:inline">Sell</span>
-                        {item.quantity > 0 && (
-                          <kbd className="hidden md:inline-flex text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-800 text-emerald-100 border border-emerald-600/50">
-                            Alt+S
-                          </kbd>
-                        )}
-                      </button>
-                    )}
                     {onReceiveStock && (
                       <button
                         type="button"
                         onClick={() => onReceiveStock(item)}
-                        className="min-h-[34px] px-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 border border-emerald-200 rounded-lg flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
-                        title={`Add inbound stock to ${item.itemName} (Shortcut: Alt + R)`}
+                        className="min-h-[34px] px-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 border border-emerald-300 rounded-lg flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                        title={`Add inbound stock to ${item.itemName} via Inward Delivery Challan (Shortcut: Alt + R)`}
                       >
                         <Plus className="w-3.5 h-3.5 text-emerald-700" />
-                        <span className="hidden xs:inline">Add Stock</span>
+                        <span className="hidden xs:inline">Inward</span>
                         <kbd className="hidden md:inline-flex text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
                           Alt+R
                         </kbd>
+                      </button>
+                    )}
+                    {onOpenDispatchOrder && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenDispatchOrder(item)}
+                        disabled={item.quantity <= 0}
+                        className={`min-h-[34px] px-2 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-2xs ${
+                          item.quantity <= 0
+                            ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                            : 'text-white bg-slate-900 hover:bg-slate-800 active:bg-black cursor-pointer'
+                        }`}
+                        title={
+                          item.quantity <= 0
+                            ? `Cannot dispatch "${item.itemName}": stock is 0`
+                            : `Dispatch / issue Delivery Challan for "${item.itemName}" (Shortcut: Alt + O)`
+                        }
+                      >
+                        <Truck className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="hidden xs:inline">Dispatch</span>
+                        {item.quantity > 0 && (
+                          <kbd className="hidden md:inline-flex text-[9px] font-mono px-1 py-0.2 rounded bg-slate-800 text-slate-200 border border-slate-700">
+                            Alt+O
+                          </kbd>
+                        )}
                       </button>
                     )}
                     <button
@@ -1722,43 +1725,44 @@ export const StockTable: React.FC<StockTableProps> = ({
                   </button>
 
                   <div className="flex items-center gap-1.5 ml-auto flex-wrap">
-                    {onOpenQuickSale && (
-                      <button
-                        type="button"
-                        onClick={() => item.quantity > 0 && onOpenQuickSale(item)}
-                        disabled={item.quantity <= 0}
-                        className={`min-h-[40px] px-2.5 py-1.5 inline-flex items-center gap-1 text-xs font-bold rounded-xl transition-colors shadow-xs ${
-                          item.quantity <= 0
-                            ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-                            : 'text-white bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 cursor-pointer'
-                        }`}
-                        title={
-                          item.quantity <= 0
-                            ? `Cannot record sale for "${item.itemName}": stock is already 0`
-                            : `Record sale for "${item.itemName}" (Shortcut: Alt + S)`
-                        }
-                      >
-                        <Receipt className="w-3.5 h-3.5" />
-                        <span>{item.quantity <= 0 ? 'Out' : 'Sell'}</span>
-                        {item.quantity > 0 && (
-                          <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-800 text-emerald-100 border border-emerald-600/50">
-                            Alt+S
-                          </kbd>
-                        )}
-                      </button>
-                    )}
                     {onReceiveStock && (
                       <button
                         type="button"
                         onClick={() => onReceiveStock(item)}
-                        className="min-h-[40px] px-2.5 py-1.5 inline-flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 border border-emerald-200 rounded-xl transition-colors cursor-pointer shadow-2xs"
-                        title="Add inbound stock with required note (Shortcut: Alt + R)"
+                        className="min-h-[40px] px-2.5 py-1.5 inline-flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 border border-emerald-300 rounded-xl transition-colors cursor-pointer shadow-2xs"
+                        title="Add inbound stock via Inward Delivery Challan (Shortcut: Alt + R)"
                       >
                         <Plus className="w-3.5 h-3.5 text-emerald-700" />
-                        <span>Add</span>
+                        <span>Inward</span>
                         <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
                           Alt+R
                         </kbd>
+                      </button>
+                    )}
+
+                    {onOpenDispatchOrder && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenDispatchOrder(item)}
+                        disabled={item.quantity <= 0}
+                        className={`min-h-[40px] px-2.5 py-1.5 inline-flex items-center gap-1 text-xs font-bold rounded-xl transition-colors shadow-xs ${
+                          item.quantity <= 0
+                            ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                            : 'text-white bg-slate-900 hover:bg-slate-800 active:bg-black cursor-pointer'
+                        }`}
+                        title={
+                          item.quantity <= 0
+                            ? `Cannot dispatch "${item.itemName}": stock is 0`
+                            : `Dispatch / issue Delivery Challan (Shortcut: Alt + O)`
+                        }
+                      >
+                        <Truck className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>{item.quantity <= 0 ? 'Out' : 'Dispatch'}</span>
+                        {item.quantity > 0 && (
+                          <kbd className="text-[9px] font-mono px-1 py-0.2 rounded bg-slate-800 text-slate-200 border border-slate-700">
+                            Alt+O
+                          </kbd>
+                        )}
                       </button>
                     )}
 
@@ -2062,43 +2066,43 @@ export const StockTable: React.FC<StockTableProps> = ({
                     {/* Actions Column */}
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-1">
-                        {onOpenQuickSale && (
-                          <button
-                            type="button"
-                            onClick={() => item.quantity > 0 && onOpenQuickSale(item)}
-                            disabled={item.quantity <= 0}
-                            className={`min-h-[34px] px-2 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-2xs ${
-                              item.quantity <= 0
-                                ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-                                : 'text-white bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 cursor-pointer'
-                            }`}
-                            title={
-                              item.quantity <= 0
-                                ? `Cannot record sale for "${item.itemName}": stock is already 0`
-                                : `Quick sale for "${item.itemName}" (Shortcut: Alt + S)`
-                            }
-                          >
-                            <Receipt className="w-3.5 h-3.5" />
-                            <span>Sell</span>
-                            {item.quantity > 0 && (
-                              <kbd className="hidden lg:inline-flex text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-800 text-emerald-100 border border-emerald-600/50">
-                                Alt+S
-                              </kbd>
-                            )}
-                          </button>
-                        )}
                         {onReceiveStock && (
                           <button
                             type="button"
                             onClick={() => onReceiveStock(item)}
-                            className="min-h-[34px] px-2.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
-                            title="Add inbound stock with required note (Shortcut: Alt + R)"
+                            className="min-h-[34px] px-2.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 border border-emerald-300 rounded-lg flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                            title="Add inbound stock via Inward Delivery Challan (Shortcut: Alt + R)"
                           >
                             <Plus className="w-3.5 h-3.5 text-emerald-700" />
-                            <span>Add Stock</span>
+                            <span>Inward</span>
                             <kbd className="hidden lg:inline-flex text-[9px] font-mono px-1 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
                               Alt+R
                             </kbd>
+                          </button>
+                        )}
+                        {onOpenDispatchOrder && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenDispatchOrder(item)}
+                            disabled={item.quantity <= 0}
+                            className={`min-h-[34px] px-2.5 text-xs font-bold rounded-lg flex items-center gap-1 transition-colors shadow-2xs ${
+                              item.quantity <= 0
+                                ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                                : 'text-white bg-slate-900 hover:bg-slate-800 active:bg-black cursor-pointer'
+                            }`}
+                            title={
+                              item.quantity <= 0
+                                ? `Cannot dispatch "${item.itemName}": stock is 0`
+                                : `Dispatch / issue Delivery Challan (Shortcut: Alt + O)`
+                            }
+                          >
+                            <Truck className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Dispatch</span>
+                            {item.quantity > 0 && (
+                              <kbd className="hidden lg:inline-flex text-[9px] font-mono px-1 py-0.2 rounded bg-slate-800 text-slate-200 border border-slate-700">
+                                Alt+O
+                              </kbd>
+                            )}
                           </button>
                         )}
                         <button
@@ -2191,29 +2195,25 @@ export const StockTable: React.FC<StockTableProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
-                    <span className="font-medium text-slate-700">Quick Sale / Bill Active Item</span>
-                    <div className="flex items-center gap-1 font-mono">
-                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">Alt</kbd>
-                      <span className="text-slate-400">+</span>
-                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">S</kbd>
-                    </div>
-                  </div>
-
                   <div className="flex items-center justify-between p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl">
                     <div>
-                      <span className="font-bold text-slate-800 block">Unified Multi-Item Dispatch & Delivery Challan</span>
-                      <span className="text-[11px] text-slate-500">Pick multiple items, deduct stock at once & issue challan</span>
+                      <span className="font-bold text-slate-800 block">Outward Delivery Challan / Dispatch</span>
+                      <span className="text-[11px] text-slate-500">Official dispatch note, multi-item pick & deduct stock</span>
                     </div>
                     <div className="flex items-center gap-1 font-mono">
                       <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">Alt</kbd>
                       <span className="text-slate-400">+</span>
                       <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">O</kbd>
+                      <span className="text-slate-400 font-sans text-xs">or</span>
+                      <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">S</kbd>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
-                    <span className="font-medium text-slate-700">Add Stock / Inbound Active Item</span>
+                  <div className="flex items-center justify-between p-2.5 bg-indigo-50/70 border border-indigo-200 rounded-xl">
+                    <div>
+                      <span className="font-bold text-slate-800 block">Inward Delivery Challan (Add Stock)</span>
+                      <span className="text-[11px] text-slate-500">Official receiving voucher — only way to add stock</span>
+                    </div>
                     <div className="flex items-center gap-1 font-mono">
                       <kbd className="px-2 py-1 bg-white border border-slate-200 rounded shadow-2xs text-xs font-bold text-slate-800">Alt</kbd>
                       <span className="text-slate-400">+</span>

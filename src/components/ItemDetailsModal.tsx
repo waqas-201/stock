@@ -47,8 +47,8 @@ interface ItemDetailsModalProps {
   item: StockItem | null;
   onClose: () => void;
   onEdit: (item: StockItem) => void;
-  onQuickQuantityChange: (item: StockItem, delta: number) => void;
   onReceiveStock?: (item: StockItem) => void;
+  onOpenDispatchOrder?: (item: StockItem) => void;
   onSelectTag?: (tag: string) => void;
   managedTags?: StockTag[];
   managedLabels?: StockLabel[];
@@ -69,8 +69,8 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
   item,
   onClose,
   onEdit,
-  onQuickQuantityChange,
   onReceiveStock,
+  onOpenDispatchOrder,
   onSelectTag,
   managedTags,
   managedLabels = [],
@@ -873,7 +873,10 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
                     {auditNoteType === 'count_verification' && (
                       <div>
                         <label className="text-xs font-bold text-slate-700 block mb-1">
-                          Verified Physical Count ({item.unit})
+                          Observed Physical Count ({item.unit})
+                          <span className="text-[10px] text-slate-500 font-normal block">
+                            (Audit record only — stock updates strictly require Inward/Dispatch Challans)
+                          </span>
                         </label>
                         <input
                           type="number"
@@ -1422,7 +1425,7 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
             <span className="hidden sm:inline text-slate-500">All modifications require approval notes</span>
           </div>
 
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex items-center gap-2 ml-auto flex-wrap">
             {onReceiveStock && (
               <button
                 type="button"
@@ -1431,10 +1434,28 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({
                   onReceiveStock(item);
                 }}
                 className="min-h-[38px] px-3.5 text-xs font-bold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 active:bg-emerald-300 border border-emerald-300 rounded-xl flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                title="Add stock via inbound restock modal"
+                title="Add stock via Inward Delivery Challan"
               >
                 <Plus className="w-3.5 h-3.5 text-emerald-800" />
-                <span>+ Add Stock</span>
+                <span>+ Inward Challan</span>
+              </button>
+            )}
+            {onOpenDispatchOrder && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenDispatchOrder(item);
+                }}
+                disabled={item.quantity <= 0}
+                className={`min-h-[38px] px-3.5 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors ${
+                  item.quantity <= 0
+                    ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                    : 'text-white bg-slate-900 hover:bg-slate-800 active:bg-black'
+                }`}
+                title="Dispatch / issue Outward Delivery Challan"
+              >
+                <span>Dispatch Challan</span>
               </button>
             )}
             <button

@@ -35,6 +35,15 @@ import {
   quickRegisterCustomer,
 } from './lib/customerStorage';
 import {
+  loadDeliveryChallans,
+  saveDeliveryChallans,
+  deleteStoredDeliveryChallan,
+} from './lib/challanStorage';
+import {
+  loadGoodsReceipts,
+  saveGoodsReceipts,
+} from './lib/receiptStorage';
+import {
   exportToExcel,
   exportToCsv,
   parseExcelOrCsvFile,
@@ -63,7 +72,10 @@ import {
   saveUserSettingsToFirestore,
   migrateLocalDataToCloud,
   saveDeliveryChallanToFirestore,
+  subscribeDeliveryChallans,
+  deleteDeliveryChallanFromFirestore,
   saveGoodsReceiptToFirestore,
+  subscribeGoodsReceipts,
   subscribeCustomers,
   saveCustomerToFirestore,
   deleteCustomerFromFirestore,
@@ -73,6 +85,7 @@ import {
 import { Navbar } from './components/Navbar';
 import { StockSummary } from './components/StockSummary';
 import { StockTable } from './components/StockTable';
+import { DeliveryChallansView } from './components/DeliveryChallansView';
 import { AddItemModal } from './components/AddItemModal';
 import { EditItemModal } from './components/EditItemModal';
 import { ItemDetailsModal } from './components/ItemDetailsModal';
@@ -84,7 +97,6 @@ import { GeminiStockChatModal } from './components/GeminiStockChatModal';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { UnauthorizedDomainModal } from './components/UnauthorizedDomainModal';
 import { ExportExcelModal } from './components/ExportExcelModal';
-import { QuickSaleModal } from './components/QuickSaleModal';
 import { TimezoneSelectorModal } from './components/TimezoneSelectorModal';
 import { DispatchOrderModal } from './components/DispatchOrderModal';
 import { ReceiveStockModal } from './components/ReceiveStockModal';
@@ -208,12 +220,39 @@ export function App() {
   const [isExportExcelModalOpen, setIsExportExcelModalOpen] = useState(false);
   const [isTimezoneModalOpen, setIsTimezoneModalOpen] = useState(false);
 
+  // Active primary screen: 'inventory' | 'challans_ledger'
+  const [activeScreen, setActiveScreen] = useState<'inventory' | 'challans_ledger'>('inventory');
+  const [challansViewInitialTab, setChallansViewInitialTab] = useState<'all_challans' | 'single_party_ledger' | 'parties_directory'>('all_challans');
+  const [challansViewPartyFilter, setChallansViewPartyFilter] = useState<string>('');
+
+  // Challans and Goods Receipts records
+  const [challans, setChallans] = useState<DeliveryChallan[]>(() => loadDeliveryChallans());
+  const [goodsReceipts, setGoodsReceipts] = useState<GoodsReceipt[]>(() => loadGoodsReceipts());
+
+  const handleSwitchScreen = useCallback(
+    (
+      screen: 'inventory' | 'challans_ledger',
+      subTab: 'all_challans' | 'single_party_ledger' | 'parties_directory' = 'all_challans',
+      partyFilter: string = ''
+    ) => {
+      setActiveScreen(screen);
+      if (screen === 'challans_ledger') {
+        setChallansViewInitialTab(subTab);
+        setChallansViewPartyFilter(partyFilter);
+      }
+    },
+    []
+  );
+
   // Unified Multi-Item Order Dispatch & Delivery Challan (Alt + O)
   const [isDispatchOrderOpen, setIsDispatchOrderOpen] = useState(false);
   const [dispatchInitialItem, setDispatchInitialItem] = useState<StockItem | null>(null);
 
-  const handleOpenDispatchOrder = useCallback((initialItem?: StockItem | null) => {
+  const handleOpenDispatchOrder = useCallback((initialItem?: StockItem | null, customerName?: string) => {
     setDispatchInitialItem(initialItem || null);
+    if (customerName) {
+      setDispatchPreselectedCustomer(customerName);
+    }
     setIsDispatchOrderOpen(true);
   }, []);
 
@@ -228,9 +267,15 @@ export function App() {
     setIsReceiveStockOpen(true);
   }, []);
 
-  // Quick Sale / Rapid Stock Deduction (Alt + B shortcut)
-  const [isQuickSaleModalOpen, setIsQuickSaleModalOpen] = useState(false);
-  const [quickSaleTargetItem, setQuickSaleTargetItem] = useState<StockItem | null>(null);
+  // Dedicated Full-Screen: Customer Ledger & Delivery Challans (Shortcut: Alt + L)
+  const handleOpenDeliveryLedger = useCallback(
+    (partyName?: string) => {
+      handleSwitchScreen('challans_ledger', partyName ? 'single_party_ledger' : 'all_challans', partyName || '');
+    },
+    [handleSwitchScreen]
+  );
+
+  // Active keyboard item tracker
   const [activeKeyboardItem, setActiveKeyboardItem] = useState<StockItem | null>(null);
   const activeKeyboardItemRef = useRef<StockItem | null>(null);
 
@@ -239,17 +284,17 @@ export function App() {
     setActiveKeyboardItem(item);
   }, []);
 
+  // Stock Outward / Dispatch — official Delivery Challan is the only route
   const handleOpenQuickSale = useCallback(
     (item?: StockItem | null) => {
       const target = item || activeKeyboardItemRef.current || activeKeyboardItem || (items.length > 0 ? items[0] : null);
       if (!target) {
-        showToast('No stock items available to modify or sell.', 'info');
+        showToast('No stock items available to dispatch.', 'info');
         return;
       }
-      setQuickSaleTargetItem(target);
-      setIsQuickSaleModalOpen(true);
+      handleOpenDispatchOrder(target);
     },
-    [activeKeyboardItem, items]
+    [activeKeyboardItem, items, handleOpenDispatchOrder]
   );
 
   // Open Add Item modal directly on the "Register New Catalog SKU" tab and land inside its input box
@@ -347,6 +392,18 @@ export function App() {
       ) {
         e.preventDefault();
         handleOpenReceiveStock();
+        return;
+      }
+
+      // 2d. Alt + L (Windows/Linux/macOS) -> Customer Ledger & Delivery Challans
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        (e.key === 'l' || e.key === 'L' || e.code === 'KeyL')
+      ) {
+        e.preventDefault();
+        handleOpenDeliveryLedger();
         return;
       }
 
@@ -611,6 +668,40 @@ export function App() {
     });
     return () => unsubscribe();
   }, [currentUser]);
+
+  // Real-time Firestore synchronizer for delivery challans & inward goods receipts
+  useEffect(() => {
+    if (!currentUser) return;
+    const unsubscribeChallans = subscribeDeliveryChallans((cloudChallans) => {
+      if (Array.isArray(cloudChallans)) {
+        saveDeliveryChallans(cloudChallans);
+        setChallans(cloudChallans);
+      }
+    });
+    const unsubscribeReceipts = subscribeGoodsReceipts((cloudReceipts) => {
+      if (Array.isArray(cloudReceipts)) {
+        saveGoodsReceipts(cloudReceipts);
+        setGoodsReceipts(cloudReceipts);
+      }
+    });
+    return () => {
+      unsubscribeChallans();
+      unsubscribeReceipts();
+    };
+  }, [currentUser]);
+
+  // Delivery Challan deletion handler
+  const handleDeleteChallan = useCallback(
+    (id: string) => {
+      deleteStoredDeliveryChallan(id);
+      setChallans(loadDeliveryChallans());
+      showToast('Delivery Challan voucher removed.', 'info');
+      if (currentUser?.uid) {
+        deleteDeliveryChallanFromFirestore(id).catch(console.error);
+      }
+    },
+    [currentUser]
+  );
 
   // Customer & Vendor Party Handlers
   const handleSaveCustomer = async (cust: CustomerParty) => {
@@ -1389,100 +1480,6 @@ export function App() {
     return { previousQuantity, newQuantity: newQty, undo };
   };
 
-  // Dedicated Rapid Point-of-Sale / Stock Modification Handler (Alt + B)
-  const handleConfirmQuickSale = (
-    item: StockItem,
-    quantitySold: number,
-    notes?: string,
-    customerOrRef?: string
-  ) => {
-    if (quantitySold <= 0) return;
-    const cleanNote = (notes || '').trim();
-    if (!cleanNote) {
-      showToast(`Cannot record sale for "${item.itemName}": A sale note or reference is strictly required.`, 'error');
-      return;
-    }
-
-    const previousQuantity = item.quantity || 0;
-
-    // Strict validation: Stock is already 0 -> cannot record sale
-    if (previousQuantity <= 0) {
-      showToast(
-        `Cannot record sale: "${item.itemName}" is already out of stock (0 ${item.unit}). Please restock before selling.`,
-        'error'
-      );
-      return;
-    }
-
-    // Strict validation: Cannot sell more than available inventory
-    if (quantitySold > previousQuantity) {
-      showToast(
-        `Cannot record sale: Attempted to sell ${quantitySold} ${item.unit}, but only ${previousQuantity} ${item.unit} available in stock.`,
-        'error'
-      );
-      return;
-    }
-
-    const newQty = Math.max(0, previousQuantity - quantitySold);
-
-    const refNote = customerOrRef ? `Ref: ${customerOrRef.trim()}` : '';
-    const details = `Audit Note: "${cleanNote}"${refNote ? ` • ${refNote}` : ''}`;
-
-    const auditEntry = createAuditEntry(
-      'quantity_changed',
-      `Sale / Outbound (-${quantitySold} ${item.unit})`,
-      `Sold ${quantitySold} ${item.unit}. Baseline was ${previousQuantity}, remaining: ${newQty} ${item.unit}. ${details}`,
-      previousQuantity,
-      newQty,
-      operator.name,
-      operator.email
-    );
-
-    const updatedTrail = [auditEntry, ...(item.auditTrail || [])];
-
-    const updatedItem: StockItem = {
-      ...item,
-      quantity: newQty,
-      updatedAt: new Date().toISOString(),
-      userId: currentUser?.uid || item.userId,
-      lastModifiedByName: operator.name,
-      lastModifiedByEmail: operator.email,
-      auditTrail: updatedTrail,
-    };
-
-    const next = items.map((i) => (i.id === item.id ? updatedItem : i));
-    updateItems(next);
-
-    const globalEntry = appendGlobalAuditLog({
-      ...auditEntry,
-      itemId: item.id,
-      itemName: item.itemName,
-      unit: item.unit,
-      performedBy: operator.name,
-      userEmail: operator.email,
-    });
-    setGlobalLogs((prev) => [globalEntry, ...prev]);
-
-    if (currentUser) {
-      saveStockItemToFirestore(updatedItem, operator, currentUser.uid).catch(console.error);
-      saveAuditLogToFirestore(globalEntry, currentUser.uid).catch(console.error);
-    }
-
-    if (selectedItemForDetails && selectedItemForDetails.id === item.id) {
-      setSelectedItemForDetails(updatedItem);
-    }
-
-    showToast(
-      `Sold ${quantitySold} ${item.unit} of "${item.itemName}". Balance: ${newQty} ${item.unit}`,
-      'success',
-      {
-        label: 'Undo Sale',
-        onClick: () => {
-          handleInboundStock(updatedItem, quantitySold, `Undo sale of ${quantitySold} ${item.unit}`);
-        },
-      }
-    );
-  };
 
   // Unified Multi-Item Order Dispatch & Delivery Challan Handler
   const handleFulfillOrderDispatch = (challan: DeliveryChallan) => {
@@ -1555,6 +1552,8 @@ export function App() {
     if (newGlobalEntries.length > 0) {
       setGlobalLogs((prev) => [...newGlobalEntries, ...prev]);
     }
+
+    setChallans(loadDeliveryChallans());
 
     if (currentUser) {
       saveDeliveryChallanToFirestore(challan, currentUser.uid).catch(console.error);
@@ -1648,6 +1647,8 @@ export function App() {
       setGlobalLogs((prev) => [...newGlobalEntries, ...prev]);
     }
 
+    setGoodsReceipts(loadGoodsReceipts());
+
     if (currentUser) {
       saveGoodsReceiptToFirestore(receipt, currentUser.uid).catch(console.error);
     }
@@ -1676,33 +1677,38 @@ export function App() {
     noteType: 'count_verification' | 'quality_check' | 'location_audit' | 'general' = 'general',
     verifiedCount?: number
   ) => {
-    const isCountUpdate = verifiedCount !== undefined && verifiedCount !== item.quantity;
-    const previousQty = item.quantity;
-    const newQty = isCountUpdate ? Math.max(0, verifiedCount) : item.quantity;
+    // Audit observations do NOT change inventory balance directly.
+    // Stock additions / reductions strictly require Delivery Challans.
+    const isCountDiscrepancy = verifiedCount !== undefined && verifiedCount !== item.quantity;
+    const currentQty = item.quantity;
 
     let summary = 'Staff Audit Note';
     if (noteType === 'count_verification') {
-      summary = isCountUpdate
-        ? `Physical Count Audit: Adjusted from ${previousQty} to ${newQty} ${item.unit}`
-        : `Physical Count Audit: Verified ${newQty} ${item.unit}`;
+      summary = isCountDiscrepancy
+        ? `Physical Audit Observation: Counted ${verifiedCount} ${item.unit} (System balance: ${currentQty} ${item.unit})`
+        : `Physical Count Verified: ${currentQty} ${item.unit}`;
     } else if (noteType === 'quality_check') {
       summary = 'Quality & Condition Inspection Logged';
     } else if (noteType === 'location_audit') {
       summary = 'Storage Rack & Location Check Logged';
     }
 
+    const noteDetails = isCountDiscrepancy
+      ? `${note.trim()} • [Audit Note: Physical count observed ${verifiedCount} ${item.unit} vs recorded ${currentQty} ${item.unit}. Stock must be reconciled through official Delivery Challans.]`
+      : note.trim() || undefined;
+
     const auditEntry = createAuditEntry(
       'audit_note',
       summary,
-      note.trim() || undefined,
-      previousQty,
-      newQty,
+      noteDetails,
+      currentQty,
+      currentQty,
       operator.name,
       operator.email,
       {
         category: 'audit',
         noteType,
-        balanceAfter: newQty,
+        balanceAfter: currentQty,
       }
     );
 
@@ -1710,7 +1716,6 @@ export function App() {
 
     const updatedItem: StockItem = {
       ...item,
-      quantity: newQty,
       updatedAt: new Date().toISOString(),
       userId: currentUser?.uid || item.userId,
       lastModifiedByName: operator.name,
@@ -2109,8 +2114,12 @@ export function App() {
         onOpenTimezoneModal={() => setIsTimezoneModalOpen(true)}
         onOpenDispatchOrder={() => handleOpenDispatchOrder()}
         onOpenReceiveStock={() => handleOpenReceiveStock()}
-        onOpenCustomerModal={() => setIsCustomerModalOpen(true)}
+        onOpenDeliveryLedger={(partyName) => handleOpenDeliveryLedger(partyName)}
+        onOpenCustomerModal={() => handleSwitchScreen('challans_ledger', 'parties_directory')}
         customerCount={customers.length}
+        activeScreen={activeScreen}
+        onSwitchScreen={handleSwitchScreen}
+        challansCount={challans.length}
       />
 
       {/* Cloud DB & Shared Access Status Banner */}
@@ -2207,46 +2216,65 @@ export function App() {
         </div>
       )}
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-7 space-y-4 sm:space-y-6">
-        {/* KPI / Stock Metrics (Tap to filter, reactive to selected tag) */}
-        <StockSummary
-          items={items}
-          activeFilter={activeFilter}
-          onSelectFilter={setActiveFilter}
-          selectedTag={selectedTag}
-          onSelectTag={setSelectedTag}
-          managedTags={tags}
-        />
+      {/* Main Container / Active Screen View */}
+      {activeScreen === 'inventory' ? (
+        <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-7 space-y-4 sm:space-y-6">
+          {/* KPI / Stock Metrics (Tap to filter, reactive to selected tag) */}
+          <StockSummary
+            items={items}
+            activeFilter={activeFilter}
+            onSelectFilter={setActiveFilter}
+            selectedTag={selectedTag}
+            onSelectTag={setSelectedTag}
+            managedTags={tags}
+          />
 
-        {/* Stock Inventory List & Table with Metadata, Voice Search & Trail view */}
-        <StockTable
-          items={items}
-          units={units}
-          activeFilter={activeFilter}
-          confirmOnDelete={confirmOnDelete}
-          onToggleConfirmOnDelete={handleToggleConfirmOnDelete}
-          onFilterChange={setActiveFilter}
-          onAddItem={openRegisterNewSKUModal}
-          onEditItem={(item) => setEditingItem(item)}
-          onDeleteItem={handleDeleteItemClick}
-          onQuickQuantityChange={handleQuickQuantityChange}
-          onReceiveStock={(item) => handleOpenReceiveStock(item)}
-          onExportExcel={handleExportExcel}
-          onViewItemDetails={(item) => setSelectedItemForDetails(item)}
-          onOpenAuditTrail={() => setIsAuditTrailModalOpen(true)}
-          onOpenGeminiChat={() => setIsGeminiChatOpen(true)}
-          searchQuery={searchQuery}
-          onSearchQueryChange={setSearchQuery}
-          selectedTag={selectedTag}
-          onSelectTag={setSelectedTag}
-          managedTags={tags}
-          onOpenTagModal={() => setIsTagModalOpen(true)}
-          onOpenQuickSale={handleOpenQuickSale}
-          onActiveItemChange={handleActiveKeyboardItemChange}
-          onOpenDispatchOrder={handleOpenDispatchOrder}
+          {/* Stock Inventory List & Table with Metadata, Voice Search & Trail view */}
+          <StockTable
+            items={items}
+            units={units}
+            activeFilter={activeFilter}
+            confirmOnDelete={confirmOnDelete}
+            onToggleConfirmOnDelete={handleToggleConfirmOnDelete}
+            onFilterChange={setActiveFilter}
+            onAddItem={openRegisterNewSKUModal}
+            onEditItem={(item) => setEditingItem(item)}
+            onDeleteItem={handleDeleteItemClick}
+            onQuickQuantityChange={handleQuickQuantityChange}
+            onReceiveStock={(item) => handleOpenReceiveStock(item)}
+            onExportExcel={handleExportExcel}
+            onViewItemDetails={(item) => setSelectedItemForDetails(item)}
+            onOpenAuditTrail={() => setIsAuditTrailModalOpen(true)}
+            onOpenGeminiChat={() => setIsGeminiChatOpen(true)}
+            searchQuery={searchQuery}
+            onSearchQueryChange={setSearchQuery}
+            selectedTag={selectedTag}
+            onSelectTag={setSelectedTag}
+            managedTags={tags}
+            onOpenTagModal={() => setIsTagModalOpen(true)}
+            onOpenQuickSale={handleOpenQuickSale}
+            onActiveItemChange={handleActiveKeyboardItemChange}
+            onOpenDispatchOrder={handleOpenDispatchOrder}
+          />
+        </main>
+      ) : (
+        <DeliveryChallansView
+          challans={challans}
+          customers={customers}
+          stockItems={items}
+          operator={operator}
+          initialPartyFilter={challansViewPartyFilter}
+          initialSubTab={challansViewInitialTab}
+          goodsReceipts={goodsReceipts}
+          onOpenNewDispatch={(custName) => handleOpenDispatchOrder(null, custName)}
+          onOpenReceiveStock={(vendorName) => handleOpenReceiveStock(null, vendorName)}
+          onSaveCustomer={handleSaveCustomer}
+          onDeleteCustomer={handleDeleteCustomer}
+          onDeleteChallan={handleDeleteChallan}
+          onShowToast={(msg, type) => showToast(msg, type)}
+          onSwitchToInventory={() => setActiveScreen('inventory')}
         />
-      </main>
+      )}
 
       {/* Mobile Floating Action Buttons (FAB): Quick AI Chat + Add Item */}
       <div className="sm:hidden fixed bottom-5 left-3 right-3 z-40 flex items-center justify-between pointer-events-none">
@@ -2319,7 +2347,10 @@ export function App() {
           setSelectedItemForDetails(null);
           setEditingItem(item);
         }}
-        onQuickQuantityChange={handleQuickQuantityChange}
+        onOpenDispatchOrder={(item) => {
+          setSelectedItemForDetails(null);
+          handleOpenDispatchOrder(item);
+        }}
         onReceiveStock={(item) => {
           setSelectedItemForDetails(null);
           handleOpenReceiveStock(item);
@@ -2431,19 +2462,7 @@ export function App() {
         onSearchItem={(q) => setSearchQuery(q)}
       />
 
-      {/* 10. Rapid Quick Sale & Item Modification Modal (Shortcut: Alt + B) */}
-      <QuickSaleModal
-        isOpen={isQuickSaleModalOpen}
-        item={quickSaleTargetItem}
-        onClose={() => {
-          setIsQuickSaleModalOpen(false);
-          setQuickSaleTargetItem(null);
-        }}
-        onConfirmSale={handleConfirmQuickSale}
-        onSwitchToEdit={(item) => setEditingItem(item)}
-        onRestockItem={(item) => setRestockTargetItem(item)}
-        onSwitchToDispatchOrder={(item) => handleOpenDispatchOrder(item)}
-      />
+
 
       {/* 10b. Unified Multi-Item Order Dispatch & Delivery Challan Modal (Shortcut: Alt + O) */}
       <DispatchOrderModal
@@ -2461,7 +2480,7 @@ export function App() {
         initialCustomerName={dispatchPreselectedCustomer}
         initialDeliveryAddress={dispatchPreselectedAddress}
         registeredCustomers={customers}
-        onOpenCustomerModal={() => setIsCustomerModalOpen(true)}
+        onOpenCustomerModal={() => handleSwitchScreen('challans_ledger', 'parties_directory')}
         onQuickRegisterCustomer={handleQuickRegisterCustomer}
         onFulfillDispatch={handleFulfillOrderDispatch}
         onShowToast={(msg, type) => showToast(msg, type)}
@@ -2482,6 +2501,9 @@ export function App() {
         onSelectForReceive={(vendorName) => {
           handleOpenReceiveStock(null, vendorName);
         }}
+        onOpenLedger={(partyName) => {
+          handleOpenDeliveryLedger(partyName);
+        }}
       />
 
       {/* 10d. Unified Multi-Item Goods Receipt & Stock Receiving Modal (Shortcut: Alt + R) */}
@@ -2498,7 +2520,7 @@ export function App() {
         initialItem={receiveInitialItem}
         initialVendorName={receiveInitialVendor}
         registeredCustomers={customers}
-        onOpenCustomerModal={() => setIsCustomerModalOpen(true)}
+        onOpenCustomerModal={() => handleSwitchScreen('challans_ledger', 'parties_directory')}
         onQuickRegisterVendor={(name) => {
           try {
             const { customer, isNew } = quickRegisterCustomer(name, { partyType: 'vendor' });

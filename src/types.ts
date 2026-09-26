@@ -146,6 +146,8 @@ export interface DeliveryChallan {
   items: DeliveryChallanItem[];
   totalItems: number;
   totalQuantity: number;
+  poNumber?: string;
+  invoiceNumber?: string;
   notes?: string;
   deliveryAddress?: string;
   vehicleNumber?: string;

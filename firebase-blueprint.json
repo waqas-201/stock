@@ -173,9 +173,35 @@
         "userId": { "type": "string", "maxLength": 128 }
       },
       "required": ["id", "name", "createdAt", "updatedAt"]
+    },
+    "GoodsReceipt": {
+      "title": "Goods Receipt Note",
+      "description": "Inward delivery challan and goods receipt voucher for physical stock intake from vendors",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "receiptNumber": { "type": "string", "maxLength": 80 },
+        "vendorName": { "type": "string", "maxLength": 200 },
+        "date": { "type": "string", "maxLength": 60 },
+        "receivedByName": { "type": "string", "maxLength": 120 },
+        "receivedByEmail": { "type": "string", "maxLength": 120 },
+        "items": { "type": "array" },
+        "totalItems": { "type": "number" },
+        "totalQuantity": { "type": "number" },
+        "vendorInvoiceNumber": { "type": "string", "maxLength": 100 },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "status": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string", "maxLength": 60 },
+        "userId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "receiptNumber", "vendorName", "date", "receivedByName", "totalItems", "totalQuantity", "createdAt"]
     }
   },
   "firestore": {
+    "/goods_receipts/{receiptId}": {
+      "schema": { "$ref": "#/entities/GoodsReceipt" },
+      "description": "Shared goods receipt notes and inward delivery challans collection for received vendor inventory"
+    },
     "/customers/{customerId}": {
       "schema": { "$ref": "#/entities/Customer" },
       "description": "Shared registered customer party profiles collection for sales and dispatch management"

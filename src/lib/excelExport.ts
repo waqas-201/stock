@@ -700,3 +700,96 @@ export function exportGoodsReceiptToExcel(receipt: GoodsReceipt): void {
   XLSX.writeFile(wb, `Goods_Receipt_${cleanReceiptNumber}.xlsx`);
 }
 
+/**
+ * Exports a customer's delivery ledger or multi-challan history to an Excel workbook.
+ */
+export function exportChallanLedgerToExcel(
+  challans: DeliveryChallan[],
+  partyName?: string,
+  timeRangeLabel?: string
+): void {
+  const wb = XLSX.utils.book_new();
+
+  // Sheet 1: Challans Summary
+  const summaryRows: (string | number)[][] = [
+    ['DELIVERY CHALLANS & DISPATCH LEDGER'],
+    ['Party / Customer Scope:', partyName || 'All Parties / Customers'],
+    ['Report Period:', timeRangeLabel || 'All Time'],
+    ['Generated On:', formatLocalDate(new Date().toISOString())],
+    ['Total Challans:', challans.length],
+    ['Total Units Dispatched:', challans.reduce((acc, c) => acc + (c.totalQuantity || 0), 0)],
+    [],
+    ['Date', 'Challan #', 'Customer / Party', 'Dispatched By', 'Total Items', 'Total Qty', 'Destination / Site', 'Vehicle / Ref', 'Notes'],
+  ];
+
+  challans.forEach((c) => {
+    summaryRows.push([
+      c.date ? formatLocalDate(c.date) : '',
+      c.challanNumber,
+      c.customerName,
+      c.dispatchedByName || 'Warehouse Staff',
+      c.totalItems || c.items?.length || 0,
+      c.totalQuantity || 0,
+      c.deliveryAddress || 'On-site / Direct',
+      c.vehicleNumber || '',
+      c.notes || '',
+    ]);
+  });
+
+  const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+  wsSummary['!cols'] = [
+    { wch: 16 }, // Date
+    { wch: 20 }, // Challan #
+    { wch: 28 }, // Customer
+    { wch: 20 }, // Dispatched By
+    { wch: 12 }, // Total Items
+    { wch: 14 }, // Total Qty
+    { wch: 28 }, // Destination
+    { wch: 18 }, // Vehicle
+    { wch: 30 }, // Notes
+  ];
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'Challans Ledger');
+
+  // Sheet 2: Item-by-item breakdown
+  const itemRows: (string | number)[][] = [
+    ['DELIVERY CHALLAN ITEM DISPATCH BREAKDOWN'],
+    [],
+    ['Date', 'Challan #', 'Customer', 'Product / Item Name', 'Dispatched Qty', 'Unit', 'Baseline Stock', 'Remaining Stock'],
+  ];
+
+  challans.forEach((c) => {
+    const dStr = c.date ? formatLocalDate(c.date) : '';
+    (c.items || []).forEach((it) => {
+      itemRows.push([
+        dStr,
+        c.challanNumber,
+        c.customerName,
+        it.itemName,
+        it.dispatchedQty,
+        it.unit,
+        it.previousQty !== undefined ? it.previousQty : '-',
+        it.remainingQty !== undefined ? it.remainingQty : '-',
+      ]);
+    });
+  });
+
+  const wsItems = XLSX.utils.aoa_to_sheet(itemRows);
+  wsItems['!cols'] = [
+    { wch: 16 }, // Date
+    { wch: 20 }, // Challan #
+    { wch: 26 }, // Customer
+    { wch: 32 }, // Product
+    { wch: 16 }, // Qty
+    { wch: 12 }, // Unit
+    { wch: 16 }, // Baseline
+    { wch: 16 }, // Remaining
+  ];
+  XLSX.utils.book_append_sheet(wb, wsItems, 'Dispatched Items');
+
+  const filePrefix = partyName
+    ? `Delivery_Ledger_${partyName.replace(/[^a-zA-Z0-9_-]/g, '_')}`
+    : 'Delivery_Challans_Ledger';
+  XLSX.writeFile(wb, `${filePrefix}_${getTodayDateString()}.xlsx`);
+}
+
+

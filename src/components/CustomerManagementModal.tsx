@@ -11,6 +11,7 @@ import {
   Building2,
   ShoppingBag,
   PackageCheck,
+  FileText,
 } from 'lucide-react';
 import { CustomerParty, CustomerPartyType } from '../types';
 
@@ -22,6 +23,7 @@ interface CustomerManagementModalProps {
   onDeleteCustomer: (id: string) => void;
   onSelectForDispatch?: (customerName: string, deliveryAddress?: string) => void;
   onSelectForReceive?: (vendorName: string) => void;
+  onOpenLedger?: (partyName: string) => void;
 }
 
 export const CustomerManagementModal: React.FC<CustomerManagementModalProps> = ({
@@ -32,6 +34,7 @@ export const CustomerManagementModal: React.FC<CustomerManagementModalProps> = (
   onDeleteCustomer,
   onSelectForDispatch,
   onSelectForReceive,
+  onOpenLedger,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'customer' | 'vendor'>('all');
@@ -426,6 +429,21 @@ export const CustomerManagementModal: React.FC<CustomerManagementModalProps> = (
                           >
                             <PackageCheck className="w-3.5 h-3.5" />
                             <span>Receive</span>
+                          </button>
+                        )}
+
+                        {onOpenLedger && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onOpenLedger(party.name);
+                              onClose();
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition-colors cursor-pointer"
+                            title={`View delivery challans & ledger statement for ${party.name}`}
+                          >
+                            <FileText className="w-3.5 h-3.5 text-slate-600" />
+                            <span>Ledger</span>
                           </button>
                         )}
 
