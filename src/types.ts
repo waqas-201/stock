@@ -105,7 +105,16 @@ export type GeminiActionType =
   | 'update_item'
   | 'delete_item'
   | 'filter_ui'
-  | 'search_ui';
+  | 'search_ui'
+  | 'create_delivery_challan'
+  | 'receive_stock';
+
+export interface GeminiChallanItemAction {
+  itemId?: string;
+  itemName: string;
+  quantity: number;
+  unit?: string;
+}
 
 export interface GeminiAgentAction {
   id?: string;
@@ -123,6 +132,16 @@ export interface GeminiAgentAction {
   filter?: StockFilter;
   searchQuery?: string;
   reason?: string;
+  // Delivery Challan & Inward Intake fields
+  customerName?: string;
+  vendorName?: string;
+  deliveryAddress?: string;
+  vehicleNumber?: string;
+  vendorInvoiceNumber?: string;
+  challanNumber?: string;
+  receiptNumber?: string;
+  challanItems?: GeminiChallanItemAction[];
+  items?: GeminiChallanItemAction[];
 }
 
 export interface DeliveryChallanItem {

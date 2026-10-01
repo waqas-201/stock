@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { StockItem, StockUnit, StockFilter, OperatorProfile, GeminiAgentAction, StockTag, StockTagColor, DeliveryChallan, CustomerParty, GoodsReceipt } from './types';
+import { StockItem, StockUnit, StockFilter, OperatorProfile, GeminiAgentAction, StockTag, StockTagColor, DeliveryChallan, DeliveryChallanItem, CustomerParty, GoodsReceipt } from './types';
 import {
   loadStoredStock,
   saveStoredStock,
@@ -37,11 +37,15 @@ import {
 import {
   loadDeliveryChallans,
   saveDeliveryChallans,
+  saveDeliveryChallan,
+  generateNextChallanNumber,
   deleteStoredDeliveryChallan,
 } from './lib/challanStorage';
 import {
   loadGoodsReceipts,
   saveGoodsReceipts,
+  saveGoodsReceipt,
+  generateNextReceiptNumber,
 } from './lib/receiptStorage';
 import {
   exportToExcel,
@@ -1553,6 +1557,7 @@ export function App() {
       setGlobalLogs((prev) => [...newGlobalEntries, ...prev]);
     }
 
+    saveDeliveryChallan(challan);
     setChallans(loadDeliveryChallans());
 
     if (currentUser) {
@@ -1647,6 +1652,7 @@ export function App() {
       setGlobalLogs((prev) => [...newGlobalEntries, ...prev]);
     }
 
+    saveGoodsReceipt(receipt);
     setGoodsReceipts(loadGoodsReceipts());
 
     if (currentUser) {
@@ -1930,6 +1936,204 @@ export function App() {
           message: `Filtered inventory by "${action.searchQuery}"`,
         };
       }
+    }
+
+    if (action.type === 'create_delivery_challan') {
+      const customer = (action.customerName || 'Customer').trim();
+      const rawChallanItems = Array.isArray(action.challanItems) && action.challanItems.length > 0
+        ? action.challanItems
+        : Array.isArray(action.items) && action.items.length > 0
+        ? action.items
+        : action.itemName
+        ? [{ itemName: action.itemName, quantity: action.quantity || Math.abs(action.delta || 1), unit: action.unit }]
+        : [];
+
+      if (rawChallanItems.length === 0) {
+        return {
+          success: false,
+          message: 'No items were specified for the delivery challan.',
+        };
+      }
+
+      // Match each requested item against current stock inventory
+      const matchedItems: Array<{ stockItem: StockItem; qty: number }> = [];
+      const missingItemNames: string[] = [];
+
+      rawChallanItems.forEach((reqItem) => {
+        const target = (reqItem.itemName || '').trim().toLowerCase();
+        const matched = items.find(
+          (i) =>
+            (reqItem.itemId && i.id === reqItem.itemId) ||
+            i.itemName.trim().toLowerCase() === target ||
+            i.itemName.trim().toLowerCase().includes(target) ||
+            (target.length > 2 && target.includes(i.itemName.trim().toLowerCase()))
+        );
+
+        if (matched) {
+          const qty = Number(reqItem.quantity) > 0 ? Number(reqItem.quantity) : 1;
+          matchedItems.push({ stockItem: matched, qty });
+        } else {
+          missingItemNames.push(reqItem.itemName || 'Unknown Item');
+        }
+      });
+
+      if (matchedItems.length === 0) {
+        return {
+          success: false,
+          message: `Item(s) not found in inventory: "${missingItemNames.join(', ')}". Please check the product names.`,
+        };
+      }
+
+      // Generate next official Challan Number (e.g. DC-YYYYMMDD-001)
+      const existingChallans = loadDeliveryChallans();
+      const challanNumber = generateNextChallanNumber(existingChallans);
+      const today = new Date().toISOString().split('T')[0];
+      const challanId = `dc-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+
+      const deliveryItems: DeliveryChallanItem[] = matchedItems.map(({ stockItem, qty }) => ({
+        itemId: stockItem.id,
+        itemName: stockItem.itemName,
+        unit: stockItem.unit,
+        dispatchedQty: qty,
+        previousQty: stockItem.quantity || 0,
+        remainingQty: Math.max(0, (stockItem.quantity || 0) - qty),
+        tags: stockItem.tags,
+      }));
+
+      const totalDispatchedQuantity = deliveryItems.reduce((sum, it) => sum + it.dispatchedQty, 0);
+
+      const newChallan: DeliveryChallan = {
+        id: challanId,
+        challanNumber,
+        date: today,
+        customerName: customer,
+        deliveryAddress: action.deliveryAddress?.trim() || undefined,
+        vehicleNumber: action.vehicleNumber?.trim() || undefined,
+        dispatchedByName: operator.name,
+        dispatchedByEmail: operator.email || currentUser?.email || undefined,
+        items: deliveryItems,
+        totalItems: deliveryItems.length,
+        totalQuantity: totalDispatchedQuantity,
+        notes: action.notes?.trim() || action.reason?.trim() || 'Created via Gemini AI Agent',
+        status: 'dispatched',
+        createdAt: new Date().toISOString(),
+        userId: currentUser?.uid,
+      };
+
+      // Fulfill the dispatch: saves locally, in Firestore, deducts stock, creates audit logs, registers customer!
+      handleFulfillOrderDispatch(newChallan);
+
+      const missingWarning = missingItemNames.length > 0
+        ? ` (Note: ${missingItemNames.join(', ')} were not found and skipped)`
+        : '';
+
+      const summaryMsg = `Created Delivery Challan #${challanNumber} for "${customer}"! Dispatched ${totalDispatchedQuantity} units across ${deliveryItems.length} item(s). Stock deducted and ledger updated.${missingWarning}`;
+      showToast(summaryMsg, 'success');
+
+      return {
+        success: true,
+        message: summaryMsg,
+      };
+    }
+
+    if (action.type === 'receive_stock') {
+      const vendor = (action.vendorName || action.customerName || 'Vendor').trim();
+      const rawReceiptItems = Array.isArray(action.items) && action.items.length > 0
+        ? action.items
+        : Array.isArray(action.challanItems) && action.challanItems.length > 0
+        ? action.challanItems
+        : action.itemName
+        ? [{ itemName: action.itemName, quantity: action.quantity || Math.abs(action.delta || 1), unit: action.unit }]
+        : [];
+
+      if (rawReceiptItems.length === 0) {
+        return {
+          success: false,
+          message: 'No items were specified for the goods receipt.',
+        };
+      }
+
+      // Match items
+      const existingReceipts = loadGoodsReceipts();
+      const receiptNumber = generateNextReceiptNumber(existingReceipts);
+      const today = new Date().toISOString().split('T')[0];
+      const receiptId = `grn-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+
+      const receiptItemsList: any[] = [];
+
+      rawReceiptItems.forEach((reqItem) => {
+        const target = (reqItem.itemName || '').trim().toLowerCase();
+        let matched = items.find(
+          (i) =>
+            (reqItem.itemId && i.id === reqItem.itemId) ||
+            i.itemName.trim().toLowerCase() === target ||
+            i.itemName.trim().toLowerCase().includes(target)
+        );
+
+        const qty = Number(reqItem.quantity) > 0 ? Number(reqItem.quantity) : 1;
+
+        if (matched) {
+          receiptItemsList.push({
+            itemId: matched.id,
+            itemName: matched.itemName,
+            unit: matched.unit,
+            receivedQty: qty,
+            previousQty: matched.quantity || 0,
+            newQty: (matched.quantity || 0) + qty,
+            tags: matched.tags,
+          });
+        } else {
+          // Auto-add new item if not in inventory
+          const newId = generateItemId();
+          const unit = reqItem.unit || 'Pieces';
+          handleAddItem(
+            reqItem.itemName,
+            unit,
+            qty,
+            5,
+            undefined,
+            `Inward receipt from ${vendor}`,
+            undefined
+          );
+          receiptItemsList.push({
+            itemId: newId,
+            itemName: reqItem.itemName,
+            unit,
+            receivedQty: qty,
+            previousQty: 0,
+            newQty: qty,
+          });
+        }
+      });
+
+      const totalReceivedQuantity = receiptItemsList.reduce((sum, it) => sum + it.receivedQty, 0);
+
+      const newReceipt: GoodsReceipt = {
+        id: receiptId,
+        receiptNumber,
+        date: today,
+        vendorName: vendor,
+        vendorInvoiceNumber: action.vendorInvoiceNumber?.trim() || undefined,
+        receivedByName: operator.name,
+        receivedByEmail: operator.email || currentUser?.email || undefined,
+        items: receiptItemsList,
+        totalItems: receiptItemsList.length,
+        totalQuantity: totalReceivedQuantity,
+        notes: action.notes?.trim() || action.reason?.trim() || 'Inward intake via Gemini AI Agent',
+        status: 'received',
+        createdAt: new Date().toISOString(),
+        userId: currentUser?.uid,
+      };
+
+      handleFulfillGoodsReceipt(newReceipt);
+
+      const summaryMsg = `Recorded Goods Receipt #${receiptNumber} from "${vendor}"! Received ${totalReceivedQuantity} units across ${receiptItemsList.length} item(s). Inventory increased and ledger updated.`;
+      showToast(summaryMsg, 'success');
+
+      return {
+        success: true,
+        message: summaryMsg,
+      };
     }
 
     return {
@@ -2484,6 +2688,9 @@ export function App() {
         onExecuteAgentAction={handleExecuteGeminiAction}
         onApplyFilter={(f) => setActiveFilter(f)}
         onSearchItem={(q) => setSearchQuery(q)}
+        onOpenDeliveryLedger={(party) =>
+          handleSwitchScreen('challans_ledger', party ? 'single_party_ledger' : 'all_challans', party || '')
+        }
       />
 
 

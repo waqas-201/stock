@@ -167,6 +167,59 @@ RULE 4: DIRECT COMMANDS ON EXISTING ITEMS
 • "Show low stock" -> {"type": "filter_ui", "filter": "low_stock"}
 • "Search for Sugar" -> {"type": "search_ui", "searchQuery": "Sugar"}
 
+RULE 5: DELIVERY CHALLAN & ORDER DISPATCH COMMANDS (CRITICAL: MUST EMIT "create_delivery_challan" ACTION!)
+Whenever the user mentions creating a delivery challan, dispatching an order, shipping items to a customer, or says e.g.:
+• "Create a delivery chalan for customer John Doe: 10 units of Widget A and 5 units of Widget B"
+• "Make a delivery challan for Acme Corp with 20 kg Rice"
+• "Dispatch 5 boxes of Apple to Customer Waqas"
+• "Hey create a delivery chalan for this customer"
+
+YOU MUST ALWAYS EMIT A REAL ACTION of type "create_delivery_challan" in [ACTIONS]!
+NEVER just write in text that you created a challan without generating this action object. If you only write text, the challan is NOT applied in the software and no inventory is deducted.
+Action Structure:
+[ACTIONS]
+[
+  {
+    "type": "create_delivery_challan",
+    "customerName": "Customer Name or Company Name",
+    "deliveryAddress": "Address if mentioned, else null",
+    "vehicleNumber": "Vehicle number if mentioned, else null",
+    "notes": "Any reference notes or po number if mentioned, else null",
+    "challanItems": [
+      {
+        "itemName": "Matched Product Name",
+        "quantity": 10,
+        "unit": "Matching Unit"
+      }
+    ]
+  }
+]
+
+Note on Customer Name:
+• If the user specifies the customer name (e.g. "for Waqas" or "for Acme Corp"), IMMEDIATELY emit the "create_delivery_challan" action in [ACTIONS]!
+• In [REPLY], confirm: "Created Delivery Challan for **[Customer Name]**! Dispatched **[Quantity] [Unit]** of **[Product]**. Inventory has been deducted and recorded in your Delivery Ledger."
+• If the user did NOT mention the customer name (e.g. "Create a delivery challan for 5 laptops"), ask: "Sure! What is the **customer or party name** for this Delivery Challan?" with [ACTIONS] [].
+
+RULE 6: INWARD STOCK INTAKE / GOODS RECEIPT (GRN)
+Whenever the user mentions receiving inward shipments or goods receipt from a supplier/vendor:
+• Example: "Received 50 boxes of Paper from Supplier XYZ"
+Output:
+[ACTIONS]
+[
+  {
+    "type": "receive_stock",
+    "vendorName": "Supplier XYZ",
+    "notes": null,
+    "items": [
+      {
+        "itemName": "Paper",
+        "quantity": 50,
+        "unit": "Boxes"
+      }
+    ]
+  }
+]
+
 STRICT OUTPUT FORMAT:
 You must strictly format your entire response using the following three sections:
 
@@ -331,6 +384,75 @@ Your natural conversational reply to the user. Use bold for key numbers and item
     const enrichedActions = Array.isArray(parsedActions)
       ? parsedActions.map((act) => {
           if (!act || typeof act !== 'object') return act;
+
+          // Delivery Challan Action enrichment
+          if (act.type === 'create_delivery_challan') {
+            const rawItems = Array.isArray(act.challanItems) && act.challanItems.length > 0
+              ? act.challanItems
+              : Array.isArray(act.items) && act.items.length > 0
+              ? act.items
+              : act.itemName
+              ? [{ itemName: act.itemName, quantity: act.quantity || Math.abs(act.delta || 1), unit: act.unit }]
+              : [];
+
+            const enrichedChallanItems = rawItems.map((ci: any) => {
+              const ciTarget = (ci.itemName || '').toLowerCase().trim();
+              const matched = itemsList.find(
+                (i: any) =>
+                  (i.itemName && i.itemName.toLowerCase().trim() === ciTarget) ||
+                  (i.itemName && i.itemName.toLowerCase().trim().includes(ciTarget)) ||
+                  (ciTarget.length > 2 && i.itemName && ciTarget.includes(i.itemName.toLowerCase().trim())) ||
+                  (i.id && ci.itemId && i.id === ci.itemId)
+              );
+              return {
+                ...ci,
+                itemId: matched?.id || ci.itemId,
+                itemName: matched?.itemName || ci.itemName,
+                unit: matched?.unit || ci.unit || 'Pieces',
+                previousQuantity: matched?.quantity,
+              };
+            });
+
+            return {
+              ...act,
+              challanItems: enrichedChallanItems,
+            };
+          }
+
+          // Inward Goods Receipt Action enrichment
+          if (act.type === 'receive_stock' || act.type === 'create_goods_receipt') {
+            const rawItems = Array.isArray(act.items) && act.items.length > 0
+              ? act.items
+              : Array.isArray(act.challanItems) && act.challanItems.length > 0
+              ? act.challanItems
+              : act.itemName
+              ? [{ itemName: act.itemName, quantity: act.quantity || Math.abs(act.delta || 1), unit: act.unit }]
+              : [];
+
+            const enrichedReceiptItems = rawItems.map((ri: any) => {
+              const riTarget = (ri.itemName || '').toLowerCase().trim();
+              const matched = itemsList.find(
+                (i: any) =>
+                  (i.itemName && i.itemName.toLowerCase().trim() === riTarget) ||
+                  (i.itemName && i.itemName.toLowerCase().trim().includes(riTarget)) ||
+                  (i.id && ri.itemId && i.id === ri.itemId)
+              );
+              return {
+                ...ri,
+                itemId: matched?.id || ri.itemId,
+                itemName: matched?.itemName || ri.itemName,
+                unit: matched?.unit || ri.unit || 'Pieces',
+                previousQuantity: matched?.quantity,
+              };
+            });
+
+            return {
+              ...act,
+              items: enrichedReceiptItems,
+            };
+          }
+
+          // Single item action enrichment
           const targetName = (act.itemName || '').toLowerCase().trim();
           const matched = itemsList.find(
             (i: any) =>

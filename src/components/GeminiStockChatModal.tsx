@@ -20,6 +20,8 @@ import {
   Plus,
   Sliders,
   Filter,
+  Truck,
+  Receipt,
 } from 'lucide-react';
 import { StockItem, StockFilter, GeminiAgentAction, StockUnit } from '../types';
 
@@ -27,6 +29,7 @@ export interface ExecutedActionRecord {
   id: string;
   type: string;
   itemName?: string;
+  customerName?: string;
   delta?: number;
   previousQuantity?: number;
   newQuantity?: number;
@@ -63,6 +66,7 @@ export interface GeminiStockChatModalProps {
     previousQuantity?: number;
     newQuantity?: number;
   };
+  onOpenDeliveryLedger?: (partyName?: string) => void;
 }
 
 /**
@@ -147,6 +151,7 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
   onSearchItem,
   onQuickQuantityChange,
   onExecuteAgentAction,
+  onOpenDeliveryLedger,
 }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -719,7 +724,8 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
             executedActionsList.push({
               id: `act-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
               type: act.type,
-              itemName: act.itemName,
+              itemName: act.itemName || (act.challanItems && act.challanItems[0]?.itemName),
+              customerName: act.customerName,
               delta: act.delta,
               previousQuantity: execResult.previousQuantity ?? act.previousQuantity,
               newQuantity:
@@ -959,14 +965,29 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                           >
                             <div className="flex items-center justify-between gap-2 flex-wrap">
                               <div className="flex items-center gap-2 min-w-0">
-                                <span className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
-                                  <TrendingUp className="w-3.5 h-3.5" />
+                                <span className="w-8 h-8 rounded-lg bg-emerald-700 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                                  {actionRecord.type === 'create_delivery_challan' ? (
+                                    <Truck className="w-4 h-4 text-white" />
+                                  ) : actionRecord.type === 'receive_stock' ? (
+                                    <Package className="w-4 h-4 text-white" />
+                                  ) : (
+                                    <TrendingUp className="w-4 h-4" />
+                                  )}
                                 </span>
                                 <div className="min-w-0">
                                   <div className="flex items-center gap-1.5 flex-wrap">
                                     <span className="font-bold text-slate-900 text-xs sm:text-sm truncate">
-                                      {actionRecord.itemName || 'Stock Item'}
+                                      {actionRecord.type === 'create_delivery_challan'
+                                        ? 'Delivery Challan Dispatched'
+                                        : actionRecord.type === 'receive_stock'
+                                        ? 'Goods Receipt Inward'
+                                        : actionRecord.itemName || 'Stock Item'}
                                     </span>
+                                    {actionRecord.customerName && (
+                                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 border border-emerald-300">
+                                        Party: {actionRecord.customerName}
+                                      </span>
+                                    )}
                                     {actionRecord.delta !== undefined && (
                                       <span
                                         className={`text-xs font-bold font-mono px-1.5 py-0.2 rounded-md ${
@@ -980,28 +1001,45 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
                                       </span>
                                     )}
                                   </div>
-                                  <p className="text-[11px] text-slate-500">
+                                  <p className="text-[11px] text-slate-600 font-medium mt-0.5">
                                     {actionRecord.summary}
                                   </p>
                                 </div>
                               </div>
 
-                              {/* Undo Button */}
-                              {actionRecord.undo && (
-                                <button
-                                  type="button"
-                                  disabled={actionRecord.isUndone}
-                                  onClick={() => handleUndoAction(actionRecord, msg.id)}
-                                  className={`min-h-[28px] px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shrink-0 ${
-                                    actionRecord.isUndone
-                                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                                      : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-300 shadow-2xs'
-                                  }`}
-                                >
-                                  <Undo2 className="w-3 h-3" />
-                                  <span>{actionRecord.isUndone ? 'Reverted' : 'Undo Action'}</span>
-                                </button>
-                              )}
+                              {/* Action Buttons: View Ledger & Undo */}
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {actionRecord.type === 'create_delivery_challan' && onOpenDeliveryLedger && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      onClose();
+                                      onOpenDeliveryLedger(actionRecord.customerName);
+                                    }}
+                                    className="min-h-[28px] px-2.5 py-1 rounded-lg text-xs font-bold text-emerald-800 hover:text-emerald-950 bg-white hover:bg-emerald-100 border border-emerald-300 shadow-2xs transition-colors cursor-pointer flex items-center gap-1"
+                                    title="Open Delivery Challans Ledger to view this document"
+                                  >
+                                    <Receipt className="w-3.5 h-3.5 text-emerald-700" />
+                                    <span>View in Ledger</span>
+                                  </button>
+                                )}
+
+                                {actionRecord.undo && (
+                                  <button
+                                    type="button"
+                                    disabled={actionRecord.isUndone}
+                                    onClick={() => handleUndoAction(actionRecord, msg.id)}
+                                    className={`min-h-[28px] px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shrink-0 ${
+                                      actionRecord.isUndone
+                                        ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                                        : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-300 shadow-2xs'
+                                    }`}
+                                  >
+                                    <Undo2 className="w-3 h-3" />
+                                    <span>{actionRecord.isUndone ? 'Reverted' : 'Undo Action'}</span>
+                                  </button>
+                                )}
+                              </div>
                             </div>
 
                             {/* Mathematical Calculation Flow */}
@@ -1099,6 +1137,13 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
             Quick Commands:
           </span>
           {[
+            {
+              label: 'Dispatch Challan',
+              query:
+                items.length > 0
+                  ? `Create a delivery challan for customer Acme Corp: 5 ${items[0].unit || 'units'} of ${items[0].itemName}`
+                  : 'Create a delivery challan for customer Acme Corp with 5 units of stock',
+            },
             {
               label: 'Add ("5 grams...")',
               query: 'Hey, add this 5 grams',
