@@ -644,27 +644,25 @@ export function exportDeliveryChallanToExcel(challan: DeliveryChallan): void {
     ['Challan Number:', challan.challanNumber],
     ['Date:', challan.date ? formatLocalDate(challan.date) : getTodayDateString()],
     ['Customer / Party Name:', challan.customerName],
-    ['Dispatched By:', challan.dispatchedByName || 'Warehouse Staff'],
+    ['Dispatched By:', 'Authorized Dispatcher'],
     ['Delivery Address / Site:', challan.deliveryAddress || 'On-site / Self-pickup'],
     ['Vehicle / Ref #:', challan.vehicleNumber || challan.notes || 'None'],
     ['Status:', (challan.status || 'Dispatched').toUpperCase()],
     [], // Blank separator
-    ['Sr #', 'Item / Product Description', 'Dispatched Qty', 'Unit', 'Baseline Stock', 'Remaining Stock'],
+    ['Sr #', 'Item / Product Description', 'Dispatched Qty', 'Unit'],
   ];
 
   challan.items.forEach((item, index) => {
     rows.push([
       index + 1,
       item.itemName,
-      item.dispatchedQty,
+      Math.abs(item.dispatchedQty),
       item.unit,
-      item.previousQty !== undefined ? item.previousQty : '-',
-      item.remainingQty !== undefined ? item.remainingQty : '-',
     ]);
   });
 
   rows.push([]);
-  rows.push(['Total Items:', challan.totalItems, 'Total Qty Dispatched:', challan.totalQuantity]);
+  rows.push(['Total Items:', challan.totalItems, 'Total Qty Dispatched:', Math.abs(challan.totalQuantity)]);
   rows.push([]);
   rows.push(['Declaration:', 'Goods received in sound and undamaged condition.']);
   rows.push(['Receiver Signature:', '_______________________', 'Authorized Signatory:', '_______________________']);
@@ -677,8 +675,6 @@ export function exportDeliveryChallanToExcel(challan: DeliveryChallan): void {
     { wch: 38 }, // Item Description
     { wch: 18 }, // Dispatched Qty
     { wch: 14 }, // Unit
-    { wch: 16 }, // Baseline Stock
-    { wch: 18 }, // Remaining Stock
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, 'Delivery Challan');

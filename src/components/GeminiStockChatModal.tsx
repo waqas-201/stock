@@ -721,27 +721,31 @@ export const GeminiStockChatModal: React.FC<GeminiStockChatModalProps> = ({
         for (const act of data.actions) {
           try {
             const execResult = onExecuteAgentAction(act);
-            executedActionsList.push({
-              id: `act-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-              type: act.type,
-              itemName: act.itemName || (act.challanItems && act.challanItems[0]?.itemName),
-              customerName: act.customerName,
-              delta: act.delta,
-              previousQuantity: execResult.previousQuantity ?? act.previousQuantity,
-              newQuantity:
-                execResult.newQuantity ??
-                (act.newQuantity !== undefined
-                  ? act.newQuantity
-                  : execResult.previousQuantity !== undefined && act.delta !== undefined
-                  ? execResult.previousQuantity + act.delta
-                  : undefined),
-              unit: act.unit,
-              reason: act.reason,
-              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              undo: execResult.undo,
-              isUndone: false,
-              summary: execResult.message || `${act.type} executed successfully`,
-            });
+            if (execResult && execResult.success) {
+              executedActionsList.push({
+                id: `act-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                type: act.type,
+                itemName: act.itemName || (act.challanItems && act.challanItems[0]?.itemName),
+                customerName: act.customerName,
+                delta: act.delta,
+                previousQuantity: execResult.previousQuantity ?? act.previousQuantity,
+                newQuantity:
+                  execResult.newQuantity ??
+                  (act.newQuantity !== undefined
+                    ? act.newQuantity
+                    : execResult.previousQuantity !== undefined && act.delta !== undefined
+                    ? execResult.previousQuantity + act.delta
+                    : undefined),
+                unit: act.unit,
+                reason: act.reason,
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                undo: execResult.undo,
+                isUndone: false,
+                summary: execResult.message || `${act.type} executed successfully`,
+              });
+            } else if (execResult && !execResult.success) {
+              console.warn('AI Agent action could not be fulfilled:', execResult.message);
+            }
           } catch (e: any) {
             console.error('Failed to execute AI agent action:', act, e);
           }

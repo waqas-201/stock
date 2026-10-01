@@ -1402,15 +1402,15 @@ Dispatched By: ${c.dispatchedByName || 'Warehouse Staff'}`;
       {/* ========================================================================= */}
       {viewingChallan && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in"
+          className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in print:p-0 print:bg-white print:static"
           onClick={() => setViewingChallan(null)}
         >
           <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95"
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 print:border-none print:shadow-none print:max-h-none print:w-full"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Slip Toolbar */}
-            <div className="px-5 py-3.5 bg-slate-900 text-white flex items-center justify-between shrink-0">
+            <div className="px-5 py-3.5 bg-slate-900 text-white flex items-center justify-between shrink-0 print:hidden">
               <div className="flex items-center gap-2 font-bold text-sm">
                 <Truck className="w-4 h-4 text-emerald-400" />
                 <span>Delivery Challan #{viewingChallan.challanNumber}</span>
@@ -1491,8 +1491,6 @@ Dispatched By: ${c.dispatchedByName || 'Warehouse Staff'}`;
                       <th className="px-3 py-2.5">Item Description</th>
                       <th className="px-3 py-2.5 text-center">Unit</th>
                       <th className="px-3 py-2.5 text-right font-bold text-emerald-800">Dispatched Qty</th>
-                      <th className="px-3 py-2.5 text-right">Baseline Stock</th>
-                      <th className="px-3 py-2.5 text-right">Remaining Stock</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
@@ -1501,17 +1499,14 @@ Dispatched By: ${c.dispatchedByName || 'Warehouse Staff'}`;
                         <td className="px-3 py-2.5 text-center font-mono text-slate-400">{idx + 1}</td>
                         <td className="px-3 py-2.5 font-bold text-slate-900">{it.itemName}</td>
                         <td className="px-3 py-2.5 text-center text-slate-600">{it.unit}</td>
-                        <td className="px-3 py-2.5 text-right font-bold text-emerald-700">-{it.dispatchedQty}</td>
-                        <td className="px-3 py-2.5 text-right text-slate-500">{it.previousQty !== undefined ? it.previousQty : '-'}</td>
-                        <td className="px-3 py-2.5 text-right text-slate-700 font-semibold">{it.remainingQty !== undefined ? it.remainingQty : '-'}</td>
+                        <td className="px-3 py-2.5 text-right font-bold text-emerald-700">{Math.abs(it.dispatchedQty)}</td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot className="bg-slate-50 font-bold border-t border-slate-200">
                     <tr>
                       <td colSpan={3} className="px-3 py-2.5 text-right text-slate-700">Total Dispatched:</td>
-                      <td className="px-3 py-2.5 text-right text-emerald-900 text-sm">-{viewingChallan.totalQuantity}</td>
-                      <td colSpan={2}></td>
+                      <td className="px-3 py-2.5 text-right text-emerald-900 text-sm font-bold">{Math.abs(viewingChallan.totalQuantity)}</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -1524,7 +1519,7 @@ Dispatched By: ${c.dispatchedByName || 'Warehouse Staff'}`;
                 </div>
                 <div>
                   <div className="h-12 border-b border-dashed border-slate-300" />
-                  <div className="mt-1 font-semibold text-slate-700">Authorized Dispatcher ({viewingChallan.dispatchedByName || 'Staff'})</div>
+                  <div className="mt-1 font-semibold text-slate-700">Authorized Dispatcher</div>
                 </div>
               </div>
             </div>

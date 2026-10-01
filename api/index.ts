@@ -167,15 +167,24 @@ RULE 4: DIRECT COMMANDS ON EXISTING ITEMS
 • "Show low stock" -> {"type": "filter_ui", "filter": "low_stock"}
 • "Search for Sugar" -> {"type": "search_ui", "searchQuery": "Sugar"}
 
-RULE 5: DELIVERY CHALLAN & ORDER DISPATCH COMMANDS (CRITICAL: MUST EMIT "create_delivery_challan" ACTION!)
+RULE 5: DELIVERY CHALLAN & ORDER DISPATCH COMMANDS (CRITICAL: MUST ALWAYS EMIT "create_delivery_challan" ACTION!)
 Whenever the user mentions creating a delivery challan, dispatching an order, shipping items to a customer, or says e.g.:
 • "Create a delivery chalan for customer John Doe: 10 units of Widget A and 5 units of Widget B"
 • "Make a delivery challan for Acme Corp with 20 kg Rice"
-• "Dispatch 5 boxes of Apple to Customer Waqas"
+• "Dispatch 5 boxes of Apple to Customer"
 • "Hey create a delivery chalan for this customer"
+• User gives stock or list of items and asks to create a delivery challan: "Here is my stock: Item 1 50, Item 2 30. Create delivery challan for this customer: 10 Item 1"
 
-YOU MUST ALWAYS EMIT A REAL ACTION of type "create_delivery_challan" in [ACTIONS]!
-NEVER just write in text that you created a challan without generating this action object. If you only write text, the challan is NOT applied in the software and no inventory is deducted.
+MANDATORY RULES:
+1. YOU MUST ALWAYS EMIT A REAL ACTION of type "create_delivery_challan" in [ACTIONS]!
+2. NEVER EVER write in [REPLY] that you created a challan without generating this action object. If you only write text, the challan is NOT applied in the software and no inventory is deducted!
+3. If the user provides a stock list with quantities alongside the challan request:
+   - For items in the challan, include "itemName", "quantity", "unit", and "previousQuantity" (baseline stock from the user's list if provided).
+   - If user asks to add the remaining items to stock, also emit "add_item" / "update_stock" actions for them!
+4. Customer Name Handling:
+   - If the user specifies a customer name (e.g. "for Acme", "for John"), set "customerName": "[Name]".
+   - If the user says "for this customer" or did not specify a name, DO NOT REFUSE OR DELAY. Set "customerName": "Customer" (or "Walk-in Customer") and IMMEDIATELY emit "create_delivery_challan" in [ACTIONS]!
+
 Action Structure:
 [ACTIONS]
 [
@@ -187,18 +196,14 @@ Action Structure:
     "notes": "Any reference notes or po number if mentioned, else null",
     "challanItems": [
       {
-        "itemName": "Matched Product Name",
+        "itemName": "Product Name",
         "quantity": 10,
-        "unit": "Matching Unit"
+        "unit": "Matching Unit",
+        "previousQuantity": 50
       }
     ]
   }
 ]
-
-Note on Customer Name:
-• If the user specifies the customer name (e.g. "for Waqas" or "for Acme Corp"), IMMEDIATELY emit the "create_delivery_challan" action in [ACTIONS]!
-• In [REPLY], confirm: "Created Delivery Challan for **[Customer Name]**! Dispatched **[Quantity] [Unit]** of **[Product]**. Inventory has been deducted and recorded in your Delivery Ledger."
-• If the user did NOT mention the customer name (e.g. "Create a delivery challan for 5 laptops"), ask: "Sure! What is the **customer or party name** for this Delivery Challan?" with [ACTIONS] [].
 
 RULE 6: INWARD STOCK INTAKE / GOODS RECEIPT (GRN)
 Whenever the user mentions receiving inward shipments or goods receipt from a supplier/vendor:
@@ -329,6 +334,43 @@ Your natural conversational reply to the user. Use bold for key numbers and item
     let parsedActions: any[] = [];
     let parsedSuggestions: string[] = [];
 
+    // Helper to robustly extract and parse JSON array or object
+    const parseJsonActions = (text: string): any[] => {
+      if (!text || !text.trim()) return [];
+      const cleaned = text
+        .replace(/```(?:json)?/gi, '')
+        .replace(/```/g, '')
+        .trim();
+
+      try {
+        const direct = JSON.parse(cleaned);
+        if (Array.isArray(direct)) return direct;
+        if (direct && typeof direct === 'object') return [direct];
+      } catch {}
+
+      const firstBracket = cleaned.indexOf('[');
+      const lastBracket = cleaned.lastIndexOf(']');
+      if (firstBracket !== -1 && lastBracket > firstBracket) {
+        try {
+          const slice = cleaned.substring(firstBracket, lastBracket + 1);
+          const parsed = JSON.parse(slice);
+          if (Array.isArray(parsed)) return parsed;
+        } catch {}
+      }
+
+      const firstBrace = cleaned.indexOf('{');
+      const lastBrace = cleaned.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace > firstBrace) {
+        try {
+          const slice = cleaned.substring(firstBrace, lastBrace + 1);
+          const parsed = JSON.parse(slice);
+          if (parsed && typeof parsed === 'object') return [parsed];
+        } catch {}
+      }
+
+      return [];
+    };
+
     try {
       if (rawText.includes('[ACTIONS]')) {
         const parts = rawText.split('[ACTIONS]');
@@ -347,12 +389,7 @@ Your natural conversational reply to the user. Use bold for key numbers and item
           actionsJsonStr = rest.trim();
         }
 
-        // Strip markdown code fences if model wrapped the JSON
-        actionsJsonStr = actionsJsonStr.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
-
-        if (actionsJsonStr.startsWith('[') && actionsJsonStr.endsWith(']')) {
-          parsedActions = JSON.parse(actionsJsonStr);
-        }
+        parsedActions = parseJsonActions(actionsJsonStr);
 
         if (suggestionsPart) {
           parsedSuggestions = suggestionsPart
@@ -375,6 +412,81 @@ Your natural conversational reply to the user. Use bold for key numbers and item
       } else {
         parsedReply = rawText.replace(/\[REPLY\]/i, '').trim();
       }
+
+      // If no actions found inside [ACTIONS], check entire rawText for JSON actions
+      if (parsedActions.length === 0) {
+        parsedActions = parseJsonActions(rawText);
+      }
+
+      // Resilient fallback heuristic for delivery challan requests
+      const isChallanIntent =
+        /create.*delivery.*chal+an/i.test(message) ||
+        /make.*delivery.*chal+an/i.test(message) ||
+        /issue.*delivery.*chal+an/i.test(message) ||
+        /delivery.*chal+an.*for/i.test(message) ||
+        /dispatch.*to/i.test(message);
+
+      const modelClaimsChallan =
+        /created\s+(?:a\s+)?delivery\s+chal+an/i.test(rawText) ||
+        /delivery\s+chal+an\s+#?DC/i.test(rawText) ||
+        /dispatched\s+\d+/i.test(rawText);
+
+      const hasChallanAction = parsedActions.some((a) => a && a.type === 'create_delivery_challan');
+
+      if (!hasChallanAction && (isChallanIntent || modelClaimsChallan)) {
+        // Extract customer name
+        let detectedCustomer = 'Customer';
+        const custMatch = message.match(/(?:for|to)\s+(?:customer|client|party)?\s*([A-Za-z0-9\s&.-]+?)(?:\s*:|\s+with|\s+having|\s+items|\s+\d|$)/i);
+        if (custMatch && custMatch[1]) {
+          const cName = custMatch[1].trim();
+          if (cName && !/^(this|this customer|customer|client|party)$/i.test(cName)) {
+            detectedCustomer = cName;
+          }
+        }
+
+        const challanItems: any[] = [];
+        // Match existing items from catalog in user query
+        for (const it of itemsList) {
+          const escapedName = it.itemName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const itRegex = new RegExp(`(?:(\\d+)\\s*(?:units?|pcs?|pieces?|boxes?|kg|liters?)?\\s*(?:of\\s+)?${escapedName}|${escapedName}[:\\s]+(\\d+))`, 'i');
+          const match = message.match(itRegex);
+          if (match) {
+            const qty = parseInt(match[1] || match[2] || '1', 10);
+            challanItems.push({
+              itemId: it.id,
+              itemName: it.itemName,
+              quantity: qty > 0 ? qty : 1,
+              unit: it.unit || 'Pieces',
+              previousQuantity: it.quantity,
+            });
+          }
+        }
+
+        // Generic extraction if no catalog items matched (e.g. user provided custom list)
+        if (challanItems.length === 0) {
+          const itemLineRegex = /(\d+)\s*(?:units?|pcs?|pieces?|boxes?|kg|liters?)?\s*(?:of\s+)?([A-Za-z0-9\s-]+?)(?:,|\.|\sand\s|$)/gi;
+          let m;
+          while ((m = itemLineRegex.exec(message)) !== null) {
+            const qty = parseInt(m[1], 10);
+            const name = m[2].trim();
+            if (qty > 0 && name.length > 1 && !/^(units?|pcs?|pieces?|boxes?|items?|customer|stock)$/i.test(name)) {
+              challanItems.push({
+                itemName: name,
+                quantity: qty,
+                unit: 'Pieces',
+              });
+            }
+          }
+        }
+
+        if (challanItems.length > 0) {
+          parsedActions.push({
+            type: 'create_delivery_challan',
+            customerName: detectedCustomer,
+            challanItems,
+          });
+        }
+      }
     } catch (parseErr) {
       console.warn('Could not parse structured actions from Gemini output:', parseErr);
       parsedReply = rawText;
@@ -392,7 +504,7 @@ Your natural conversational reply to the user. Use bold for key numbers and item
               : Array.isArray(act.items) && act.items.length > 0
               ? act.items
               : act.itemName
-              ? [{ itemName: act.itemName, quantity: act.quantity || Math.abs(act.delta || 1), unit: act.unit }]
+              ? [{ itemName: act.itemName, quantity: act.quantity || Math.abs(act.delta || 1), unit: act.unit, previousQuantity: act.previousQuantity }]
               : [];
 
             const enrichedChallanItems = rawItems.map((ci: any) => {
@@ -409,12 +521,18 @@ Your natural conversational reply to the user. Use bold for key numbers and item
                 itemId: matched?.id || ci.itemId,
                 itemName: matched?.itemName || ci.itemName,
                 unit: matched?.unit || ci.unit || 'Pieces',
-                previousQuantity: matched?.quantity,
+                previousQuantity: ci.previousQuantity !== undefined ? ci.previousQuantity : matched?.quantity,
               };
             });
 
+            const cust = (act.customerName || '').trim();
+            const cleanCustomer = (!cust || /^(this|this customer|customer)$/i.test(cust))
+              ? 'Customer'
+              : cust;
+
             return {
               ...act,
+              customerName: cleanCustomer,
               challanItems: enrichedChallanItems,
             };
           }

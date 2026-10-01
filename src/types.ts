@@ -114,6 +114,8 @@ export interface GeminiChallanItemAction {
   itemName: string;
   quantity: number;
   unit?: string;
+  previousQuantity?: number;
+  tags?: string[];
 }
 
 export interface GeminiAgentAction {
@@ -124,6 +126,7 @@ export interface GeminiAgentAction {
   delta?: number;
   newQuantity?: number;
   quantity?: number;
+  previousQuantity?: number;
   unit?: string;
   lowStockThreshold?: number;
   productionDate?: string;

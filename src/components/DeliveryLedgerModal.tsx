@@ -607,7 +607,7 @@ Dispatched by: ${c.dispatchedByName || 'Warehouse Staff'}`;
                                   Baseline: {it.previousQty !== undefined ? it.previousQty : '-'} {it.unit}
                                 </span>
                                 <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                                  -{it.dispatchedQty} {it.unit}
+                                  {Math.abs(it.dispatchedQty)} {it.unit}
                                 </span>
                                 <span className="text-slate-600">
                                   Left: {it.remainingQty !== undefined ? it.remainingQty : '-'} {it.unit}
@@ -740,8 +740,6 @@ Dispatched by: ${c.dispatchedByName || 'Warehouse Staff'}`;
                         <th className="px-3 py-2.5">Item Description</th>
                         <th className="px-3 py-2.5 text-center">Unit</th>
                         <th className="px-3 py-2.5 text-right font-bold text-emerald-800">Dispatched Qty</th>
-                        <th className="px-3 py-2.5 text-right">Baseline Stock</th>
-                        <th className="px-3 py-2.5 text-right">Remaining Stock</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
@@ -750,17 +748,14 @@ Dispatched by: ${c.dispatchedByName || 'Warehouse Staff'}`;
                           <td className="px-3 py-2.5 text-center font-mono text-slate-400">{idx + 1}</td>
                           <td className="px-3 py-2.5 font-bold text-slate-900">{it.itemName}</td>
                           <td className="px-3 py-2.5 text-center text-slate-600">{it.unit}</td>
-                          <td className="px-3 py-2.5 text-right font-bold text-emerald-700">-{it.dispatchedQty}</td>
-                          <td className="px-3 py-2.5 text-right text-slate-500">{it.previousQty !== undefined ? it.previousQty : '-'}</td>
-                          <td className="px-3 py-2.5 text-right text-slate-700 font-semibold">{it.remainingQty !== undefined ? it.remainingQty : '-'}</td>
+                          <td className="px-3 py-2.5 text-right font-bold text-emerald-700">{Math.abs(it.dispatchedQty)}</td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot className="bg-slate-50 font-bold border-t border-slate-200">
                       <tr>
                         <td colSpan={3} className="px-3 py-2.5 text-right text-slate-700">Total Dispatched:</td>
-                        <td className="px-3 py-2.5 text-right text-emerald-900 text-sm">-{activeViewingChallan.totalQuantity}</td>
-                        <td colSpan={2}></td>
+                        <td className="px-3 py-2.5 text-right text-emerald-900 text-sm font-bold">{Math.abs(activeViewingChallan.totalQuantity)}</td>
                       </tr>
                     </tfoot>
                   </table>
@@ -773,7 +768,7 @@ Dispatched by: ${c.dispatchedByName || 'Warehouse Staff'}`;
                   </div>
                   <div>
                     <div className="h-12 border-b border-dashed border-slate-300" />
-                    <div className="mt-1 font-semibold text-slate-700">Authorized Dispatcher ({activeViewingChallan.dispatchedByName || 'Staff'})</div>
+                    <div className="mt-1 font-semibold text-slate-700">Authorized Dispatcher</div>
                   </div>
                 </div>
               </div>

@@ -1491,6 +1491,8 @@ export function App() {
 
     // Create item map for batched multi-item inventory reduction
     const itemMap = new Map<string, StockItem>();
+    const allStoredItems = loadStoredStock();
+    allStoredItems.forEach((it) => itemMap.set(it.id, it));
     items.forEach((it) => itemMap.set(it.id, it));
 
     const updatedItemsList: StockItem[] = [];
@@ -1939,13 +1941,17 @@ export function App() {
     }
 
     if (action.type === 'create_delivery_challan') {
-      const customer = (action.customerName || 'Customer').trim();
+      const rawCustomer = (action.customerName || '').trim();
+      const customer = (!rawCustomer || /^(this|this customer|customer)$/i.test(rawCustomer))
+        ? 'Customer'
+        : rawCustomer;
+
       const rawChallanItems = Array.isArray(action.challanItems) && action.challanItems.length > 0
         ? action.challanItems
         : Array.isArray(action.items) && action.items.length > 0
         ? action.items
         : action.itemName
-        ? [{ itemName: action.itemName, quantity: action.quantity || Math.abs(action.delta || 1), unit: action.unit }]
+        ? [{ itemName: action.itemName, quantity: action.quantity || Math.abs(action.delta || 1), unit: action.unit, previousQuantity: action.previousQuantity }]
         : [];
 
       if (rawChallanItems.length === 0) {
@@ -1956,12 +1962,13 @@ export function App() {
       }
 
       // Match each requested item against current stock inventory
+      // If an item does not exist yet, auto-create it with baseline stock so the dispatch succeeds
+      const currentItemsCopy = [...items];
       const matchedItems: Array<{ stockItem: StockItem; qty: number }> = [];
-      const missingItemNames: string[] = [];
 
       rawChallanItems.forEach((reqItem) => {
         const target = (reqItem.itemName || '').trim().toLowerCase();
-        const matched = items.find(
+        let matched = currentItemsCopy.find(
           (i) =>
             (reqItem.itemId && i.id === reqItem.itemId) ||
             i.itemName.trim().toLowerCase() === target ||
@@ -1969,18 +1976,47 @@ export function App() {
             (target.length > 2 && target.includes(i.itemName.trim().toLowerCase()))
         );
 
-        if (matched) {
-          const qty = Number(reqItem.quantity) > 0 ? Number(reqItem.quantity) : 1;
-          matchedItems.push({ stockItem: matched, qty });
-        } else {
-          missingItemNames.push(reqItem.itemName || 'Unknown Item');
+        const qty = Number(reqItem.quantity) > 0 ? Number(reqItem.quantity) : 1;
+
+        if (!matched) {
+          const cleanItemName = (reqItem.itemName || '').trim() || 'Dispatched Product';
+          const unit = reqItem.unit || (units && units.length > 0 ? units[0].name : 'Pieces');
+          const baselineCandidate = Number(reqItem.previousQuantity);
+          const baselineQty = !isNaN(baselineCandidate) && baselineCandidate >= qty
+            ? baselineCandidate
+            : qty;
+
+          const newItem: StockItem = {
+            id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+            itemName: cleanItemName,
+            unit,
+            quantity: baselineQty,
+            lowStockThreshold: 5,
+            notes: 'Auto-registered via Delivery Challan',
+            tags: reqItem.tags || [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            lastModifiedByName: operator.name,
+          };
+
+          currentItemsCopy.push(newItem);
+          saveStoredStock(currentItemsCopy);
+          if (currentUser?.uid) {
+            saveStockItemToFirestore(newItem, operator, currentUser.uid).catch(console.error);
+          }
+          matched = newItem;
         }
+
+        matchedItems.push({ stockItem: matched, qty });
       });
+
+      // Update React state so new items are immediately visible
+      setItems(currentItemsCopy);
 
       if (matchedItems.length === 0) {
         return {
           success: false,
-          message: `Item(s) not found in inventory: "${missingItemNames.join(', ')}". Please check the product names.`,
+          message: 'No items could be prepared for the delivery challan.',
         };
       }
 
@@ -2023,11 +2059,7 @@ export function App() {
       // Fulfill the dispatch: saves locally, in Firestore, deducts stock, creates audit logs, registers customer!
       handleFulfillOrderDispatch(newChallan);
 
-      const missingWarning = missingItemNames.length > 0
-        ? ` (Note: ${missingItemNames.join(', ')} were not found and skipped)`
-        : '';
-
-      const summaryMsg = `Created Delivery Challan #${challanNumber} for "${customer}"! Dispatched ${totalDispatchedQuantity} units across ${deliveryItems.length} item(s). Stock deducted and ledger updated.${missingWarning}`;
+      const summaryMsg = `Created Delivery Challan #${challanNumber} for "${customer}"! Dispatched ${totalDispatchedQuantity} units across ${deliveryItems.length} item(s). Stock deducted and recorded in delivery ledger.`;
       showToast(summaryMsg, 'success');
 
       return {

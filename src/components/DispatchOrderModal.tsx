@@ -2196,8 +2196,6 @@ export const DispatchOrderModal: React.FC<DispatchOrderModalProps> = ({
                       <th className="py-2.5 px-3 font-bold text-slate-700">Product / Item Description</th>
                       <th className="py-2.5 px-3 font-bold text-slate-700 text-center">Unit</th>
                       <th className="py-2.5 px-3 font-bold text-slate-700 text-right">Dispatched Qty</th>
-                      <th className="py-2.5 px-3 font-bold text-slate-500 text-right">Baseline Stock</th>
-                      <th className="py-2.5 px-3 font-bold text-slate-500 text-right">Remaining</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 font-medium">
@@ -2209,13 +2207,7 @@ export const DispatchOrderModal: React.FC<DispatchOrderModalProps> = ({
                         </td>
                         <td className="py-2.5 px-3 text-center text-slate-600">{item.unit}</td>
                         <td className="py-2.5 px-3 text-right font-black font-mono text-sm text-slate-900">
-                          {item.dispatchedQty}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-mono text-slate-500">
-                          {item.previousQty !== undefined ? item.previousQty : '-'}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-mono text-slate-700">
-                          {item.remainingQty !== undefined ? item.remainingQty : '-'}
+                          {Math.abs(item.dispatchedQty)}
                         </td>
                       </tr>
                     ))}
@@ -2231,7 +2223,7 @@ export const DispatchOrderModal: React.FC<DispatchOrderModalProps> = ({
                 <div className="text-right">
                   Total Dispatched Quantity:{' '}
                   <strong className="text-base font-black font-mono text-slate-900">
-                    {activeChallan.totalQuantity}
+                    {Math.abs(activeChallan.totalQuantity)}
                   </strong>
                 </div>
               </div>
@@ -2245,10 +2237,10 @@ export const DispatchOrderModal: React.FC<DispatchOrderModalProps> = ({
                 <div className="grid grid-cols-2 gap-8 text-center text-xs">
                   <div>
                     <div className="border-t-2 border-slate-400 pt-2 font-bold text-slate-800">
-                      Dispatched By (Authorized Signatory)
+                      Authorized Dispatcher
                     </div>
                     <div className="text-[11px] text-slate-500 mt-0.5">
-                      {activeChallan.dispatchedByName}
+                      Signature & Stamp
                     </div>
                   </div>
 
