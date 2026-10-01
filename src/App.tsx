@@ -1952,8 +1952,30 @@ export function App() {
       showToast('No items to export.', 'info');
       return;
     }
-    exportToCsv(items, 'stock-inventory.csv');
-    showToast('CSV file exported', 'success');
+    const cleanTag = selectedTag ? selectedTag.toLowerCase().trim().replace(/^#+/, '') : null;
+    const itemsToExport = cleanTag
+      ? items.filter(
+          (it) =>
+            Array.isArray(it.tags) &&
+            it.tags.some((t) => t && t.toLowerCase().trim().replace(/^#+/, '') === cleanTag)
+        )
+      : items;
+
+    if (itemsToExport.length === 0) {
+      showToast(`No items tagged "${selectedTag}" to export.`, 'info');
+      return;
+    }
+
+    const filename = cleanTag
+      ? `stock-inventory-tag-${cleanTag}.csv`
+      : 'stock-inventory.csv';
+    exportToCsv(itemsToExport, filename);
+    showToast(
+      cleanTag
+        ? `Exported ${itemsToExport.length} items tagged with "${selectedTag}" to CSV`
+        : 'CSV file exported',
+      'success'
+    );
   };
 
   const handleImportFile = async (file: File) => {
@@ -2378,6 +2400,8 @@ export function App() {
         onClose={() => setIsExportExcelModalOpen(false)}
         items={items}
         globalLogs={unifiedLogs}
+        initialSelectedTag={selectedTag}
+        managedTags={tags}
         onShowToast={(msg, type) => showToast(msg, type)}
       />
 

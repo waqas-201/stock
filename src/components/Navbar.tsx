@@ -713,10 +713,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </div>
                       <div>
                         <div className="text-xs font-bold text-slate-900">
-                          Export to Excel (.xlsx)
+                          {selectedTag ? `Export #${selectedTag.replace(/^#+/, '')} to Excel (.xlsx)` : 'Export to Excel (.xlsx)'}
                         </div>
                         <div className="text-[11px] text-slate-500">
-                          Download official inventory sheet
+                          {selectedTag ? `Export only items tagged #${selectedTag.replace(/^#+/, '')}` : 'Download official inventory sheet'}
                         </div>
                       </div>
                     </div>
@@ -738,10 +738,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </div>
                       <div>
                         <div className="text-xs font-bold text-slate-900">
-                          Export to CSV (.csv)
+                          {selectedTag ? `Export #${selectedTag.replace(/^#+/, '')} to CSV (.csv)` : 'Export to CSV (.csv)'}
                         </div>
                         <div className="text-[11px] text-slate-500">
-                          Raw comma-separated data
+                          {selectedTag ? `Export only items tagged #${selectedTag.replace(/^#+/, '')}` : 'Raw comma-separated data'}
                         </div>
                       </div>
                     </div>

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   X,
   FileSpreadsheet,
@@ -8,10 +8,12 @@ import {
   Clock,
   History,
   AlertCircle,
-  TrendingUp,
   Boxes,
+  Tag,
+  Hash,
+  Search,
 } from 'lucide-react';
-import { StockItem } from '../types';
+import { StockItem, StockTag } from '../types';
 import { GlobalAuditRecord, deduplicateAuditLogs } from '../lib/stockStorage';
 import {
   getAffectedItems,
@@ -22,16 +24,18 @@ import {
   getLocalDateRange,
   getRecentHoursRange,
   useActiveTimezone,
-  formatLocalDate,
   parseLocalDateBoundary,
   isDateMatchingToday,
 } from '../lib/dateUtils';
+import { getTagStyle } from '../lib/tagUtils';
 
 export interface ExportExcelModalProps {
   isOpen: boolean;
   onClose: () => void;
   items: StockItem[];
   globalLogs?: GlobalAuditRecord[];
+  initialSelectedTag?: string | null;
+  managedTags?: StockTag[];
   onShowToast?: (message: string, type: 'success' | 'error' | 'info') => void;
 }
 
@@ -47,6 +51,7 @@ type TimeSpanPreset =
   | '60_days'
   | 'all_time'
   | 'custom';
+
 type ExportScope = 'whole_stock' | 'affected_only';
 
 export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
@@ -54,6 +59,8 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
   onClose,
   items = [],
   globalLogs = [],
+  initialSelectedTag = null,
+  managedTags = [],
   onShowToast,
 }) => {
   const safeItems = Array.isArray(items) ? items : [];
@@ -63,6 +70,47 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
   }, [globalLogs]);
 
   const { timezone } = useActiveTimezone();
+
+  // Tag filter state: defaults to currently active tag from inventory table if any
+  const [selectedTagFilter, setSelectedTagFilter] = useState<string | null>(initialSelectedTag || null);
+  const [tagSearchTerm, setTagSearchTerm] = useState<string>('');
+
+  // Sync state whenever modal opens or initialSelectedTag changes
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedTagFilter(initialSelectedTag || null);
+      setTagSearchTerm('');
+      // When a tag is specified, automatically default scope to 'whole_stock' so all items matching that tag are exported!
+      if (initialSelectedTag && initialSelectedTag !== 'all') {
+        setExportScope('whole_stock');
+      }
+    }
+  }, [isOpen, initialSelectedTag]);
+
+  // Extract all unique tags present across items with exact item counts
+  const uniqueTagsList = useMemo(() => {
+    const map = new Map<string, number>();
+    safeItems.forEach((item) => {
+      if (Array.isArray(item.tags)) {
+        item.tags.forEach((t) => {
+          if (t && t.trim()) {
+            const clean = t.trim().replace(/^#+/, '');
+            map.set(clean, (map.get(clean) || 0) + 1);
+          }
+        });
+      }
+    });
+    return Array.from(map.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }, [safeItems]);
+
+  // Filtered tags list for in-modal search
+  const visibleTagsList = useMemo(() => {
+    if (!tagSearchTerm.trim()) return uniqueTagsList;
+    const q = tagSearchTerm.toLowerCase().trim().replace(/^#+/, '');
+    return uniqueTagsList.filter((t) => t.name.toLowerCase().includes(q));
+  }, [uniqueTagsList, tagSearchTerm]);
 
   // Default time span preset is "Last 20 Days"
   const [selectedPreset, setSelectedPreset] = useState<TimeSpanPreset>('20_days');
@@ -77,9 +125,24 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
     initial20Days.endStr
   );
 
-  // Export scope: default to 'affected_only' or 'whole_stock'
-  const [exportScope, setExportScope] = useState<ExportScope>('affected_only');
+  // Export scope: 'affected_only' or 'whole_stock'
+  const [exportScope, setExportScope] = useState<ExportScope>(
+    initialSelectedTag ? 'whole_stock' : 'affected_only'
+  );
   const [includeAuditTrail, setIncludeAuditTrail] = useState<boolean>(true);
+
+  // Filter base items by selected tag
+  const activeBaseItems = useMemo(() => {
+    if (!selectedTagFilter || selectedTagFilter === 'all') {
+      return safeItems;
+    }
+    const cleanTag = selectedTagFilter.toLowerCase().trim().replace(/^#+/, '');
+    return safeItems.filter(
+      (item) =>
+        Array.isArray(item.tags) &&
+        item.tags.some((t) => t && t.toLowerCase().trim().replace(/^#+/, '') === cleanTag)
+    );
+  }, [safeItems, selectedTagFilter]);
 
   // Compute actual start and end dates based on preset
   const { startDate, endDate, timeSpanLabel } = useMemo(() => {
@@ -160,22 +223,32 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
     };
   }, [selectedPreset, customDays, customStartDate, customEndDate, timezone]);
 
-  // Compute affected items for the active date range
+  // Compute affected items for the active date range constrained to activeBaseItems
   const { affectedItems, itemStatsMap } = useMemo(() => {
-    return getAffectedItems(safeItems, startDate, endDate, safeLogs);
-  }, [safeItems, startDate, endDate, safeLogs]);
+    return getAffectedItems(activeBaseItems, startDate, endDate, safeLogs);
+  }, [activeBaseItems, startDate, endDate, safeLogs]);
 
-  // Calculate matching audit logs count
+  // Calculate matching audit logs count (constrained to date range AND tag filter)
   const matchingLogsCount = useMemo(() => {
-    if (!startDate && !endDate) return safeLogs.length;
     return safeLogs.filter((log) => {
       if (!log.timestamp) return false;
-      if (selectedPreset === 'today') {
-        return isDateMatchingToday(log.timestamp, timezone);
+      const matchDate =
+        selectedPreset === 'today'
+          ? isDateMatchingToday(log.timestamp, timezone)
+          : isTimestampInRange(log.timestamp, startDate, endDate, timezone);
+      if (!matchDate) return false;
+
+      if (selectedTagFilter && selectedTagFilter !== 'all') {
+        const matchesTag = activeBaseItems.some(
+          (bi) =>
+            bi.id === log.itemId ||
+            (log.itemName && log.itemName.toLowerCase() === bi.itemName.toLowerCase())
+        );
+        if (!matchesTag) return false;
       }
-      return isTimestampInRange(log.timestamp, startDate, endDate, timezone);
+      return true;
     }).length;
-  }, [safeLogs, startDate, endDate, selectedPreset, timezone]);
+  }, [safeLogs, startDate, endDate, selectedPreset, timezone, selectedTagFilter, activeBaseItems]);
 
   if (!isOpen) return null;
 
@@ -218,12 +291,14 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
   };
 
   const handleExport = () => {
-    const exportItems = exportScope === 'affected_only' ? affectedItems : safeItems;
+    const exportItems = exportScope === 'affected_only' ? affectedItems : activeBaseItems;
 
     if (exportItems.length === 0) {
       if (onShowToast) {
         onShowToast(
-          exportScope === 'affected_only'
+          selectedTagFilter
+            ? `No items tagged "${selectedTagFilter}" match the selected export criteria (${timeSpanLabel}).`
+            : exportScope === 'affected_only'
             ? `No items were affected in the selected period (${timeSpanLabel}). Try selecting "Whole Stock" or a wider date range.`
             : 'No stock items available to export.',
           'error'
@@ -241,15 +316,18 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
         timeSpanLabel,
         includeAuditTrail,
         globalLogs: safeLogs,
+        selectedTag: selectedTagFilter,
       });
 
       if (onShowToast) {
         onShowToast(
-          `Exported ${exportItems.length} items (${
-            exportScope === 'affected_only'
-              ? `Affected in ${timeSpanLabel}`
-              : 'Whole Stock'
-          }) to Excel.`,
+          selectedTagFilter
+            ? `Exported ${exportItems.length} items tagged with "${selectedTagFilter}" to Excel.`
+            : `Exported ${exportItems.length} items (${
+                exportScope === 'affected_only'
+                  ? `Affected in ${timeSpanLabel}`
+                  : 'Whole Stock'
+              }) to Excel.`,
           'success'
         );
       }
@@ -270,6 +348,8 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
       year: 'numeric',
     });
   };
+
+  const effectiveExportCount = exportScope === 'affected_only' ? affectedItems.length : activeBaseItems.length;
 
   return (
     <div
@@ -299,7 +379,7 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
                 Export Inventory to Excel
               </h3>
               <p className="text-xs text-slate-500 truncate">
-                Select time span, item scope, and audit trail options
+                {selectedTagFilter ? `Filtered by tag: #${selectedTagFilter}` : 'Filter by tag, time span, and audit trail'}
               </p>
             </div>
           </div>
@@ -315,12 +395,147 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-5 sm:p-6 overflow-y-auto space-y-5">
-          {/* Section 1: Time Span Selection */}
+          {/* Section 1: Tag Filter (The Key User Request: Export Only Selected Tag) */}
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                <Tag className="w-4 h-4 text-emerald-600" />
+                <span>1. Tag Filter (Export Specific Tag)</span>
+              </label>
+              {selectedTagFilter && selectedTagFilter !== 'all' ? (
+                <button
+                  type="button"
+                  onClick={() => setSelectedTagFilter(null)}
+                  className="text-xs font-bold text-rose-600 hover:text-rose-800 flex items-center gap-1 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Clear Tag (Export All Items)</span>
+                </button>
+              ) : (
+                <span className="text-[11px] text-slate-400 font-medium">
+                  {uniqueTagsList.length} tag{uniqueTagsList.length === 1 ? '' : 's'} available
+                </span>
+              )}
+            </div>
+
+            {/* Active Tag Status Indicator */}
+            {selectedTagFilter && selectedTagFilter !== 'all' && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200/90 rounded-xl flex items-center justify-between gap-2 animate-in fade-in">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-xs text-emerald-950 font-medium">
+                    Exporting <strong>only</strong> items matching tag:
+                  </span>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-600 text-white shadow-2xs font-mono">
+                    #{selectedTagFilter}
+                  </span>
+                  <span className="text-xs text-emerald-800 font-semibold">
+                    ({activeBaseItems.length} item{activeBaseItems.length === 1 ? '' : 's'})
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedTagFilter(null)}
+                  className="text-xs font-semibold text-emerald-800 hover:text-emerald-950 underline cursor-pointer shrink-0"
+                >
+                  Reset
+                </button>
+              </div>
+            )}
+
+            {/* Tag Selection Chips */}
+            <div className="p-3 bg-slate-50 border border-slate-200/90 rounded-2xl space-y-2">
+              {/* Optional tag search if many tags exist */}
+              {uniqueTagsList.length > 6 && (
+                <div className="relative mb-1">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={tagSearchTerm}
+                    onChange={(e) => setTagSearchTerm(e.target.value)}
+                    placeholder="Search tags..."
+                    className="w-full pl-8 pr-7 py-1 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+                  />
+                  {tagSearchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => setTagSearchTerm('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <div className="flex items-center gap-1.5 flex-wrap max-h-40 overflow-y-auto pr-1">
+                {/* Option: All Tags */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedTagFilter(null)}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 ${
+                    !selectedTagFilter || selectedTagFilter === 'all'
+                      ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>All Tags</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                      !selectedTagFilter || selectedTagFilter === 'all'
+                        ? 'bg-white/20 text-white'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {safeItems.length}
+                  </span>
+                </button>
+
+                {/* Individual Tags */}
+                {visibleTagsList.map(({ name, count }) => {
+                  const isSelected = selectedTagFilter?.toLowerCase().replace(/^#+/, '') === name.toLowerCase().replace(/^#+/, '');
+                  const style = getTagStyle(name, managedTags || []);
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => {
+                        if (isSelected) {
+                          setSelectedTagFilter(null);
+                        } else {
+                          setSelectedTagFilter(name);
+                          setExportScope('whole_stock');
+                        }
+                      }}
+                      className={`px-2.5 py-1.5 text-xs font-semibold rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 ${
+                        isSelected
+                          ? `${style.activeBg} font-bold shadow-2xs ring-2 ring-emerald-500/20`
+                          : `${style.bg} ${style.text} ${style.border} hover:opacity-90`
+                      }`}
+                      title={`Filter export to items with tag "${name}" (${count} items)`}
+                    >
+                      <Hash className="w-3 h-3 opacity-60" />
+                      <span>{name}</span>
+                      <span
+                        className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                          isSelected ? 'bg-black/25 text-white' : 'bg-black/5 text-current'
+                        }`}
+                      >
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2: Time Span Selection */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
                 <Calendar className="w-4 h-4 text-emerald-600" />
-                <span>1. Select Time Span</span>
+                <span>2. Select Time Span</span>
               </label>
               {startDate && endDate && (
                 <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60">
@@ -351,7 +566,7 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
                     onClick={() => handlePresetSelect(p.id as TimeSpanPreset)}
                     className={`px-2 py-2 text-xs font-bold rounded-xl border transition-all cursor-pointer text-center relative ${
                       isActive
-                        ? 'bg-emerald-700 text-white border-emerald-700 shadow-sm ring-2 ring-emerald-500/20'
+                        ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs ring-2 ring-emerald-500/20'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                     }`}
                   >
@@ -379,7 +594,7 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
                       type="date"
                       value={customStartDate}
                       onChange={(e) => setCustomStartDate(e.target.value)}
-                      className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
                     />
                   </div>
                   <div>
@@ -390,7 +605,7 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
                       type="date"
                       value={customEndDate}
                       onChange={(e) => setCustomEndDate(e.target.value)}
-                      className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
                     />
                   </div>
                 </div>
@@ -408,7 +623,7 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
                     max={365}
                     value={customDays}
                     onChange={(e) => handleCustomDaysChange(parseInt(e.target.value) || 20)}
-                    className="w-16 px-2 py-1 text-xs font-bold text-center bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    className="w-16 px-2 py-1 text-xs font-bold text-center bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-hidden focus:ring-1 focus:ring-emerald-500"
                   />
                   <span className="font-semibold text-slate-500">days</span>
                 </div>
@@ -416,15 +631,15 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
             ) : null}
           </div>
 
-          {/* Section 2: Choose Items to Export (The 2 Core Options Requested) */}
+          {/* Section 3: Choose Scope (Whole Stock vs Affected Only) */}
           <div className="space-y-2.5">
             <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
               <Boxes className="w-4 h-4 text-emerald-600" />
-              <span>2. Choose Items to Export</span>
+              <span>3. Choose Items to Export</span>
             </label>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* Option 1: Whole Stock */}
+              {/* Option 1: Whole Stock (constrained by Tag) */}
               <button
                 type="button"
                 onClick={() => setExportScope('whole_stock')}
@@ -438,11 +653,13 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
                   <div>
                     <div className="flex items-center gap-1.5">
                       <span className="text-sm font-bold text-slate-900">
-                        Whole Stock
+                        {selectedTagFilter ? `All Items in #${selectedTagFilter}` : 'Whole Stock'}
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                      Export complete catalog snapshot of all items currently in inventory.
+                      {selectedTagFilter
+                        ? `Export all ${activeBaseItems.length} items tagged with #${selectedTagFilter}.`
+                        : 'Export complete catalog snapshot of all items currently in inventory.'}
                     </p>
                   </div>
                   <div
@@ -458,10 +675,10 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
 
                 <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
                   <span className="text-[11px] font-semibold text-slate-500">
-                    Total in Catalog
+                    {selectedTagFilter ? `Matching #${selectedTagFilter}` : 'Total in Catalog'}
                   </span>
                   <span className="text-xs font-extrabold px-2 py-0.5 rounded-md bg-slate-100 text-slate-800 font-mono">
-                    {safeItems.length} items
+                    {activeBaseItems.length} items
                   </span>
                 </div>
               </button>
@@ -480,14 +697,14 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
                   <div>
                     <div className="flex items-center gap-1.5">
                       <span className="text-sm font-bold text-slate-900">
-                        Affected Items Only
+                        {selectedTagFilter ? `Active in #${selectedTagFilter}` : 'Affected Items Only'}
                       </span>
                       <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800">
                         Active
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                      Only items that had stock changes, restocks, edits, or additions in {timeSpanLabel.toLowerCase()}.
+                      Only items {selectedTagFilter ? `tagged #${selectedTagFilter}` : ''} that had stock changes or activity in {timeSpanLabel.toLowerCase()}.
                     </p>
                   </div>
                   <div
@@ -503,7 +720,7 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
 
                 <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
                   <span className="text-[11px] font-semibold text-slate-500">
-                    Affected in Period
+                    Active in Period
                   </span>
                   <span
                     className={`text-xs font-extrabold px-2 py-0.5 rounded-md font-mono ${
@@ -522,13 +739,13 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
               <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl flex items-center gap-2.5 text-xs text-amber-900">
                 <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
                 <span>
-                  No items had logged activity in <strong>{timeSpanLabel}</strong>. You can switch to <strong>"Whole Stock"</strong> or choose a wider date range.
+                  No items {selectedTagFilter ? `tagged with #${selectedTagFilter}` : ''} had logged activity in <strong>{timeSpanLabel}</strong>. You can switch to <strong>"Whole Stock"</strong> or choose a wider date range.
                 </span>
               </div>
             )}
           </div>
 
-          {/* Section 3: Include Audit Trail Sheet */}
+          {/* Section 4: Include Audit Trail Sheet */}
           <div className="p-3.5 bg-slate-50 border border-slate-200/90 rounded-2xl">
             <label className="flex items-start gap-3 cursor-pointer">
               <input
@@ -543,7 +760,7 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
                   <span>Include Audit Trail Sheet in Workbook</span>
                 </span>
                 <span className="text-[11px] text-slate-500 block mt-0.5">
-                  Adds a dedicated "Activity Trail" tab in the Excel file showing timestamps, staff members, previous/new quantities, and summaries ({matchingLogsCount} events in this period).
+                  Adds a dedicated "Activity Trail" tab in Excel showing timestamps, staff members, previous/new quantities, and notes ({matchingLogsCount} events {selectedTagFilter ? `for #${selectedTagFilter}` : 'in this period'}).
                 </span>
               </div>
             </label>
@@ -554,8 +771,16 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
             <div className="text-slate-700">
               Exporting{' '}
               <strong className="text-emerald-950 font-bold">
-                {exportScope === 'affected_only' ? affectedItems.length : safeItems.length} items
+                {effectiveExportCount} item{effectiveExportCount === 1 ? '' : 's'}
               </strong>{' '}
+              {selectedTagFilter && (
+                <>
+                  tagged{' '}
+                  <strong className="text-emerald-800 font-bold">
+                    #{selectedTagFilter}
+                  </strong>{' '}
+                </>
+              )}
               ({exportScope === 'affected_only' ? 'Affected Only' : 'Whole Stock'}) for{' '}
               <strong className="text-emerald-950 font-bold">{timeSpanLabel}</strong>
             </div>
@@ -579,12 +804,14 @@ export const ExportExcelModal: React.FC<ExportExcelModalProps> = ({
             id="btn-confirm-export-excel"
             type="button"
             onClick={handleExport}
-            disabled={exportScope === 'affected_only' && affectedItems.length === 0}
+            disabled={effectiveExportCount === 0}
             className="min-h-[40px] px-5 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-2"
           >
             <Download className="w-4 h-4" />
             <span>
-              Download Excel ({exportScope === 'affected_only' ? affectedItems.length : safeItems.length})
+              {selectedTagFilter && selectedTagFilter !== 'all'
+                ? `Download Excel for #${selectedTagFilter.replace(/^#+/, '')} (${effectiveExportCount})`
+                : `Download Excel (${effectiveExportCount})`}
             </span>
           </button>
         </div>

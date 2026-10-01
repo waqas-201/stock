@@ -145,10 +145,12 @@ export interface AdvancedExportOptions {
   includeAuditTrail?: boolean;
   globalLogs?: GlobalAuditRecord[];
   filename?: string;
+  selectedTag?: string | null;
 }
 
 /**
- * Advanced Excel export with time span and scope options (Whole Stock vs Affected Only).
+ * Advanced Excel export with time span and scope options (Whole Stock vs Affected Only),
+ * plus optional Tag filter for exporting items belonging to a specific tag.
  */
 export function exportToExcelAdvanced(options: AdvancedExportOptions): void {
   const {
@@ -160,16 +162,31 @@ export function exportToExcelAdvanced(options: AdvancedExportOptions): void {
     includeAuditTrail = false,
     globalLogs = [],
     filename,
+    selectedTag = null,
   } = options;
 
+  // Filter items by tag if a specific tag is selected
+  const hasTagFilter = Boolean(selectedTag && selectedTag.trim() && selectedTag.toLowerCase() !== 'all');
+  const cleanFilterTag = hasTagFilter
+    ? (selectedTag as string).toLowerCase().trim().replace(/^#+/, '')
+    : null;
+
+  const baseItems = cleanFilterTag
+    ? items.filter(
+        (it) =>
+          Array.isArray(it.tags) &&
+          it.tags.some((t) => t && t.toLowerCase().trim().replace(/^#+/, '') === cleanFilterTag)
+      )
+    : items;
+
   const { affectedItems, itemStatsMap } = getAffectedItems(
-    items,
+    baseItems,
     startDate ?? null,
     endDate ?? null,
     globalLogs
   );
 
-  const exportList = scope === 'affected_only' ? affectedItems : items;
+  const exportList = scope === 'affected_only' ? affectedItems : baseItems;
 
   // Build Sheet 1: Stock Inventory
   const data = exportList.map((item) => {
@@ -221,7 +238,14 @@ export function exportToExcelAdvanced(options: AdvancedExportOptions): void {
   ];
 
   const workbook = XLSX.utils.book_new();
-  const sheetTitle = scope === 'affected_only' ? 'Affected Items' : 'Stock Inventory';
+  const cleanTagTitle = cleanFilterTag ? `Tag - ${cleanFilterTag}`.substring(0, 31) : null;
+  const sheetTitle = cleanTagTitle
+    ? scope === 'affected_only'
+      ? `${cleanTagTitle} (Active)`.substring(0, 31)
+      : cleanTagTitle
+    : scope === 'affected_only'
+    ? 'Affected Items'
+    : 'Stock Inventory';
   XLSX.utils.book_append_sheet(workbook, worksheet, sheetTitle);
 
   // Build Sheet 2: Audit Trail & Movement History (if requested)
@@ -229,6 +253,17 @@ export function exportToExcelAdvanced(options: AdvancedExportOptions): void {
     const filteredLogs = globalLogs.filter((log) => {
       const matchDate = isTimestampInRange(log.timestamp, startDate, endDate);
       if (!matchDate) return false;
+
+      // Filter by tag if active
+      if (hasTagFilter) {
+        const matchesTag = baseItems.some(
+          (bi) =>
+            bi.id === log.itemId ||
+            (log.itemName && log.itemName.toLowerCase() === bi.itemName.toLowerCase())
+        );
+        if (!matchesTag) return false;
+      }
+
       if (scope === 'affected_only') {
         return affectedItems.some(
           (ai) =>
@@ -277,12 +312,16 @@ export function exportToExcelAdvanced(options: AdvancedExportOptions): void {
     }
   }
 
+  const tagSlug = cleanFilterTag
+    ? `tag-${cleanFilterTag.replace(/[^a-z0-9]+/g, '-')}-`
+    : '';
+
   const defaultFilename =
     scope === 'affected_only'
-      ? `stock-inventory-affected-${
+      ? `stock-inventory-${tagSlug}affected-${
           timeSpanLabel ? timeSpanLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-') : 'period'
         }-${getTodayDateString()}.xlsx`
-      : `stock-inventory-whole-stock-${getTodayDateString()}.xlsx`;
+      : `stock-inventory-${tagSlug}whole-stock-${getTodayDateString()}.xlsx`;
 
   XLSX.writeFile(workbook, filename || defaultFilename);
 }

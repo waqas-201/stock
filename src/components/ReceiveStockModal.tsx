@@ -18,6 +18,8 @@ import {
   Sparkles,
   History,
   Users,
+  Bookmark,
+  RotateCcw,
 } from 'lucide-react';
 import { StockItem, OperatorProfile, GoodsReceipt, GoodsReceiptItem, CustomerParty } from '../types';
 import {
@@ -27,6 +29,12 @@ import {
   deleteStoredGoodsReceipt,
   extractPastVendorNames,
 } from '../lib/receiptStorage';
+import {
+  saveReceiveChallanDraft,
+  loadReceiveChallanDraft,
+  clearReceiveChallanDraft,
+} from '../lib/challanDraftStorage';
+import { UnsavedDraftConfirmDialog } from './UnsavedDraftConfirmDialog';
 import { exportGoodsReceiptToExcel } from '../lib/excelExport';
 import { formatLocalDate, useActiveTimezone } from '../lib/dateUtils';
 import { GlobalAuditRecord } from '../lib/stockStorage';
@@ -109,6 +117,11 @@ export const ReceiveStockModal: React.FC<ReceiveStockModalProps> = ({
   const [formError, setFormError] = useState<string | null>(null);
   const [copiedText, setCopiedText] = useState<boolean>(false);
 
+  // Unsaved draft persistence & confirmation prompt state
+  const [isUnsavedPromptOpen, setIsUnsavedPromptOpen] = useState<boolean>(false);
+  const [isResumedDraft, setIsResumedDraft] = useState<boolean>(false);
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
+
   // History search
   const [historySearch, setHistorySearch] = useState<string>('');
 
@@ -175,37 +188,73 @@ export const ReceiveStockModal: React.FC<ReceiveStockModalProps> = ({
       .slice(0, 15);
   }, [items, entryItemQuery]);
 
-  // Sync state when modal opens or initial values change
+  // Sync state when modal opens or restore draft
   useEffect(() => {
     if (isOpen) {
       setStoredReceipts(loadGoodsReceipts());
       const nextNumber = generateNextReceiptNumber(loadGoodsReceipts());
       setReceiptNumber(nextNumber);
       setReceiptDate(new Date().toISOString().split('T')[0]);
-      setVendorName(initialVendorName || '');
-      setVendorInvoiceNumber('');
-      setReceiptNotes('');
       setFormError(null);
       setActiveTab('receive');
       setActiveReceipt(null);
       setCopiedText(false);
+      setEntrySelectedItem(null);
+      setEntryItemQuery('');
+      setEntryQty('10');
+      setIsItemDropdownOpen(false);
+      setIsVendorDropdownOpen(false);
 
-      if (initialItem) {
-        setBasket([
-          {
-            item: initialItem,
-            quantity: 10,
-            inputStr: '10',
-          },
-        ]);
-        setEntrySelectedItem(null);
-        setEntryItemQuery('');
-        setEntryQty('10');
+      // Check if a saved draft exists
+      const savedDraft = loadReceiveChallanDraft();
+      if (
+        savedDraft &&
+        (savedDraft.vendorName?.trim() ||
+          savedDraft.vendorInvoiceNumber?.trim() ||
+          savedDraft.notes?.trim() ||
+          (savedDraft.basket && savedDraft.basket.length > 0))
+      ) {
+        setVendorName(savedDraft.vendorName || '');
+        setVendorInvoiceNumber(savedDraft.vendorInvoiceNumber || '');
+        if (savedDraft.receiptDate) {
+          setReceiptDate(savedDraft.receiptDate);
+        }
+        setReceiptNotes(savedDraft.notes || '');
+
+        const restoredBasket: SelectedReceiveItem[] = [];
+        (savedDraft.basket || []).forEach((b) => {
+          const matchedItem = items.find((it) => it.id === b.itemId);
+          if (matchedItem) {
+            restoredBasket.push({
+              item: matchedItem,
+              quantity: typeof b.receivedQty === 'number' ? b.receivedQty : 10,
+              inputStr: String(b.receivedQty || 10),
+              unitCost: b.unitCost,
+              notes: b.notes,
+            });
+          }
+        });
+        setBasket(restoredBasket);
+        setIsResumedDraft(true);
+        setDraftSavedAt(savedDraft.updatedAt || null);
       } else {
-        setBasket([]);
-        setEntrySelectedItem(null);
-        setEntryItemQuery('');
-        setEntryQty('10');
+        setIsResumedDraft(false);
+        setDraftSavedAt(null);
+        setVendorName(initialVendorName || '');
+        setVendorInvoiceNumber('');
+        setReceiptNotes('');
+
+        if (initialItem) {
+          setBasket([
+            {
+              item: initialItem,
+              quantity: 10,
+              inputStr: '10',
+            },
+          ]);
+        } else {
+          setBasket([]);
+        }
       }
 
       setTimeout(() => {
@@ -216,7 +265,98 @@ export const ReceiveStockModal: React.FC<ReceiveStockModalProps> = ({
         }
       }, 80);
     }
-  }, [isOpen, initialItem, initialVendorName]);
+  }, [isOpen, initialItem, initialVendorName, items]);
+
+  // Auto-save changes to persistent draft
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'receive') return;
+    const hasChanges = Boolean(
+      vendorName.trim() ||
+      vendorInvoiceNumber.trim() ||
+      receiptNotes.trim() ||
+      basket.length > 0
+    );
+
+    if (hasChanges) {
+      saveReceiveChallanDraft({
+        vendorName,
+        vendorInvoiceNumber,
+        receiptDate,
+        notes: receiptNotes,
+        basket: basket.map((b) => ({
+          itemId: b.item.id,
+          itemName: b.item.itemName,
+          unit: b.item.unit,
+          receivedQty: b.quantity,
+          unitCost: b.unitCost,
+          notes: b.notes,
+          tags: b.item.tags,
+        })),
+        updatedAt: new Date().toISOString(),
+      });
+      setDraftSavedAt(new Date().toISOString());
+    }
+  }, [isOpen, activeTab, vendorName, vendorInvoiceNumber, receiptDate, receiptNotes, basket]);
+
+  // Safe Close Request: Prompt confirmation dialog if there are active unsaved changes
+  const handleRequestClose = () => {
+    if (activeTab === 'receive') {
+      const hasChanges = Boolean(
+        vendorName.trim() ||
+        vendorInvoiceNumber.trim() ||
+        receiptNotes.trim() ||
+        basket.length > 0
+      );
+      if (hasChanges) {
+        setIsUnsavedPromptOpen(true);
+        return;
+      }
+    }
+    onClose();
+  };
+
+  const handleSaveDraftAndClose = () => {
+    saveReceiveChallanDraft({
+      vendorName,
+      vendorInvoiceNumber,
+      receiptDate,
+      notes: receiptNotes,
+      basket: basket.map((b) => ({
+        itemId: b.item.id,
+        itemName: b.item.itemName,
+        unit: b.item.unit,
+        receivedQty: b.quantity,
+        unitCost: b.unitCost,
+        notes: b.notes,
+        tags: b.item.tags,
+      })),
+      updatedAt: new Date().toISOString(),
+    });
+    setIsUnsavedPromptOpen(false);
+    onShowToast('Inward Delivery Challan draft saved. You can resume anytime!', 'success');
+    onClose();
+  };
+
+  const handleDiscardAndClose = () => {
+    clearReceiveChallanDraft();
+    setIsResumedDraft(false);
+    setVendorName('');
+    setVendorInvoiceNumber('');
+    setReceiptNotes('');
+    setBasket([]);
+    setIsUnsavedPromptOpen(false);
+    onClose();
+  };
+
+  const handleDiscardDraftAndStartFresh = () => {
+    clearReceiveChallanDraft();
+    setIsResumedDraft(false);
+    setVendorName('');
+    setVendorInvoiceNumber('');
+    setReceiptNotes('');
+    setBasket([]);
+    onShowToast('Draft discarded. Started with a fresh Inward Delivery Challan.', 'info');
+  };
 
   // Click outside listener for dropdowns
   useEffect(() => {
@@ -238,13 +378,62 @@ export const ReceiveStockModal: React.FC<ReceiveStockModalProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Keyboard shortcut listener inside modal: Ctrl+Enter to confirm receipt
+  // Keyboard shortcut listener: ESC does NOT close modal! Ctrl+Enter to confirm receipt
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isOpen) return;
-      if (e.key === 'Escape' && !isItemDropdownOpen && !isVendorDropdownOpen) {
-        onClose();
+
+      if (e.key === 'Escape') {
+        if (isItemDropdownOpen) {
+          e.preventDefault();
+          setIsItemDropdownOpen(false);
+          return;
+        }
+        if (isVendorDropdownOpen) {
+          e.preventDefault();
+          setIsVendorDropdownOpen(false);
+          return;
+        }
+
+        // In receive mode: ESC never closes the modal!
+        if (activeTab === 'receive') {
+          e.preventDefault();
+          const hasChanges = Boolean(
+            vendorName.trim() ||
+            vendorInvoiceNumber.trim() ||
+            receiptNotes.trim() ||
+            basket.length > 0
+          );
+          if (hasChanges) {
+            saveReceiveChallanDraft({
+              vendorName,
+              vendorInvoiceNumber,
+              receiptDate,
+              notes: receiptNotes,
+              basket: basket.map((b) => ({
+                itemId: b.item.id,
+                itemName: b.item.itemName,
+                unit: b.item.unit,
+                receivedQty: b.quantity,
+                unitCost: b.unitCost,
+                notes: b.notes,
+                tags: b.item.tags,
+              })),
+              updatedAt: new Date().toISOString(),
+            });
+            onShowToast('Draft auto-saved. (Escape does not close the form — use the top-right [✕] button to exit).', 'info');
+          }
+          return;
+        }
+
+        // In view or history mode: return to receive mode
+        if (activeTab === 'view_grn' || activeTab === 'history') {
+          e.preventDefault();
+          setActiveTab('receive');
+          return;
+        }
       }
+
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && activeTab === 'receive') {
         e.preventDefault();
         handleConfirmReceive();
@@ -252,7 +441,18 @@ export const ReceiveStockModal: React.FC<ReceiveStockModalProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, activeTab, isItemDropdownOpen, isVendorDropdownOpen, basket, vendorName, receiptNumber, receiptDate]);
+  }, [
+    isOpen,
+    activeTab,
+    isItemDropdownOpen,
+    isVendorDropdownOpen,
+    basket,
+    vendorName,
+    vendorInvoiceNumber,
+    receiptDate,
+    receiptNotes,
+    onShowToast,
+  ]);
 
   // Fast entry item picker
   const handlePickEntryItem = (item: StockItem) => {
@@ -399,6 +599,10 @@ export const ReceiveStockModal: React.FC<ReceiveStockModalProps> = ({
     // Save locally
     saveGoodsReceipt(newReceipt);
     setStoredReceipts((prev) => [newReceipt, ...prev]);
+
+    // Clear persistent draft once successfully received
+    clearReceiveChallanDraft();
+    setIsResumedDraft(false);
 
     // Trigger parent fulfillment (increments inventory stock + logs audit trail + saves Firestore)
     onFulfillReceive(newReceipt);
@@ -553,9 +757,10 @@ Status: VERIFIED & TAKEN INTO INVENTORY`;
 
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleRequestClose}
               className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-              title="Close modal (Escape)"
+              aria-label="Close modal"
+              title="Close form (Click mouse only)"
             >
               <X className="w-5 h-5" />
             </button>
@@ -603,6 +808,34 @@ Status: VERIFIED & TAKEN INTO INVENTORY`;
 
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+          {/* Draft Resumed Banner */}
+          {isResumedDraft && activeTab === 'receive' && (
+            <div className="p-3.5 bg-indigo-50 border border-indigo-200 rounded-xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs text-indigo-950 animate-in fade-in">
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                  <Bookmark className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="font-bold text-indigo-900">Draft Resumed:</span>{' '}
+                  <span>
+                    Restored your in-progress Inward Delivery Challan from where you left off
+                    {basket.length > 0 && ` (${basket.length} item${basket.length === 1 ? '' : 's'} in list)`}
+                    {vendorName.trim() && ` from "${vendorName}"`}.
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleDiscardDraftAndStartFresh}
+                  className="px-3 py-1.5 text-xs font-bold text-rose-700 hover:text-rose-900 bg-white hover:bg-rose-50 border border-rose-200 rounded-lg transition-colors cursor-pointer"
+                >
+                  Discard Draft & Start Fresh
+                </button>
+              </div>
+            </div>
+          )}
+
           {formError && (
             <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold text-rose-800 flex items-center justify-between animate-in fade-in">
               <span>{formError}</span>
@@ -1292,7 +1525,7 @@ Status: VERIFIED & TAKEN INTO INVENTORY`;
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleRequestClose}
                 className="flex-1 sm:flex-initial px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-200/60 rounded-xl transition-colors cursor-pointer"
               >
                 Cancel
@@ -1314,6 +1547,21 @@ Status: VERIFIED & TAKEN INTO INVENTORY`;
           </div>
         )}
       </div>
+
+      {/* Confirmation Dialog on Close if there are unsaved changes */}
+      <UnsavedDraftConfirmDialog
+        isOpen={isUnsavedPromptOpen}
+        title="Unsaved Inward Delivery Challan"
+        subtitle="You have unsaved incoming items or vendor details in this Inward Delivery Challan. What would you like to do?"
+        summaryBadge={
+          vendorName.trim() || basket.length > 0
+            ? `${vendorName ? `Vendor: ${vendorName}` : 'Vendor set'} | ${basket.length} item(s) in list`
+            : undefined
+        }
+        onSaveDraftAndClose={handleSaveDraftAndClose}
+        onDiscardAndClose={handleDiscardAndClose}
+        onKeepEditing={() => setIsUnsavedPromptOpen(false)}
+      />
     </div>
   );
 };

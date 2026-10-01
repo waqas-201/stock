@@ -31,6 +31,7 @@ import {
   Keyboard,
   ShieldCheck,
   Truck,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { StockItem, StockFilter, SortField, SortOrder, StockTag, StockLabel, StockUnit } from '../types';
 import { getTagStyle, getUniqueTagsWithCounts } from '../lib/tagUtils';
@@ -82,6 +83,7 @@ export const StockTable: React.FC<StockTableProps> = ({
   onDeleteItem,
   onQuickQuantityChange,
   onReceiveStock,
+  onExportExcel,
   onViewItemDetails,
   onOpenAuditTrail,
   searchQuery: externalSearchQuery,
@@ -216,8 +218,12 @@ export const StockTable: React.FC<StockTableProps> = ({
   const filteredItems = useMemo(() => {
     return safeItems.filter((item) => {
       // 1. Tag Filter
-      if (selectedTag && (!Array.isArray(item.tags) || !item.tags.includes(selectedTag))) {
-        return false;
+      if (selectedTag) {
+        const cleanTarget = selectedTag.toLowerCase().trim().replace(/^#+/, '');
+        const hasTag = Array.isArray(item.tags) && item.tags.some(
+          (t) => t && t.toLowerCase().trim().replace(/^#+/, '') === cleanTarget
+        );
+        if (!hasTag) return false;
       }
 
       // 2. Search query (matches item name, unit, notes, batch/date, and tags)
@@ -519,7 +525,12 @@ export const StockTable: React.FC<StockTableProps> = ({
 
   // Count items by category for filter tabs (interconnected with active tag filter)
   const tagScopedItems = selectedTag
-    ? safeItems.filter((i) => Array.isArray(i.tags) && i.tags.includes(selectedTag))
+    ? safeItems.filter((i) => {
+        const cleanTarget = selectedTag.toLowerCase().trim().replace(/^#+/, '');
+        return Array.isArray(i.tags) && i.tags.some(
+          (t) => t && t.toLowerCase().trim().replace(/^#+/, '') === cleanTarget
+        );
+      })
     : safeItems;
   const countAll = tagScopedItems.length;
   const countInStock = tagScopedItems.filter((i) => isItemInStock(i)).length;
@@ -880,6 +891,31 @@ export const StockTable: React.FC<StockTableProps> = ({
                 <span className="text-[11px] hidden xs:inline">Table</span>
               </button>
             </div>
+
+            {/* Quick Export to Excel button in toolbar */}
+            {onExportExcel && (
+              <button
+                type="button"
+                id="btn-stock-export-excel"
+                onClick={onExportExcel}
+                className={`min-h-[32px] px-2.5 py-1 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                  selectedTag
+                    ? 'bg-emerald-700 text-white border-emerald-800 shadow-2xs hover:bg-emerald-800'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-slate-900 shadow-2xs'
+                }`}
+                title={
+                  selectedTag
+                    ? `Export all items tagged "${selectedTag}" directly to Excel`
+                    : 'Export inventory to Excel (.xlsx)'
+                }
+              >
+                <FileSpreadsheet className={`w-3.5 h-3.5 ${selectedTag ? 'text-white' : 'text-emerald-600'}`} />
+                <span className="hidden xs:inline">
+                  {selectedTag ? `Export #${selectedTag.replace(/^#+/, '')} (${tagScopedItems.length})` : 'Export Excel'}
+                </span>
+                <span className="xs:hidden">Export</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -1165,6 +1201,20 @@ export const StockTable: React.FC<StockTableProps> = ({
                   >
                     <X className="w-3 h-3" />
                     <span>Clear Tag</span>
+                  </button>
+                )}
+
+                {/* Direct Export Tag Items Button */}
+                {selectedTag && onExportExcel && (
+                  <button
+                    type="button"
+                    id="btn-export-active-tag-excel"
+                    onClick={onExportExcel}
+                    className="min-h-[28px] px-2.5 py-1 text-xs font-bold text-emerald-900 hover:text-white bg-emerald-100 hover:bg-emerald-700 border border-emerald-300 hover:border-emerald-700 rounded-lg transition-all cursor-pointer shrink-0 flex items-center gap-1.5 shadow-2xs"
+                    title={`Export all ${tagScopedItems.length} items tagged "${selectedTag}" to Excel (.xlsx)`}
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Export "#{selectedTag.replace(/^#+/, '')}" to Excel ({tagScopedItems.length})</span>
                   </button>
                 )}
               </div>

@@ -8,10 +8,18 @@ import {
   Lock,
   Truck,
   ShieldCheck,
+  Bookmark,
+  RotateCcw,
 } from 'lucide-react';
 import { StockItem, StockUnit, StockTag, StockLabel, StockTagColor } from '../types';
 import { TagInput } from './TagInput';
 import { getTodayDateString } from '../lib/dateUtils';
+import {
+  saveAddItemDraft,
+  loadAddItemDraft,
+  clearAddItemDraft,
+} from '../lib/challanDraftStorage';
+import { UnsavedDraftConfirmDialog } from './UnsavedDraftConfirmDialog';
 
 export interface AddItemModalProps {
   isOpen: boolean;
@@ -64,18 +72,44 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
   const [tags, setTags] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // Initialize or reset modal state when opened
+  // Unsaved draft persistence & confirmation prompt state
+  const [isUnsavedPromptOpen, setIsUnsavedPromptOpen] = useState<boolean>(false);
+  const [isResumedDraft, setIsResumedDraft] = useState<boolean>(false);
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
+
+  // Initialize or restore draft when opened
   useEffect(() => {
     if (isOpen) {
       setError(null);
-      setItemName('');
-      setThreshold('5');
-      setProductionDate('');
-      setNotes('');
-      setTags([]);
 
-      if (units && units.length > 0 && units[0]?.name) {
-        setUnit(units[0].name);
+      // Check if a saved draft exists
+      const savedDraft = loadAddItemDraft();
+      if (
+        savedDraft &&
+        (savedDraft.itemName?.trim() ||
+          savedDraft.notes?.trim() ||
+          (savedDraft.selectedTags && savedDraft.selectedTags.length > 0))
+      ) {
+        setItemName(savedDraft.itemName || '');
+        setUnit(savedDraft.unit || (units && units[0]?.name ? units[0].name : ''));
+        setThreshold(savedDraft.threshold || '5');
+        setProductionDate(savedDraft.productionDate || '');
+        setNotes(savedDraft.notes || '');
+        setTags(Array.isArray(savedDraft.selectedTags) ? savedDraft.selectedTags : []);
+        setIsResumedDraft(true);
+        setDraftSavedAt(savedDraft.updatedAt || null);
+      } else {
+        setIsResumedDraft(false);
+        setDraftSavedAt(null);
+        setItemName('');
+        setThreshold('5');
+        setProductionDate('');
+        setNotes('');
+        setTags([]);
+
+        if (units && units.length > 0 && units[0]?.name) {
+          setUnit(units[0].name);
+        }
       }
 
       const timer = setTimeout(() => {
@@ -86,15 +120,105 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
     }
   }, [isOpen, units]);
 
-  // Close modal on Escape
+  // Auto-save changes to persistent draft
+  useEffect(() => {
+    if (!isOpen) return;
+    const hasChanges = Boolean(
+      itemName.trim() ||
+      notes.trim() ||
+      tags.length > 0
+    );
+
+    if (hasChanges) {
+      saveAddItemDraft({
+        itemName,
+        unit,
+        threshold,
+        productionDate,
+        notes,
+        selectedTags: tags,
+        updatedAt: new Date().toISOString(),
+      });
+      setDraftSavedAt(new Date().toISOString());
+    }
+  }, [isOpen, itemName, unit, threshold, productionDate, notes, tags]);
+
+  // Safe Close Request: Prompt confirmation dialog if there are active unsaved changes
+  const handleRequestClose = () => {
+    const hasChanges = Boolean(
+      itemName.trim() ||
+      notes.trim() ||
+      tags.length > 0
+    );
+    if (hasChanges) {
+      setIsUnsavedPromptOpen(true);
+      return;
+    }
+    onClose();
+  };
+
+  const handleSaveDraftAndClose = () => {
+    saveAddItemDraft({
+      itemName,
+      unit,
+      threshold,
+      productionDate,
+      notes,
+      selectedTags: tags,
+      updatedAt: new Date().toISOString(),
+    });
+    setIsUnsavedPromptOpen(false);
+    onClose();
+  };
+
+  const handleDiscardAndClose = () => {
+    clearAddItemDraft();
+    setIsResumedDraft(false);
+    setItemName('');
+    setNotes('');
+    setTags([]);
+    setIsUnsavedPromptOpen(false);
+    onClose();
+  };
+
+  const handleDiscardDraftAndStartFresh = () => {
+    clearAddItemDraft();
+    setIsResumedDraft(false);
+    setItemName('');
+    setNotes('');
+    setTags([]);
+    if (units && units.length > 0 && units[0]?.name) {
+      setUnit(units[0].name);
+    }
+  };
+
+  // Keyboard shortcut listener: ESC does NOT close modal! It auto-saves progress.
   useEffect(() => {
     if (!isOpen) return;
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        const hasChanges = Boolean(
+          itemName.trim() ||
+          notes.trim() ||
+          tags.length > 0
+        );
+        if (hasChanges) {
+          saveAddItemDraft({
+            itemName,
+            unit,
+            threshold,
+            productionDate,
+            notes,
+            selectedTags: tags,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
     };
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [isOpen, onClose]);
+  }, [isOpen, itemName, unit, threshold, productionDate, notes, tags]);
 
   // Check if typed new item name already exists in catalog
   const matchingExistingItem = useMemo(() => {
@@ -149,6 +273,8 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
       notes.trim(),
       tags.length > 0 ? tags : undefined
     );
+    clearAddItemDraft();
+    setIsResumedDraft(false);
     onClose();
   };
 
@@ -194,7 +320,7 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
     <div
       id="add-item-modal-backdrop"
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200"
-      onClick={onClose}
+      onClick={handleRequestClose}
     >
       <div
         id="add-item-modal-box"
@@ -223,9 +349,10 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
 
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleRequestClose}
             className="min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-200/60 transition-colors cursor-pointer"
             aria-label="Close modal"
+            title="Close form (Click mouse only)"
           >
             <X className="w-5 h-5" />
           </button>
@@ -238,6 +365,26 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
             <strong>Inventory Control Active:</strong> New items start at <strong>0 stock</strong>. All stock additions must be recorded via <strong>Inward Delivery Challan</strong>.
           </span>
         </div>
+
+        {/* Draft Resumed Banner */}
+        {isResumedDraft && (
+          <div className="mx-5 sm:mx-6 mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between gap-3 text-xs text-emerald-950 animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <Bookmark className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>
+                <strong>Draft Resumed:</strong> Restored uncompleted item SKU
+                {itemName.trim() && ` "${itemName}"`}.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleDiscardDraftAndStartFresh}
+              className="px-2.5 py-1 text-[11px] font-bold text-rose-700 hover:text-rose-900 bg-white hover:bg-rose-50 border border-rose-200 rounded-lg transition-colors cursor-pointer shrink-0"
+            >
+              Start Fresh
+            </button>
+          </div>
+        )}
 
         {/* Error notification banner */}
         {error && (
@@ -489,7 +636,7 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
           <div className="pt-2 flex items-center justify-end gap-2.5">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleRequestClose}
               className="min-h-[44px] px-4 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 cursor-pointer"
             >
               Cancel
@@ -518,6 +665,17 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({
           </div>
         </form>
       </div>
+
+      {/* Confirmation Dialog on Close if there are unsaved changes */}
+      <UnsavedDraftConfirmDialog
+        isOpen={isUnsavedPromptOpen}
+        title="Unsaved Product SKU"
+        subtitle="You have unsaved product SKU details in this form. What would you like to do?"
+        summaryBadge={itemName.trim() ? `Item: ${itemName}` : 'Form has unsaved fields'}
+        onSaveDraftAndClose={handleSaveDraftAndClose}
+        onDiscardAndClose={handleDiscardAndClose}
+        onKeepEditing={() => setIsUnsavedPromptOpen(false)}
+      />
     </div>
   );
 };

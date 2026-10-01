@@ -28,6 +28,7 @@ import {
   ShieldCheck,
   Users,
   Building2,
+  Bookmark,
 } from 'lucide-react';
 import { StockItem, StockUnit, OperatorProfile, DeliveryChallan, DeliveryChallanItem, CustomerParty } from '../types';
 import {
@@ -37,6 +38,12 @@ import {
   loadDeliveryChallans,
   deleteStoredDeliveryChallan,
 } from '../lib/challanStorage';
+import {
+  saveDispatchChallanDraft,
+  loadDispatchChallanDraft,
+  clearDispatchChallanDraft,
+} from '../lib/challanDraftStorage';
+import { UnsavedDraftConfirmDialog } from './UnsavedDraftConfirmDialog';
 import { exportDeliveryChallanToExcel } from '../lib/excelExport';
 import { formatLocalDate, useActiveTimezone } from '../lib/dateUtils';
 import { GlobalAuditRecord } from '../lib/stockStorage';
@@ -129,6 +136,11 @@ export const DispatchOrderModal: React.FC<DispatchOrderModalProps> = ({
   const [formError, setFormError] = useState<string | null>(null);
   const [copiedText, setCopiedText] = useState<boolean>(false);
 
+  // Unsaved draft persistence & confirmation prompt state
+  const [isUnsavedPromptOpen, setIsUnsavedPromptOpen] = useState<boolean>(false);
+  const [isResumedDraft, setIsResumedDraft] = useState<boolean>(false);
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
+
   // History search
   const [historySearch, setHistorySearch] = useState<string>('');
 
@@ -180,7 +192,7 @@ export const DispatchOrderModal: React.FC<DispatchOrderModalProps> = ({
     return Array.from(tags).slice(0, 8);
   }, [items]);
 
-  // Reset or initialize form when opened
+  // Reset or restore form when opened
   useEffect(() => {
     if (isOpen) {
       const nextNo = generateNextChallanNumber(storedChallans);
@@ -189,10 +201,6 @@ export const DispatchOrderModal: React.FC<DispatchOrderModalProps> = ({
       const today = new Date().toISOString().split('T')[0];
       setChallanDate(today);
 
-      setCustomerName(initialCustomerName || '');
-      setDeliveryAddress(initialDeliveryAddress || '');
-      setVehicleNumber('');
-      setOrderNotes('');
       setFormError(null);
       setActiveTab('create');
       setActiveChallan(null);
@@ -207,17 +215,56 @@ export const DispatchOrderModal: React.FC<DispatchOrderModalProps> = ({
       setHighlightedCustomerIndex(0);
       setShowCatalogBrowser(false);
 
-      // If opened with a specific initial item, seed the basket with it
-      if (initialItem && initialItem.quantity > 0) {
-        setBasket([
-          {
-            item: initialItem,
-            quantity: 1,
-            inputStr: '1',
-          },
-        ]);
+      // Check if a saved draft exists
+      const savedDraft = loadDispatchChallanDraft();
+      if (
+        savedDraft &&
+        (savedDraft.customerName?.trim() ||
+          savedDraft.deliveryAddress?.trim() ||
+          savedDraft.vehicleNumber?.trim() ||
+          savedDraft.orderNotes?.trim() ||
+          (savedDraft.basket && savedDraft.basket.length > 0))
+      ) {
+        setCustomerName(savedDraft.customerName || '');
+        setDeliveryAddress(savedDraft.deliveryAddress || '');
+        setVehicleNumber(savedDraft.vehicleNumber || '');
+        setOrderNotes(savedDraft.orderNotes || '');
+        setShowOptionalDetails(!!savedDraft.showOptionalDetails);
+
+        const restoredBasket: SelectedDispatchItem[] = [];
+        (savedDraft.basket || []).forEach((b) => {
+          const matchedItem = items.find((it) => it.id === b.itemId);
+          if (matchedItem) {
+            restoredBasket.push({
+              item: matchedItem,
+              quantity: typeof b.quantity === 'number' ? b.quantity : 1,
+              inputStr: b.inputStr || String(b.quantity || 1),
+            });
+          }
+        });
+        setBasket(restoredBasket);
+        setIsResumedDraft(true);
+        setDraftSavedAt(savedDraft.updatedAt || null);
       } else {
-        setBasket([]);
+        setIsResumedDraft(false);
+        setDraftSavedAt(null);
+        setCustomerName(initialCustomerName || '');
+        setDeliveryAddress(initialDeliveryAddress || '');
+        setVehicleNumber('');
+        setOrderNotes('');
+        setShowOptionalDetails(false);
+
+        if (initialItem && initialItem.quantity > 0) {
+          setBasket([
+            {
+              item: initialItem,
+              quantity: 1,
+              inputStr: '1',
+            },
+          ]);
+        } else {
+          setBasket([]);
+        }
       }
 
       // Auto-focus the required Customer / Party Name field
@@ -225,7 +272,100 @@ export const DispatchOrderModal: React.FC<DispatchOrderModalProps> = ({
         customerInputRef.current?.focus();
       }, 80);
     }
-  }, [isOpen, initialItem]);
+  }, [isOpen, initialItem, initialCustomerName, initialDeliveryAddress, items]);
+
+  // Auto-save changes to persistent draft
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'create') return;
+    const hasChanges = Boolean(
+      customerName.trim() ||
+      deliveryAddress.trim() ||
+      vehicleNumber.trim() ||
+      orderNotes.trim() ||
+      basket.length > 0
+    );
+
+    if (hasChanges) {
+      saveDispatchChallanDraft({
+        customerName,
+        deliveryAddress,
+        vehicleNumber,
+        orderNotes,
+        showOptionalDetails,
+        basket: basket.map((b) => ({
+          itemId: b.item.id,
+          itemName: b.item.itemName,
+          unit: b.item.unit,
+          quantity: b.quantity,
+          inputStr: b.inputStr,
+        })),
+        updatedAt: new Date().toISOString(),
+      });
+      setDraftSavedAt(new Date().toISOString());
+    }
+  }, [isOpen, activeTab, customerName, deliveryAddress, vehicleNumber, orderNotes, showOptionalDetails, basket]);
+
+  // Safe Close Request: Prompt confirmation dialog if there are active unsaved changes
+  const handleRequestClose = () => {
+    if (activeTab === 'create') {
+      const hasChanges = Boolean(
+        customerName.trim() ||
+        deliveryAddress.trim() ||
+        vehicleNumber.trim() ||
+        orderNotes.trim() ||
+        basket.length > 0
+      );
+      if (hasChanges) {
+        setIsUnsavedPromptOpen(true);
+        return;
+      }
+    }
+    onClose();
+  };
+
+  const handleSaveDraftAndClose = () => {
+    saveDispatchChallanDraft({
+      customerName,
+      deliveryAddress,
+      vehicleNumber,
+      orderNotes,
+      showOptionalDetails,
+      basket: basket.map((b) => ({
+        itemId: b.item.id,
+        itemName: b.item.itemName,
+        unit: b.item.unit,
+        quantity: b.quantity,
+        inputStr: b.inputStr,
+      })),
+      updatedAt: new Date().toISOString(),
+    });
+    setIsUnsavedPromptOpen(false);
+    onShowToast('Delivery Challan draft saved. You can resume anytime!', 'success');
+    onClose();
+  };
+
+  const handleDiscardAndClose = () => {
+    clearDispatchChallanDraft();
+    setIsResumedDraft(false);
+    setCustomerName('');
+    setDeliveryAddress('');
+    setVehicleNumber('');
+    setOrderNotes('');
+    setBasket([]);
+    setIsUnsavedPromptOpen(false);
+    onClose();
+  };
+
+  const handleDiscardDraftAndStartFresh = () => {
+    clearDispatchChallanDraft();
+    setIsResumedDraft(false);
+    setCustomerName('');
+    setDeliveryAddress('');
+    setVehicleNumber('');
+    setOrderNotes('');
+    setBasket([]);
+    onShowToast('Draft discarded. Started with a fresh Delivery Challan.', 'info');
+  };
 
   // Handle outside click to close Item dropdown & Customer dropdowns
   useEffect(() => {
@@ -247,21 +387,77 @@ export const DispatchOrderModal: React.FC<DispatchOrderModalProps> = ({
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
-  // Handle ESC key to close
+  // Handle ESC key: ESC must NEVER close the form! It auto-saves progress and keeps user safe.
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // If an autocomplete dropdown is open, close that dropdown only
+        if (isItemDropdownOpen) {
+          e.preventDefault();
+          setIsItemDropdownOpen(false);
+          return;
+        }
+        if (isCustomerDropdownOpen) {
+          e.preventDefault();
+          setIsCustomerDropdownOpen(false);
+          return;
+        }
+
+        // In Create mode: ESC does NOT close modal! It auto-saves current progress
+        if (activeTab === 'create') {
+          e.preventDefault();
+          const hasChanges = Boolean(
+            customerName.trim() ||
+            deliveryAddress.trim() ||
+            vehicleNumber.trim() ||
+            orderNotes.trim() ||
+            basket.length > 0
+          );
+          if (hasChanges) {
+            saveDispatchChallanDraft({
+              customerName,
+              deliveryAddress,
+              vehicleNumber,
+              orderNotes,
+              showOptionalDetails,
+              basket: basket.map((b) => ({
+                itemId: b.item.id,
+                itemName: b.item.itemName,
+                unit: b.item.unit,
+                quantity: b.quantity,
+                inputStr: b.inputStr,
+              })),
+              updatedAt: new Date().toISOString(),
+            });
+            onShowToast('Draft auto-saved. (Escape does not close the form — use the top-right [✕] button to exit).', 'info');
+          }
+          return;
+        }
+
+        // In View Challan mode: ESC returns to create view
         if (activeTab === 'view_challan') {
+          e.preventDefault();
           setActiveTab('create');
-        } else {
-          onClose();
+          return;
         }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, activeTab, onClose]);
+  }, [
+    isOpen,
+    activeTab,
+    isItemDropdownOpen,
+    isCustomerDropdownOpen,
+    customerName,
+    deliveryAddress,
+    vehicleNumber,
+    orderNotes,
+    showOptionalDetails,
+    basket,
+    onShowToast,
+  ]);
 
   // Filter catalog items
   const filteredCatalogItems = useMemo(() => {
@@ -702,6 +898,10 @@ export const DispatchOrderModal: React.FC<DispatchOrderModalProps> = ({
     saveDeliveryChallan(newChallan);
     setStoredChallans(loadDeliveryChallans());
 
+    // Clear persistent draft once successfully fulfilled
+    clearDispatchChallanDraft();
+    setIsResumedDraft(false);
+
     // Trigger parent stock reduction & audit logging
     onFulfillDispatch(newChallan);
 
@@ -865,9 +1065,10 @@ export const DispatchOrderModal: React.FC<DispatchOrderModalProps> = ({
 
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleRequestClose}
               className="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
               aria-label="Close modal"
+              title="Close form (Click mouse only)"
             >
               <X className="w-5 h-5" />
             </button>
@@ -879,6 +1080,34 @@ export const DispatchOrderModal: React.FC<DispatchOrderModalProps> = ({
         {/* ------------------------------------------------------------- */}
         {activeTab === 'create' && (
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+            {/* Draft Resumed Notification Banner */}
+            {isResumedDraft && (
+              <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs text-emerald-950 animate-in fade-in">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                    <Bookmark className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-emerald-900">Draft Resumed:</span>{' '}
+                    <span>
+                      Restored your in-progress Delivery Challan from where you left off
+                      {basket.length > 0 && ` (${basket.length} item${basket.length === 1 ? '' : 's'} in order)`}
+                      {customerName.trim() && ` for "${customerName}"`}.
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleDiscardDraftAndStartFresh}
+                    className="px-3 py-1.5 text-xs font-bold text-rose-700 hover:text-rose-900 bg-white hover:bg-rose-50 border border-rose-200 rounded-lg transition-colors cursor-pointer"
+                  >
+                    Discard Draft & Start Fresh
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Error Banner */}
             {formError && (
               <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-xs text-rose-800 animate-in fade-in">
@@ -1808,7 +2037,7 @@ export const DispatchOrderModal: React.FC<DispatchOrderModalProps> = ({
               <div className="flex items-center gap-2 justify-end">
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={handleRequestClose}
                   className="px-4 py-2 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors cursor-pointer"
                 >
                   Cancel
@@ -2182,6 +2411,21 @@ export const DispatchOrderModal: React.FC<DispatchOrderModalProps> = ({
           </div>
         )}
       </div>
+
+      {/* Confirmation Dialog on Close if there are unsaved changes */}
+      <UnsavedDraftConfirmDialog
+        isOpen={isUnsavedPromptOpen}
+        title="Unsaved Delivery Challan"
+        subtitle="You have unsaved items or customer information in this Delivery Challan. What would you like to do?"
+        summaryBadge={
+          customerName.trim() || basket.length > 0
+            ? `${customerName ? `Party: ${customerName}` : 'Customer set'} | ${basket.length} item(s) in basket`
+            : undefined
+        }
+        onSaveDraftAndClose={handleSaveDraftAndClose}
+        onDiscardAndClose={handleDiscardAndClose}
+        onKeepEditing={() => setIsUnsavedPromptOpen(false)}
+      />
     </div>
   );
 };
